@@ -13237,9 +13237,17 @@ function _buildFallbackAIFriendCandidate(){
             if (opts.pRole && opts.pRole!=='不限') constraints.push('身份背景：'+opts.pRole);
             if (opts.pNameStyle && opts.pNameStyle!=='不限') constraints.push('名字风格：'+opts.pNameStyle);
             if (note) constraints.push('补充：'+note);
-            var sysP = '你是一个 AI 角色扮演人设生成器。请为用户生成一个可直接使用的第一人称人设档案，风格自然真实，有个性。只返回 JSON 格式：{"name":"人设名字","text":"人设正文（100-200字，包含性格、爱好、说话习惯、背景等）"}，不要任何额外文字。';
+            var sysP = [
+              '你是一个 AI 角色扮演人设生成器。请生成完整的第一人称人设档案，风格自然真实，有个性。',
+              '只返回 JSON，不要 markdown，不要额外文字。',
+              '必须包含以下所有字段（没有的写合理推断值，不要留空）：',
+              'name(姓名), text(第一人称自我介绍150-250字), gender(性别如女/男), age(年龄如22岁),',
+              'occupation(职业), address(住址如某城市某区), height(身高如168cm), figure(身材描述),',
+              'hairColor(发色), eyeColor(瞳色), feature(外形特征气质一两句), personality(性格描述两三句),',
+              'hobby(爱好兴趣逗号分隔), bio(生平简介两三句)。'
+            ].join('');
             var userP = '请生成一个人设。' + (constraints.length ? '\n约束条件：\n'+constraints.join('\n') : '') + '\n只返回 JSON。';
-            var ret = await PhoneAI.chat({ system:sysP, messages:[{role:'user',content:userP}], temperature:0.9, maxTokens:400, channel:'background' });
+            var ret = await PhoneAI.chat({ system:sysP, messages:[{role:'user',content:userP}], temperature:0.9, maxTokens:600, channel:'background' });
             if (ret && ret.ok && ret.data){
               var raw = String(ret.data||'').replace(/```json|```/g,'').trim();
               var parsed = JSON.parse(raw);
