@@ -178,9 +178,10 @@ html,body{height:100%;width:100%;overflow:hidden;background:var(--ph-bg-primary,
       transform: none !important;
     }
 
-    /* ── phBackdrop 不需要了（没有酒馆背景） ── */
+    /* ── phBackdrop：全屏但不捕获点击（只是背景装饰）── */
     #meow-phone-root .phBackdrop {
-      display: none !important;
+      pointer-events: none !important;
+      background: transparent !important;
     }
 
     /* ── phRingLayer（手机外圈装饰）不需要 ── */
@@ -188,16 +189,32 @@ html,body{height:100%;width:100%;overflow:hidden;background:var(--ph-bg-primary,
       display: none !important;
     }
 
-    /* ── 关闭按钮隐藏（独立模式没有酒馆可以回去） ── */
+    /* ── 关闭/mini/pill 按钮隐藏（独立模式无需） ── */
     #meow-phone-root .phCloseBtn,
-    #meow-phone-root [data-act="close"] {
+    #meow-phone-root [data-act="close"],
+    #meow-phone-root [data-act="mini"],
+    #meow-phone-root [data-act="pill"] {
       display: none !important;
     }
 
-    /* ── 药丸/mini模式按钮隐藏 ── */
+    /* ── 药丸/拖拽提示隐藏 ── */
     #meow-phone-root .phPillIcon,
     #meow-phone-root .phDragHint {
       display: none !important;
+    }
+
+    /* ── 返回按钮必须可点击（修复被 phShell overflow:hidden 裁掉的情况）── */
+    #meow-phone-root .phNavBtn.isBack {
+      position: relative !important;
+      z-index: 100 !important;
+      pointer-events: auto !important;
+    }
+
+    /* ── phShell 内滚动容器正确撑满 ── */
+    #meow-phone-root .phAppBody {
+      height: calc(100% - 44px - 54px) !important;
+      overflow-y: auto !important;
+      -webkit-overflow-scrolling: touch !important;
     }
 
     /* ── 状态栏：全屏时加 safe-area 适配 iPhone 刘海 ── */
@@ -11337,7 +11354,70 @@ function _buildFallbackAIFriendCandidate(){
         }catch(e){}
       }
 
-      async function _generateAIFriendCandidate(parentContainer){
+      function _showAIFriendOptionsPanel(parentContainer, triggerBtn){
+        function chipGroup(groupId, label, items, defaultVal){
+          var chips = items.map(function(item){
+            var on = item.val === defaultVal;
+            return '<button data-chip="'+groupId+'" data-val="'+esc(item.val)+'"'
+              +' style="padding:6px 12px;border-radius:20px;font-size:12px;cursor:pointer;font-family:inherit;'
+              +'border:1px solid '+(on?'var(--ph-accent,#07c160)':'rgba(0,0,0,.1)')+';'
+              +'background:'+(on?'var(--ph-accent,#07c160)':'rgba(255,255,255,.85)')+';'
+              +'color:'+(on?'#fff':'rgba(20,24,28,.7)')+';'
+              +'-webkit-tap-highlight-color:transparent;">'+esc(item.label)+'</button>';
+          }).join('');
+          return '<div style="margin-bottom:14px;">'
+            +'<div style="font-size:11px;color:rgba(20,24,28,.45);margin-bottom:7px;letter-spacing:.3px;">'+label+'</div>'
+            +'<div data-group="'+groupId+'" style="display:flex;flex-wrap:wrap;gap:7px;">'+chips+'</div></div>';
+        }
+        var _svgStar='<path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25zM9 12l-2-4.5L2.5 9l4.5-2L9 2.5l2 4.5 4.5 2-4.5 2zm10 1l-1.25 2.75L15 17l2.75 1.25L19 21l1.25-2.75L23 17l-2.75-1.25z"/>';
+        var inner =
+          '<div style="font-size:15px;font-weight:700;color:var(--ph-text,rgba(20,24,28,.88));margin-bottom:16px;display:flex;align-items:center;gap:8px;">'
+          +'<svg viewBox="0 0 24 24" fill="currentColor" style="width:17px;height:17px;color:var(--ph-accent,#07c160);">'+_svgStar+'</svg>生成新好友</div>'
+          + chipGroup('gender','\u6027\u522b',[{val:'\u4e0d\u9650',label:'\u4e0d\u9650'},{val:'\u7537',label:'\u7537'},{val:'\u5973',label:'\u5973'},{val:'\u4e2d\u6027',label:'\u4e2d\u6027'}],'\u4e0d\u9650')
+          + chipGroup('ageRange','\u5e74\u9f84\u6bb5',[{val:'\u4e0d\u9650',label:'\u4e0d\u9650'},{val:'\u9752\u5c11\u5e74(16-19\u5c81)',label:'\u9752\u5c11\u5e74'},{val:'\u9752\u5e74(20-28\u5c81)',label:'\u9752\u5e74'},{val:'\u6210\u719f(29-40\u5c81)',label:'\u6210\u719f'},{val:'\u4e2d\u5e74(40\u5c81\u4ee5\u4e0a)',label:'\u4e2d\u5e74'}],'\u4e0d\u9650')
+          + chipGroup('relation','\u4e0e\u6211\u7684\u5173\u7cfb',[{val:'\u4e0d\u9650',label:'\u4e0d\u9650'},{val:'\u540c\u5b66/\u540c\u5c4a',label:'\u540c\u5b66'},{val:'\u540c\u4e8b/\u5408\u4f5c\u8005',label:'\u540c\u4e8b'},{val:'\u90bb\u5c45/\u5e38\u89c1\u9762',label:'\u90bb\u5c45'},{val:'\u65e7\u8bc6/\u5931\u8054\u591a\u5e74',label:'\u65e7\u8bc6'},{val:'\u670b\u53cb\u7684\u670b\u53cb',label:'\u670b\u53cb\u4ecb\u7ecd'}],'\u4e0d\u9650')
+          + chipGroup('personality','\u6027\u683c\u5012\u5411',[{val:'\u4e0d\u9650',label:'\u4e0d\u9650'},{val:'\u6d3b\u6cfc\u5916\u5411',label:'\u5916\u5411'},{val:'\u5b89\u9759\u5185\u5411',label:'\u5185\u5411'},{val:'\u795e\u79d8\u96be\u6349\u6478',label:'\u795e\u79d8'},{val:'\u6e29\u67d4\u4f53\u8d34',label:'\u6e29\u67d4'},{val:'\u6bd2\u820c\u5e7d\u9ed8',label:'\u6bd2\u820c'}],'\u4e0d\u9650')
+          + chipGroup('nameStyle','\u540d\u5b57\u98ce\u683c',[{val:'\u4e0d\u9650',label:'\u4e0d\u9650'},{val:'\u73b0\u4ee3\u4e2d\u6587\uff08\u5e38\u89c1\u3001\u81ea\u7136\uff09',label:'\u73b0\u4ee3\u4e2d\u6587'},{val:'\u53e4\u98ce\u96c5\u81f4\uff08\u6709\u53e4\u97f5\u7684\u6c49\u5b57\u540d\uff09',label:'\u53e4\u98ce'},{val:'\u65e5\u7cfb\u98ce\u683c\uff08\u5982\u6674\u7f8e\u3001\u60a0\u6597\uff09',label:'\u65e5\u7cfb'},{val:'\u6b27\u7f8e\u98ce\u683c\uff08\u5982Alex\u3001Sophie\uff09',label:'\u6b27\u7f8e'},{val:'\u6e05\u51b7\u7b80\u6d01\uff08\u5355\u5b57\u6216\u4e24\u5b57\uff09',label:'\u6e05\u51b7\u7b80\u6d01'}],'\u4e0d\u9650')
+          +'<div style="margin-bottom:14px;">'
+          +'<div style="font-size:11px;color:rgba(20,24,28,.45);margin-bottom:7px;letter-spacing:.3px;">\u8865\u5145\u8bf4\u660e\uff08\u53ef\u9009\uff09</div>'
+          +'<input id="aiFriendNote" placeholder="\u4f8b\u5982\uff1a\u662f\u4e2a\u548c\u5496\u5561\u5e08\u3001\u7279\u522b\u7231\u732b\u2026"'
+          +' style="width:100%;padding:9px 12px;border:1px solid rgba(0,0,0,.1);border-radius:10px;font-size:13px;'
+          +'outline:none;background:rgba(255,255,255,.85);color:var(--ph-text);font-family:inherit;box-sizing:border-box;"/></div>'
+          +'<div style="display:flex;gap:8px;margin-top:4px;">'
+          +'<button data-el="aifCancel" style="flex:1;padding:11px;border-radius:11px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.85);font-size:13px;color:rgba(20,24,28,.5);cursor:pointer;font-family:inherit;">\u53d6\u6d88</button>'
+          +'<button data-el="aifGenerate" style="flex:2;padding:11px;border-radius:11px;border:none;background:var(--ph-accent-grad,linear-gradient(135deg,#07c160,#06a050));color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:6px;">'
+          +'<svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;">'+_svgStar+'</svg>AI \u751f\u6210</button>'
+          +'</div>';
+        var ov=(typeof _cpShowOverlay==='function')?_cpShowOverlay(inner):null;
+        if(!ov)return;
+        var modal=ov.querySelector('.wxCPModal');
+        if(modal){modal.style.maxWidth='320px';modal.style.width='calc(100% - 16px)';modal.style.padding='18px 16px 16px';modal.style.borderRadius='20px';modal.style.maxHeight='82vh';modal.style.overflowY='auto';}
+        ov.addEventListener('click',function(e){
+          var chip=e.target.closest('[data-chip]');if(!chip)return;
+          var gid=chip.getAttribute('data-chip');
+          ov.querySelectorAll('[data-chip="'+gid+'"]').forEach(function(c){
+            var on=c===chip;
+            c.style.background=on?'var(--ph-accent,#07c160)':'rgba(255,255,255,.85)';
+            c.style.color=on?'#fff':'rgba(20,24,28,.7)';
+            c.style.borderColor=on?'var(--ph-accent,#07c160)':'rgba(0,0,0,.1)';
+          });
+        });
+        ov.querySelector('[data-el="aifCancel"]')?.addEventListener('click',function(){ov.remove();});
+        ov.querySelector('[data-el="aifGenerate"]')?.addEventListener('click',async function(){
+          var opts={};
+          ['gender','ageRange','relation','personality','nameStyle'].forEach(function(gid){
+            var sel=ov.querySelector('[data-chip="'+gid+'"][style*="#07c160"]')||ov.querySelector('[data-chip="'+gid+'"]');
+            opts[gid]=sel?sel.getAttribute('data-val'):'\u4e0d\u9650';
+          });
+          var note=(ov.querySelector('#aiFriendNote')||{}).value||'';
+          ov.remove();
+          if(triggerBtn)triggerBtn.dataset.busy='1';
+          try{await _generateAIFriendCandidate(parentContainer,opts,note);}
+          finally{if(triggerBtn&&triggerBtn.isConnected)triggerBtn.dataset.busy='0';}
+        });
+      }
+
+      async function _generateAIFriendCandidate(parentContainer, _genOpts, _genNote){
         let usedFallback = false;
         let cand = null;
 
@@ -11377,6 +11457,17 @@ function _buildFallbackAIFriendCandidate(){
               'profile（可直接写入角色设定的完整人物描述，必须涵盖所有关键信息）。'
             ].join('\n');
 
+            // 约束条件（用户在面板里选的）
+            var _constraintLines = [];
+            if (_genOpts){
+              if (_genOpts.gender && _genOpts.gender !== '不限')         _constraintLines.push('性别约束：必须是' + _genOpts.gender);
+              if (_genOpts.ageRange && _genOpts.ageRange !== '不限')     _constraintLines.push('年龄约束：' + _genOpts.ageRange);
+              if (_genOpts.relation && _genOpts.relation !== '不限')     _constraintLines.push('关系约束：必须是' + _genOpts.relation);
+              if (_genOpts.personality && _genOpts.personality !== '不限') _constraintLines.push('性格约束：' + _genOpts.personality);
+              if (_genOpts.nameStyle && _genOpts.nameStyle !== '不限')   _constraintLines.push('名字风格：' + _genOpts.nameStyle);
+            }
+            if (_genNote && _genNote.trim()) _constraintLines.push('补充要求：' + _genNote.trim());
+
             const userPrompt = [
               '当前用户：' + userName,
               '',
@@ -11386,9 +11477,10 @@ function _buildFallbackAIFriendCandidate(){
               '【已有联系人或候选，禁止重名】',
               existedNames.length ? existedNames.join('、') : '无',
               '',
-              '请生成 1 个最适合现在加入“新的朋友”的候选。',
+              _constraintLines.length ? '【必须满足以下约束条件】\n' + _constraintLines.join('\n') : '',
+              '请生成 1 个最适合现在加入\"新的朋友\"的候选。',
               '只返回 JSON。'
-            ].join('\n');
+            ].filter(Boolean).join('\n');
 
             const ret = await PhoneAI.chat({
               system: systemPrompt,
