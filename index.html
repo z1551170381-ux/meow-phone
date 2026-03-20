@@ -13245,13 +13245,24 @@ function _buildFallbackAIFriendCandidate(){
               var parsed = JSON.parse(raw);
               if (parsed.name && parsed.text){
                 ov._close();
-                // 直接保存
                 const d2 = _loadPersonas();
                 const id2 = 'p_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,6);
-                d2.list.push({id:id2, name:parsed.name, text:parsed.text, time:Date.now()});
+                // ★ 保存完整结构化字段（AI 不一定全返回，先存再让用户补填）
+                var _np = {
+                  id:id2, name:parsed.name, text:parsed.text, time:Date.now(),
+                  ocGender:parsed.gender||'', ocAge:parsed.age||'',
+                  ocOccupation:parsed.occupation||'', ocAddress:parsed.address||'',
+                  ocHeight:parsed.height||'', ocFigure:parsed.figure||'',
+                  ocHairColor:parsed.hairColor||'', ocEyeColor:parsed.eyeColor||'',
+                  ocFeature:parsed.feature||'', ocPersonality:parsed.personality||'',
+                  ocHobby:parsed.hobby||'', bio:parsed.bio||''
+                };
+                d2.list.push(_np);
                 _savePersonas(d2);
-                try{toast('✅ 人设已生成：'+parsed.name);}catch(e){}
                 _renderPersonaPage(container);
+                // ★ 自动打开编辑面板，让用户确认/补填空字段
+                setTimeout(function(){ _openPersonaEditor(container, d2.list.length-1); }, 150);
+                try{toast('✅ 已生成：'+parsed.name+'，请确认并补充字段');}catch(e){}
               } else { try{toast('生成内容格式有误，请重试');}catch(e){} }
             } else { try{toast('生成失败，请检查 API');}catch(e){} }
           }catch(e){
