@@ -9,7 +9,7 @@
 <title>喵喵小手机</title>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;}
-html,body{height:100%;height:100dvh;width:100%;overflow:hidden;background:var(--ph-bg-primary,#f7f4f0);-webkit-text-size-adjust:100%;touch-action:manipulation;}
+html,body{height:100%;height:100dvh;width:100%;overflow:hidden;background:var(--ph-bg-primary,#f5f2ee);-webkit-text-size-adjust:100%;touch-action:manipulation;}
 </style>
 </head>
 <body>
@@ -143,7 +143,8 @@ html,body{height:100%;height:100dvh;width:100%;overflow:hidden;background:var(--
     html, body {
       margin: 0; padding: 0;
       height: 100%; height: 100dvh;
-      background: #18181f;
+      /* 背景和 app 一致，避免未覆盖区域露出黑色 */
+      background: var(--ph-bg-primary, #f5f2ee);
       font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
     }
 
@@ -223,26 +224,14 @@ html,body{height:100%;height:100dvh;width:100%;overflow:hidden;background:var(--
       padding-top: max(8px, env(safe-area-inset-top)) !important;
     }
 
-    /* ── phShell 内部 flex 布局强制撑满 ── */
+    /* ── phShell：绝对定位撑满，不用 flex（内部是 position:absolute 体系）── */
     #meow-phone-root .phShell {
-      display: flex !important;
-      flex-direction: column !important;
       overflow: hidden !important;
     }
 
-    /* ── phAppBody 占满剩余高度 ── */
-    #meow-phone-root .phAppBody {
-      flex: 1 1 0 !important;
-      min-height: 0 !important;
-      overflow-y: auto !important;
-      -webkit-overflow-scrolling: touch !important;
-    }
-
-    /* ── 底部 Tab Bar：不被压缩，贴底 + 安全区 ── */
-    #meow-phone-root .phTabBar,
-    #meow-phone-root .wxTabBar {
-      flex-shrink: 0 !important;
-      padding-bottom: max(8px, env(safe-area-inset-bottom)) !important;
+    /* ── wxTabbar 底部安全区（内置 CSS 已有，这里加强） ── */
+    #meow-phone-root .wxTabbar {
+      padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)) !important;
     }
   `;
   document.head.appendChild(style);
