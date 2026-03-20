@@ -13958,20 +13958,37 @@ function _buildFallbackAIFriendCandidate(){
             }
           });
 
-          // 拉取恢复
+          // 拉取恢复（自动搜索 Gist 列表，不依赖本地存的 gistId）
           container.querySelector('[data-act="gistPull"]')?.addEventListener('click', async function(){
             var cfg = loadGistCfg();
             if (!cfg.token){ try{toast('请先填写并保存 GitHub Token');}catch(e){} return; }
-            if (!cfg.gistId){ try{toast('还没有推送过备份，请先在原设备推送');}catch(e){} return; }
             if (!confirm('确定要从 Gist 恢复数据？当前数据会被覆盖。')) return;
-            var btn = this; btn.disabled = true; btn.textContent = '拉取中…';
+            var btn = this; btn.disabled = true;
+            btn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;animation:spin .8s linear infinite"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> 搜索中…';
             try{
-              var r = await fetch('https://api.github.com/gists/'+cfg.gistId, {
+              // 先用本地存的 gistId，没有就搜索列表
+              var targetId = cfg.gistId;
+              if (!targetId){
+                try{toast('正在搜索你的备份 Gist…');}catch(e){}
+                var listR = await fetch('https://api.github.com/gists?per_page=30', {
+                  headers: { 'Authorization':'token '+cfg.token }
+                });
+                if (!listR.ok) throw new Error('搜索失败 HTTP '+listR.status);
+                var list = await listR.json();
+                var found = list.find(function(g){
+                  return g.description === '喵喵小手机数据备份' && g.files && g.files['meow_backup.json'];
+                });
+                if (!found) throw new Error('未找到备份，请先在原设备推送');
+                targetId = found.id;
+                cfg.gistId = targetId; saveGistCfg(cfg);
+              }
+              btn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;animation:spin .8s linear infinite"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> 拉取中…';
+              var r = await fetch('https://api.github.com/gists/'+targetId, {
                 headers: { 'Authorization':'token '+cfg.token }
               });
-              if (!r.ok) throw new Error('HTTP '+r.status);
+              if (!r.ok) throw new Error('拉取失败 HTTP '+r.status);
               var d = await r.json();
-              var content = d.files?.['meow_backup.json']?.content;
+              var content = d.files && d.files['meow_backup.json'] && d.files['meow_backup.json'].content;
               if (!content) throw new Error('备份文件为空');
               var pack = JSON.parse(content);
               Object.keys(pack).forEach(function(k){ if(k.startsWith('meow_')) localStorage.setItem(k, pack[k]); });
@@ -13980,7 +13997,7 @@ function _buildFallbackAIFriendCandidate(){
               try{toast('✅ 数据已恢复，2秒后刷新');}catch(e){}
               setTimeout(function(){ location.reload(); }, 2000);
             }catch(e){
-              try{toast('❌ 拉取失败：'+e.message);}catch(_){}
+              try{toast('❌ '+e.message);}catch(_){}
             }finally{
               btn.disabled = false;
               btn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>拉取恢复';
