@@ -13928,11 +13928,11 @@ function _buildFallbackAIFriendCandidate(){
             if (!cfg.token){ try{toast('请先填写并保存 GitHub Token');}catch(e){} return; }
             var btn = this; btn.disabled = true; btn.textContent = '推送中…';
             try{
-              // 打包所有 meow_ 开头的数据
+              // 打包所有 meow_ 开头的数据（排除 Gist 配置，避免 Token 泄露被 GitHub 撤销）
               var pack = {};
               for (var i=0; i<localStorage.length; i++){
                 var k = localStorage.key(i);
-                if (k && k.startsWith('meow_')) pack[k] = localStorage.getItem(k);
+                if (k && k.startsWith('meow_') && k !== 'meow_gist_cfg') pack[k] = localStorage.getItem(k);
               }
               var body = {
                 description: '喵喵小手机数据备份',
