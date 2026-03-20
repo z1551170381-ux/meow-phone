@@ -396,7 +396,10 @@
       '#meow-phone-root [data-act="pill"]{display:none!important}' +
       '#meow-phone-root .phNavBtn.isBack{z-index:100!important;pointer-events:auto!important}' +
       '#meow-phone-root .wxTabbar{padding-bottom:max(6px,env(safe-area-inset-bottom,0px))!important}' +
-      '#meow-phone-root .phStatus{padding-top:max(8px,env(safe-area-inset-top,0px))!important}';
+      /* 独立运行时隐藏假状态栏，用真实 iOS 状态栏 */
+      '#meow-phone-root .phStatus{display:none!important}' +
+      '#meow-phone-root .phStage{top:0!important}' +
+      '#meow-phone-root .phAppBar{top:0!important}';
     document.head.appendChild(_safeStyle);
 
     // 首次运行引导（延迟 300ms 确保 UI 渲染完成后显示）
