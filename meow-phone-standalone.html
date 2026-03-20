@@ -11466,7 +11466,7 @@ function _buildFallbackAIFriendCandidate(){
         ov.className = 'meowBottomSheet';
         ov.style.cssText = 'position:absolute;inset:0;z-index:9999;background:rgba(0,0,0,.28);display:flex;flex-direction:column;justify-content:flex-end;';
         var sheet = doc.createElement('div');
-        sheet.style.cssText = 'background:var(--ph-bg-primary,#f7f4f0);border-radius:20px 20px 0 0;padding:18px 16px 28px;max-height:'+maxH+';overflow-y:auto;-webkit-overflow-scrolling:touch;transform:translateY(100%);transition:transform .28s cubic-bezier(.32,0,.67,0);';
+        sheet.style.cssText = 'background:var(--ph-glass-strong,rgba(248,246,244,.96));backdrop-filter:blur(calc(var(--ph-glass-blur,18px)*.9)) saturate(120%);-webkit-backdrop-filter:blur(calc(var(--ph-glass-blur,18px)*.9)) saturate(120%);border-radius:20px 20px 0 0;border-top:1px solid var(--ph-glass-border,rgba(255,255,255,.55));padding:18px 16px 28px;max-height:'+maxH+';overflow-y:auto;-webkit-overflow-scrolling:touch;transform:translateY(100%);transition:transform .28s cubic-bezier(.32,0,.67,0);box-shadow:0 -4px 32px rgba(0,0,0,.08);';
         // 拖动条
         sheet.innerHTML = '<div style="width:36px;height:4px;border-radius:2px;background:rgba(0,0,0,.12);margin:0 auto 16px;"></div>' + innerHtml;
         ov.appendChild(sheet);
@@ -12940,30 +12940,108 @@ function _buildFallbackAIFriendCandidate(){
         const data = _loadPersonas();
         const existing = (typeof editIdx === 'number') ? data.list[editIdx] : null;
         const isEdit = !!existing;
-        root.querySelectorAll('.wxConfirmOverlay').forEach(o=>o.remove());
-        const overlay = doc.createElement('div');
-        overlay.className = 'wxConfirmOverlay';
-        overlay.innerHTML = `<div class="wxConfirmBox" style="min-width:280px;text-align:left;max-height:80vh;overflow-y:auto;">
-          <div style="font-weight:700;font-size:15px;color:rgba(20,24,28,.88);margin-bottom:14px;text-align:center;">${isEdit ? '编辑人设' : '新建人设'}</div>
-          <div style="margin-bottom:10px;">
-            <div style="font-size:12px;color:rgba(20,24,28,.5);margin-bottom:4px;">人设名称 *</div>
-            <input data-field="pName" placeholder="给人设起个名字" value="${esc(existing?.name||'')}" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;outline:none;"/>
-          </div>
-          <div style="margin-bottom:14px;">
-            <div style="font-size:12px;color:rgba(20,24,28,.5);margin-bottom:4px;">人设内容 *</div>
-            <textarea data-field="pText" rows="8" placeholder="描述你的人设…" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;outline:none;resize:vertical;">${esc(existing?.text||'')}</textarea>
-          </div>
-          <div style="display:flex;gap:8px;">
-            <button data-act="pCancel" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(0,0,0,.1);background:#fff;color:rgba(20,24,28,.6);font-size:13px;cursor:pointer;">取消</button>
-            <button data-act="pSave" style="flex:1;padding:10px;border-radius:8px;border:0;background:var(--ph-accent, #07c160);color:#fff;font-size:13px;font-weight:600;cursor:pointer;">保存</button>
-          </div>
-        </div>`;
-        root.appendChild(overlay);
-        overlay.addEventListener('click',(e)=>{ if(e.target===overlay) overlay.remove(); });
-        overlay.querySelector('[data-act="pCancel"]')?.addEventListener('click',()=> overlay.remove());
-        overlay.querySelector('[data-act="pSave"]')?.addEventListener('click',()=>{
-          const name = (overlay.querySelector('[data-field="pName"]')?.value||'').trim();
-          const text = (overlay.querySelector('[data-field="pText"]')?.value||'').trim();
+        var _svgStar='<path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25zM9 12l-2-4.5L2.5 9l4.5-2L9 2.5l2 4.5 4.5 2-4.5 2zm10 1l-1.25 2.75L15 17l2.75 1.25L19 21l1.25-2.75L23 17l-2.75-1.25z"/>';
+        var _svgUser='<path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>';
+        var _curTab = 'manual';
+
+        function mkPChips(gid, label, items){
+          var chips = items.map(function(item,idx){
+            var on = idx===0;
+            return '<button data-chip="'+gid+'" data-val="'+esc(item.v)+'" data-sel="'+(on?'1':'0')+'"'
+              +' style="padding:5px 11px;border-radius:18px;font-size:12px;cursor:pointer;font-family:inherit;transition:all .12s;-webkit-tap-highlight-color:transparent;'
+              +'border:1px solid '+(on?'var(--ph-accent,#07c160)':'rgba(0,0,0,.1)')+';'
+              +'background:'+(on?'var(--ph-accent,#07c160)':'rgba(255,255,255,.9)')+';'
+              +'color:'+(on?'#fff':'rgba(20,24,28,.65)')+';font-weight:'+(on?'600':'400')+';">'+esc(item.l)+'</button>';
+          }).join('');
+          return '<div style="margin-bottom:12px;">'
+            +'<div style="font-size:10.5px;color:rgba(20,24,28,.4);letter-spacing:.4px;margin-bottom:6px;">'+label+'</div>'
+            +'<div style="display:flex;flex-wrap:wrap;gap:6px;">'+chips+'</div></div>';
+        }
+
+        // Tab 栏（编辑模式只显示手动）
+        var tabBar = isEdit ? '' :
+          '<div style="display:flex;gap:4px;background:rgba(0,0,0,.06);border-radius:12px;padding:3px;margin-bottom:16px;">'
+          +'<button data-tabBtn="manual" style="flex:1;padding:7px 10px;border-radius:10px;border:none;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;background:#fff;color:rgba(20,24,28,.8);box-shadow:0 1px 3px rgba(0,0,0,.08);display:flex;align-items:center;justify-content:center;gap:4px;transition:all .15s;">'
+          +'<svg viewBox="0 0 24 24" fill="currentColor" style="width:12px;height:12px;">'+_svgUser+'</svg>手动填写</button>'
+          +'<button data-tabBtn="ai" style="flex:1;padding:7px 10px;border-radius:10px;border:none;font-size:12px;cursor:pointer;font-family:inherit;background:transparent;color:rgba(20,24,28,.45);display:flex;align-items:center;justify-content:center;gap:4px;transition:all .15s;">'
+          +'<svg viewBox="0 0 24 24" fill="currentColor" style="width:12px;height:12px;">'+_svgStar+'</svg>AI 生成</button>'
+          +'</div>';
+
+        // 手动面板
+        var manualPane = '<div data-pane="manual">'
+          +'<div style="font-size:15px;font-weight:700;color:var(--ph-text,rgba(20,24,28,.88));margin-bottom:16px;">'+(isEdit?'编辑人设':'新建人设')+'</div>'
+          +'<div style="margin-bottom:10px;">'
+          +'<div style="font-size:10.5px;color:rgba(20,24,28,.4);margin-bottom:5px;">人设名称 <span style="color:#e74c3c;font-size:10px;">*</span></div>'
+          +'<input data-pf="pName" placeholder="给人设起个名字" value="'+esc(existing?.name||'')+'"'
+          +' style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid rgba(0,0,0,.1);border-radius:12px;font-size:13px;outline:none;background:rgba(255,255,255,.9);font-family:inherit;"/></div>'
+          +'<div style="margin-bottom:14px;">'
+          +'<div style="font-size:10.5px;color:rgba(20,24,28,.4);margin-bottom:5px;">人设内容 <span style="color:#e74c3c;font-size:10px;">*</span></div>'
+          +'<textarea data-pf="pText" rows="6" placeholder="描述你的人设…"'
+          +' style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid rgba(0,0,0,.1);border-radius:12px;font-size:13px;outline:none;resize:none;background:rgba(255,255,255,.9);font-family:inherit;line-height:1.55;">'+esc(existing?.text||'')+'</textarea></div>'
+          +'<div style="display:flex;gap:8px;">'
+          +'<button data-el="pCancel" style="flex:1;padding:11px;border-radius:12px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.9);font-size:13px;color:rgba(20,24,28,.5);cursor:pointer;font-family:inherit;">取消</button>'
+          +'<button data-el="pSave" style="flex:2;padding:11px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--ph-accent,#07c160),#06a050);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">保存</button>'
+          +'</div></div>';
+
+        // AI 生成面板（仅新建时）
+        var aiPane = isEdit ? '' : '<div data-pane="ai" style="display:none;">'
+          +'<div style="font-size:15px;font-weight:700;color:var(--ph-text,rgba(20,24,28,.88));margin-bottom:16px;display:flex;align-items:center;gap:8px;">'
+          +'<svg viewBox="0 0 24 24" fill="currentColor" style="width:16px;height:16px;color:var(--ph-accent,#07c160);">'+_svgStar+'</svg>AI 生成我的人设</div>'
+          + mkPChips('pGender','性别',[{v:'不限',l:'不限'},{v:'女',l:'女'},{v:'男',l:'男'},{v:'中性',l:'中性'}])
+          + mkPChips('pAge','年龄段',[{v:'不限',l:'不限'},{v:'青少年(16-19岁)',l:'青少年'},{v:'青年(20-28岁)',l:'青年'},{v:'成熟(29-40岁)',l:'成熟'},{v:'中年(40岁+)',l:'中年'}])
+          + mkPChips('pStyle','人设风格',[{v:'不限',l:'不限'},{v:'温柔体贴',l:'温柔'},{v:'活泼开朗',l:'活泼'},{v:'沉稳内敛',l:'内敛'},{v:'神秘优雅',l:'神秘'},{v:'毒舌腹黑',l:'腹黑'}])
+          + mkPChips('pRole','身份背景',[{v:'不限',l:'不限'},{v:'普通学生',l:'学生'},{v:'上班族/职场人',l:'职场'},{v:'艺术创作者',l:'艺术'},{v:'自由职业者',l:'自由职业'}])
+          + mkPChips('pNameStyle','名字风格',[{v:'不限',l:'不限'},{v:'现代中文',l:'现代中文'},{v:'古风雅致',l:'古风'},{v:'日系风格',l:'日系'},{v:'欧美风格',l:'欧美'},{v:'清冷简洁',l:'清冷'}])
+          +'<div style="margin-bottom:14px;">'
+          +'<div style="font-size:10.5px;color:rgba(20,24,28,.4);letter-spacing:.4px;margin-bottom:6px;">补充说明（可选）</div>'
+          +'<input data-ai="note" placeholder="例如：喜欢猫、是个厨师…" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid rgba(0,0,0,.1);border-radius:12px;font-size:13px;outline:none;background:rgba(255,255,255,.9);font-family:inherit;"/></div>'
+          +'<div style="display:flex;gap:8px;">'
+          +'<button data-el="paCancel" style="flex:1;padding:11px;border-radius:12px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.9);font-size:13px;color:rgba(20,24,28,.5);cursor:pointer;font-family:inherit;">取消</button>'
+          +'<button data-el="paGenerate" style="flex:2;padding:11px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--ph-accent,#07c160),#06a050);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:5px;">'
+          +'<svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;">'+_svgStar+'</svg>AI 润色生成</button>'
+          +'</div></div>';
+
+        var ov = _showBottomSheet(tabBar + manualPane + aiPane, {maxH:'90vh'});
+        if (!ov) return;
+
+        // Tab 切换
+        if (!isEdit){
+          ov.querySelectorAll('[data-tabBtn]').forEach(function(tb){
+            tb.addEventListener('click', function(){
+              _curTab = this.getAttribute('data-tabBtn');
+              ov.querySelectorAll('[data-tabBtn]').forEach(function(b){
+                var on = b.getAttribute('data-tabBtn') === _curTab;
+                b.style.background = on ? '#fff' : 'transparent';
+                b.style.color = on ? 'rgba(20,24,28,.8)' : 'rgba(20,24,28,.45)';
+                b.style.fontWeight = on ? '600' : '400';
+                b.style.boxShadow = on ? '0 1px 3px rgba(0,0,0,.08)' : 'none';
+              });
+              ov.querySelectorAll('[data-pane]').forEach(function(p){
+                p.style.display = p.getAttribute('data-pane') === _curTab ? '' : 'none';
+              });
+            });
+          });
+        }
+
+        // 芯片单选
+        ov.addEventListener('click', function(e){
+          var chip = e.target.closest('[data-chip]'); if (!chip) return;
+          var gid = chip.getAttribute('data-chip');
+          ov.querySelectorAll('[data-chip="'+gid+'"]').forEach(function(c){
+            var on = c === chip;
+            c.setAttribute('data-sel', on ? '1' : '0');
+            c.style.background = on ? 'var(--ph-accent,#07c160)' : 'rgba(255,255,255,.9)';
+            c.style.color = on ? '#fff' : 'rgba(20,24,28,.65)';
+            c.style.borderColor = on ? 'var(--ph-accent,#07c160)' : 'rgba(0,0,0,.1)';
+            c.style.fontWeight = on ? '600' : '400';
+          });
+        });
+
+        // 手动：取消/保存
+        ov.querySelector('[data-el="pCancel"]')?.addEventListener('click', function(){ ov._close(); });
+        ov.querySelector('[data-el="pSave"]')?.addEventListener('click', function(){
+          const name = (ov.querySelector('[data-pf="pName"]')?.value||'').trim();
+          const text = (ov.querySelector('[data-pf="pText"]')?.value||'').trim();
           if (!name || !text){ try{toast('名称和内容不能为空');}catch(e){} return; }
           if (isEdit){
             data.list[editIdx] = { ...existing, name, text, editTime: Date.now() };
@@ -12972,10 +13050,59 @@ function _buildFallbackAIFriendCandidate(){
             data.list.push({ id, name, text, time: Date.now() });
           }
           _savePersonas(data);
-          overlay.remove();
+          ov._close();
           try{toast(isEdit ? '人设已更新' : '人设已创建');}catch(e){}
           _renderPersonaPage(container);
         });
+
+        // AI：取消/生成
+        ov.querySelector('[data-el="paCancel"]')?.addEventListener('click', function(){ ov._close(); });
+        ov.querySelector('[data-el="paGenerate"]')?.addEventListener('click', async function(){
+          var opts = {};
+          ['pGender','pAge','pStyle','pRole','pNameStyle'].forEach(function(gid){
+            var sel = ov.querySelector('[data-chip="'+gid+'"][data-sel="1"]') || ov.querySelector('[data-chip="'+gid+'"]');
+            opts[gid] = sel ? sel.getAttribute('data-val') : '不限';
+          });
+          var note = (ov.querySelector('[data-ai="note"]')?.value||'');
+          var genBtn = ov.querySelector('[data-el="paGenerate"]');
+          if (genBtn){ genBtn.disabled=true; genBtn.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;animation:spin 1s linear infinite;"><path d="'+_svgStar+'"/></svg> 生成中…'; }
+          try{
+            var apiCfg = PhoneAI._getConfig ? PhoneAI._getConfig('background') : null;
+            if (!apiCfg || !apiCfg.endpoint || !apiCfg.key){
+              try{toast('请先配置 API');}catch(e){} ov._close(); return;
+            }
+            var constraints = [];
+            if (opts.pGender && opts.pGender!=='不限') constraints.push('性别：'+opts.pGender);
+            if (opts.pAge && opts.pAge!=='不限') constraints.push('年龄段：'+opts.pAge);
+            if (opts.pStyle && opts.pStyle!=='不限') constraints.push('性格风格：'+opts.pStyle);
+            if (opts.pRole && opts.pRole!=='不限') constraints.push('身份背景：'+opts.pRole);
+            if (opts.pNameStyle && opts.pNameStyle!=='不限') constraints.push('名字风格：'+opts.pNameStyle);
+            if (note) constraints.push('补充：'+note);
+            var sysP = '你是一个 AI 角色扮演人设生成器。请为用户生成一个可直接使用的第一人称人设档案，风格自然真实，有个性。只返回 JSON 格式：{"name":"人设名字","text":"人设正文（100-200字，包含性格、爱好、说话习惯、背景等）"}，不要任何额外文字。';
+            var userP = '请生成一个人设。' + (constraints.length ? '\n约束条件：\n'+constraints.join('\n') : '') + '\n只返回 JSON。';
+            var ret = await PhoneAI.chat({ system:sysP, messages:[{role:'user',content:userP}], temperature:0.9, maxTokens:400, channel:'background' });
+            if (ret && ret.ok && ret.data){
+              var raw = String(ret.data||'').replace(/```json|```/g,'').trim();
+              var parsed = JSON.parse(raw);
+              if (parsed.name && parsed.text){
+                ov._close();
+                // 直接保存
+                const d2 = _loadPersonas();
+                const id2 = 'p_'+Date.now().toString(36)+'_'+Math.random().toString(36).slice(2,6);
+                d2.list.push({id:id2, name:parsed.name, text:parsed.text, time:Date.now()});
+                _savePersonas(d2);
+                try{toast('✅ 人设已生成：'+parsed.name);}catch(e){}
+                _renderPersonaPage(container);
+              } else { try{toast('生成内容格式有误，请重试');}catch(e){} }
+            } else { try{toast('生成失败，请检查 API');}catch(e){} }
+          }catch(e){
+            try{toast('出错：'+(e.message||String(e)));}catch(e2){}
+          }finally{
+            if(genBtn && genBtn.isConnected){ genBtn.disabled=false; genBtn.innerHTML='<svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;">'+_svgStar+'</svg>AI 润色生成'; }
+          }
+        });
+
+        setTimeout(function(){ try{ ov.querySelector('[data-pf="pName"]')?.focus(); }catch(e){} }, 350);
       }
 
       // ===================== 4.3 表情页 =====================
