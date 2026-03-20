@@ -8,15 +8,8 @@
 <meta name="theme-color" content="#f7f4f0">
 <title>喵喵小手机</title>
 <style>
-* { margin:0; padding:0; box-sizing:border-box; }
-html, body {
-  height: 100%; width: 100%;
-  overflow: hidden;
-  background: var(--ph-bg-primary, #f7f4f0);
-  -webkit-text-size-adjust: 100%;
-  /* 防止 iOS 双击缩放 */
-  touch-action: manipulation;
-}
+*{margin:0;padding:0;box-sizing:border-box;}
+html,body{height:100%;width:100%;overflow:hidden;background:var(--ph-bg-primary,#f7f4f0);-webkit-text-size-adjust:100%;touch-action:manipulation;}
 </style>
 </head>
 <body>
@@ -6943,17 +6936,6 @@ function buildHTML(){
               if (!scene.name && !scene.location){
                 _openSceneEditor(offNid);
               }
-            } else {
-              // ★ 退出线下时：检查是否有未总结内容，有则弹选项
-              var _exitPending = _getPendingForNpc(offNid, 'offline');
-              var _hasUnsummarized = _exitPending && (_exitPending.toIdx - _exitPending.fromIdx + 1) >= 3;
-              if (_hasUnsummarized){
-                // 弹出选项浮层（手机框内风格）
-                _showExitSummaryDialog(offNid);
-                renderChatDetail(offNid);
-                try{ toast('💬 已切换到在线模式'); }catch(e){}
-                return;
-              }
             }
             renderChatDetail(offNid);
             try{ toast(newMode === 'offline' ? '☕ 已切换到线下模式' : '💬 已切换到在线模式'); }catch(e){}
@@ -9296,6 +9278,7 @@ function walletEarn(amount, reason){
         const c = _phLoad(PHONE_IM_KEYS.candidates, null);
 
         // ✅ 兼容旧版本：如果曾经有“auto 自动候选”，这里直接清掉（避免你看到莫名其妙的12个）
+        // ✅ 同时保留候选的结构化资料，避免 AI 好友加入通讯录后角色设定丢失
         if (c && typeof c === 'object' && Array.isArray(c.list)){
           const clean = { v:1, list:[] };
           for (const it of c.list){
@@ -9303,11 +9286,24 @@ function walletEarn(amount, reason){
             const src = String(it.source || '');
             // 旧逻辑的 auto 候选一律丢弃；只保留你手动产生的 import/scan/custom
             if (src === 'auto') continue;
-            clean.list.push({
+            const row = {
               name: String(it.name).trim(),
               source: src || 'custom',
               addedAt: Number(it.addedAt || Date.now())
-            });
+            };
+            if (it.identity) row.identity = String(it.identity);
+            if (it.appearance) row.appearance = String(it.appearance);
+            if (it.status) row.status = String(it.status);
+            if (it.relations) row.relations = String(it.relations);
+            if (it.profile) row.profile = String(it.profile);
+            if (it.personality) row.personality = String(it.personality);
+            if (it.hobby) row.hobby = String(it.hobby);
+            if (it.address) row.address = String(it.address);
+            if (it.occupation) row.occupation = String(it.occupation);
+            if (it.gender) row.gender = String(it.gender);
+            if (it.height) row.height = String(it.height);
+            if (it.bio) row.bio = String(it.bio);
+            clean.list.push(row);
           }
           // 控制最大长度，防止长期使用越来越卡
           if (clean.list.length > 50) clean.list = clean.list.slice(-50);
@@ -9332,9 +9328,37 @@ function walletEarn(amount, reason){
           if (extraData.status) entry.status = String(extraData.status);
           if (extraData.relations) entry.relations = String(extraData.relations);
           if (extraData.profile) entry.profile = String(extraData.profile);
+          if (extraData.personality) entry.personality = String(extraData.personality);
+          if (extraData.hobby) entry.hobby = String(extraData.hobby);
+          if (extraData.address) entry.address = String(extraData.address);
+          if (extraData.occupation) entry.occupation = String(extraData.occupation);
+          if (extraData.gender) entry.gender = String(extraData.gender);
+          if (extraData.height) entry.height = String(extraData.height);
+          if (extraData.bio) entry.bio = String(extraData.bio);
         }
         c.list.push(entry);
         saveCandidates(c);
+      }
+
+      function _buildCandidateProfileText(cand){
+        if (!cand || typeof cand !== 'object') return '';
+        const safe = _ensureAIFriendCandidateProfile(cand);
+        const lines = [];
+        if (safe.name) lines.push('姓名：' + String(safe.name).trim());
+        if (safe.gender) lines.push('性别：' + String(safe.gender).trim());
+        if (safe.personality) lines.push('性格：' + String(safe.personality).trim());
+        if (safe.height) lines.push('身高：' + String(safe.height).trim());
+        if (safe.appearance) lines.push('外貌：' + String(safe.appearance).trim());
+        if (safe.hobby) lines.push('爱好：' + String(safe.hobby).trim());
+        if (safe.address) lines.push('住址：' + String(safe.address).trim());
+        if (safe.occupation || safe.identity){
+          lines.push('职业（身份）：' + [safe.occupation, safe.identity].filter(Boolean).map(function(x){ return String(x).trim(); }).join('｜'));
+        }
+        if (safe.relations) lines.push('关系：' + String(safe.relations).trim());
+        if (safe.bio) lines.push('生平简介：' + String(safe.bio).trim());
+        if (safe.status) lines.push('状态：' + String(safe.status).trim());
+        const profile = String(safe.profile || '').trim();
+        return profile || lines.join('\n');
       }
       function removeCandidateByName(name){
         const c = loadCandidates();
@@ -10928,6 +10952,507 @@ ${lines}
         }catch(e){}
       }
 
+      function _pickAIFriendAddressFromMap(){
+        try{
+          if (typeof _mapLoad !== 'function') return '';
+          const md = _mapLoad();
+          const candidates = [];
+          _safeArr(md && md.landmarks).forEach(function(lm){
+            const dn = String((lm && (lm.customName || lm.name)) || '').trim();
+            if (!dn) return;
+            const tags = _safeArr(lm && lm.tags).slice(0, 2).join('·');
+            candidates.push(tags ? (dn + '一带（' + tags + '）') : (dn + '一带'));
+          });
+          _safeArr(md && md.houses).forEach(function(h){
+            const dn = String((h && (h.customName || h.name)) || '').trim();
+            if (!dn) return;
+            candidates.push(dn + '附近');
+          });
+          if (!candidates.length) return '';
+          return candidates[Math.floor(Math.random() * Math.min(candidates.length, 8))] || '';
+        }catch(e){ return ''; }
+      }
+
+      function _buildAIFriendMapContext(){
+  try{
+    if (typeof _mapLoad !== 'function') return '';
+    const md = _mapLoad();
+    const names = [];
+    _safeArr(md && md.landmarks).slice(0, 12).forEach(function(lm){
+      const dn = String((lm && (lm.customName || lm.name)) || '').trim();
+      if (!dn) return;
+      names.push(dn);
+    });
+    _safeArr(md && md.houses).slice(0, 8).forEach(function(h){
+      const dn = String((h && (h.customName || h.name)) || '').trim();
+      if (!dn) return;
+      names.push(dn);
+    });
+    names.splice(12);
+    return names.length ? ('【地图 App 可参考地点】\n' + names.join('、')) : '';
+  }catch(e){ return ''; }
+}
+
+function _buildAIFriendUserContext(){
+  const parts = [];
+  try{
+    const persona = _readSTPersona();
+    if (persona){
+      if (persona.name) parts.push('用户名称：' + String(persona.name).trim());
+      if (persona.description) parts.push('用户人设：' + String(persona.description).trim().slice(0, 600));
+    }
+  }catch(e){}
+  try{
+    const settings = phoneLoadSettings();
+    if (settings && settings.phoneName) parts.push('小手机昵称：' + String(settings.phoneName).trim());
+  }catch(e){}
+  try{
+    const ctx = meowGetSTCtx();
+    if (ctx && Array.isArray(ctx.chat)){
+      const recent = ctx.chat
+        .filter(function(m){ return m && m.is_user && m.mes; })
+        .slice(-6)
+        .map(function(m){ return String(m.mes || '').replace(/\s+/g, ' ').trim().slice(0, 120); })
+        .filter(Boolean);
+      if (recent.length) parts.push('用户最近说过的话：\n- ' + recent.join('\n- '));
+    }
+  }catch(e){}
+  const mapCtx = _buildAIFriendMapContext();
+  if (mapCtx) parts.push(mapCtx);
+  return parts.join('\n\n') || '暂无更多用户资料，请根据当前世界观生成一个自然的新朋友。';
+}
+
+function _parseAIFriendCandidate(raw){
+  try{
+    let txt = String(raw || '').trim();
+    if (!txt) return null;
+    txt = txt.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```$/i, '').trim();
+    const tries = [txt];
+    const m = txt.match(/\{[\s\S]*\}/);
+    if (m && m[0]) tries.push(m[0]);
+    for (let i = 0; i < tries.length; i++){
+      try{
+        let obj = JSON.parse(tries[i]);
+        if (obj && typeof obj === 'object' && !Array.isArray(obj)){
+          if (obj.friend && typeof obj.friend === 'object') obj = obj.friend;
+          else if (obj.candidate && typeof obj.candidate === 'object') obj = obj.candidate;
+        }
+        if (Array.isArray(obj)) obj = obj[0];
+        if (!obj || typeof obj !== 'object') continue;
+        const out = {
+          name: String(obj.name || obj.nickname || '').trim(),
+          identity: String(obj.identity || obj.role_identity || '').trim(),
+          occupation: String(obj.occupation || obj.job || obj.profession || '').trim(),
+          address: String(obj.address || obj.location || obj.residence || '').trim(),
+          personality: String(obj.personality || obj.character || '').trim(),
+          hobby: String(obj.hobby || obj.hobbies || obj.interests || '').trim(),
+          relations: String(obj.relations || obj.relationship || obj.relation || '').trim(),
+          appearance: String(obj.appearance || '').trim(),
+          gender: String(obj.gender || obj.sex || '').trim(),
+          height: String(obj.height || '').trim(),
+          bio: String(obj.bio || obj.biography || obj.background || obj.life_story || '').trim(),
+          status: String(obj.status || '').trim(),
+          profile: String(obj.profile || '').trim()
+        };
+        if (!out.name) continue;
+        if (!out.profile){
+          const lines = [];
+          if (out.name) lines.push('姓名：' + out.name);
+          if (out.gender) lines.push('性别：' + out.gender);
+          if (out.personality) lines.push('性格：' + out.personality);
+          if (out.height) lines.push('身高：' + out.height);
+          if (out.appearance) lines.push('外貌：' + out.appearance);
+          if (out.hobby) lines.push('爱好：' + out.hobby);
+          if (out.address) lines.push('住址：' + out.address);
+          if (out.occupation || out.identity) lines.push('职业（身份）：' + [out.occupation, out.identity].filter(Boolean).join('｜'));
+          if (out.relations) lines.push('关系：' + out.relations);
+          if (out.bio) lines.push('生平简介：' + out.bio);
+          if (out.status) lines.push('状态：' + out.status);
+          out.profile = lines.join('\n');
+        }
+        if (!out.identity){
+          const idParts = [];
+          if (out.occupation) idParts.push('职业：' + out.occupation);
+          if (out.address) idParts.push('住址：' + out.address);
+          if (out.relations) idParts.push('关系：' + out.relations);
+          out.identity = idParts.join('；');
+        }
+        return _ensureAIFriendCandidateProfile(out);
+      }catch(e){}
+    }
+  }catch(e){}
+  return null;
+}
+
+function _ensureAIFriendCandidateProfile(cand){
+  try{
+    if (!cand || typeof cand !== 'object') return cand;
+    const out = Object.assign({}, cand);
+    const labels = [
+      ['姓名', out.name],
+      ['性别', out.gender],
+      ['性格', out.personality],
+      ['身高', out.height],
+      ['外貌', out.appearance],
+      ['爱好', out.hobby],
+      ['住址', out.address],
+      ['职业（身份）', [out.occupation, out.identity].filter(Boolean).map(function(x){ return String(x).trim(); }).join('｜')],
+      ['关系', out.relations],
+      ['生平简介', out.bio],
+      ['状态', out.status]
+    ].filter(function(row){ return String(row[1] || '').trim(); });
+
+    let profile = String(out.profile || '').trim();
+    const hasLabel = function(label){
+      if (!profile) return false;
+      if (label === '职业（身份）') return /职业（身份）：|职业：|身份：/.test(profile);
+      return new RegExp(label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '：').test(profile);
+    };
+
+    if (!profile){
+      profile = labels.map(function(row){ return row[0] + '：' + String(row[1]).trim(); }).join('\n');
+    } else {
+      labels.forEach(function(row){
+        if (!hasLabel(row[0])) profile += '\n' + row[0] + '：' + String(row[1]).trim();
+      });
+      profile = profile.trim();
+    }
+    out.profile = profile;
+    if (!out.identity){
+      const idParts = [];
+      if (out.occupation) idParts.push(String(out.occupation).trim());
+      if (out.relations) idParts.push(String(out.relations).trim());
+      if (out.address) idParts.push(String(out.address).trim());
+      out.identity = idParts.join('｜');
+    }
+    if (!out.bio){
+      const m = profile.match(/(?:生平简介|简介|背景)：([^\n]+)/);
+      if (m && m[1]) out.bio = String(m[1]).trim();
+    }
+    return out;
+  }catch(e){
+    return cand;
+  }
+}
+
+function _buildFallbackAIFriendCandidate(){
+        let userName = '用户';
+        let userText = '';
+        try{
+          const persona = _readSTPersona();
+          if (persona && persona.name) userName = String(persona.name).trim() || userName;
+          if (persona && persona.description) userText += String(persona.description).trim() + '\n';
+        }catch(e){}
+        try{
+          const ctx = meowGetSTCtx();
+          if (ctx && Array.isArray(ctx.chat)){
+            const recent = ctx.chat.filter(function(m){ return m && m.is_user && m.mes; }).slice(-4).map(function(m){ return String(m.mes || '').replace(/\s+/g,' ').trim(); }).filter(Boolean);
+            if (recent.length) userText += recent.join('\n');
+          }
+        }catch(e){}
+
+        const txt = String(userText || '').toLowerCase();
+        const mapAddrHint = _pickAIFriendAddressFromMap();
+        const names = ['林栖','周槐','沈枝','许砚','宋遥','顾青槐','宁和','余晚舟','程岚','闻野','苏澈','唐予'];
+        const templates = [
+          {
+            relations: '和' + userName + '住得很近，偶尔会在楼下便利店和电梯口碰见',
+            occupation: '附近花店店员',
+            address: mapAddrHint || '你住处附近的旧街口',
+            gender: '女',
+            height: '165cm',
+            personality: '安静、细心、说话轻，但记性很好',
+            hobby: '养花、做手账、拍黄昏的街景',
+            appearance: '总穿浅色上衣，指尖常沾一点花叶气味，眼神温和',
+            bio: '原本学过园艺，后来留在街口花店工作，对旧城区的人和事都很熟。',
+            status: '最近常在傍晚匆匆下班，看起来像有一件放不下的心事'
+          },
+          {
+            relations: '是' + userName + '朋友转介绍认识的人，最近可能会频繁联系',
+            occupation: '自由摄影师',
+            address: mapAddrHint || '城南老街附近的公寓',
+            gender: '男',
+            height: '181cm',
+            personality: '慢热、观察力强、有边界感，但熟了以后会很可靠',
+            hobby: '拍照、逛旧书店、收集胶片和明信片',
+            appearance: '背相机包，衣着干净利落，说话时会先想一下再开口',
+            bio: '大学时学的是视觉相关，后来转成自由接单，跑过不少城市项目。',
+            status: '最近在赶一个长期项目，作息有点乱，但回复消息还算及时'
+          },
+          {
+            relations: '和' + userName + '在同一片生活圈活动，属于慢慢会熟起来的类型',
+            occupation: '咖啡店店主',
+            address: mapAddrHint || '离你常去路线不远的一家临街小店',
+            gender: '女',
+            height: '168cm',
+            personality: '温和、稳重、会照顾人，也很会察言观色',
+            hobby: '做甜点、收集杯子、听老歌',
+            appearance: '身上常带淡淡咖啡香，笑起来很轻，给人很安心的感觉',
+            bio: '以前在连锁店做过几年，后来自己开了小店，慢慢把周围的人都记熟了。',
+            status: '最近店里在调整营业时间，所以白天会比平时更忙'
+          },
+          {
+            relations: '曾和' + userName + '在某件事上有过交集，只是之前没有正式加上联系方式',
+            occupation: '设计相关从业者',
+            address: mapAddrHint || '市区靠河的一栋旧楼里',
+            gender: '男',
+            height: '178cm',
+            personality: '有审美、慢性子、表达直接但不刻薄',
+            hobby: '看展、收集纸品、画速写',
+            appearance: '气质清爽，常带着笔记本和耳机，安静时很有存在感',
+            bio: '做过品牌和展陈项目，工作之外喜欢慢慢观察人和空间的细节。',
+            status: '最近刚结束一段忙碌周期，整个人稍微松下来一些'
+          }
+        ];
+
+        let template = templates[Math.floor(Math.random() * templates.length)];
+        if (txt.indexOf('画') >= 0 || txt.indexOf('设计') >= 0 || txt.indexOf('艺术') >= 0 || txt.indexOf('展') >= 0){
+          template = templates[3];
+        } else if (txt.indexOf('咖啡') >= 0 || txt.indexOf('甜') >= 0 || txt.indexOf('店') >= 0){
+          template = templates[2];
+        } else if (txt.indexOf('拍') >= 0 || txt.indexOf('照片') >= 0 || txt.indexOf('相机') >= 0){
+          template = templates[1];
+        }
+
+        const name = names[Math.floor(Math.random() * names.length)];
+        return _ensureAIFriendCandidateProfile({
+          name: name,
+          identity: template.relations + '；' + template.occupation,
+          occupation: template.occupation,
+          address: template.address,
+          personality: template.personality,
+          hobby: template.hobby,
+          relations: template.relations,
+          appearance: template.appearance,
+          gender: template.gender,
+          height: template.height,
+          bio: template.bio,
+          status: template.status,
+          profile: ''
+        });
+      }
+
+      function _acceptCandidateIntoContacts(name, parentContainer){
+        const n = String(name || '').trim();
+        if (!n) return null;
+        const cand = _safeArr(loadCandidates().list).find(function(x){ return x && x.name === n; });
+        if (!cand) return null;
+        const fullCand = _ensureAIFriendCandidateProfile(cand);
+        const profileText = _buildCandidateProfileText(fullCand);
+        const npc = addOrUpdateNPC({
+          name: n,
+          alias: [],
+          profile: profileText,
+          source: fullCand.source || '',
+          identity: fullCand.identity || '',
+          appearance: fullCand.appearance || '',
+          status: fullCand.status || '',
+          relations: fullCand.relations || ''
+        });
+        try{
+          if (npc && npc.id){
+            const db = loadContactsDB();
+            const target = findContactById(db, npc.id);
+            if (target){
+              target.profile = profileText;
+              target.source = fullCand.source || target.source || '';
+              saveContactsDB(db);
+            }
+            const ce = _loadCharExtra(npc.id);
+            ce.profile = profileText;
+            ce.aiFriendProfile = profileText;
+            if (fullCand.age)        ce.ocAge       = String(fullCand.age);
+            if (fullCand.height)     ce.ocHeight    = String(fullCand.height);
+            if (fullCand.figure)     ce.ocFigure    = String(fullCand.figure);
+            if (fullCand.hairColor)  ce.ocHairColor = String(fullCand.hairColor);
+            if (fullCand.eyeColor)   ce.ocEyeColor  = String(fullCand.eyeColor);
+            if (fullCand.feature)    ce.ocFeature   = String(fullCand.feature);
+            if (fullCand.bio)        ce.bio         = String(fullCand.bio);
+            _saveCharExtra(npc.id, ce);
+            try{
+              if (fullCand.socialDrive != null){
+                const st = _loadCharState(npc.id);
+                if (!st.personality) st.personality = {};
+                st.personality.socialDrive    = Math.round(Number(fullCand.socialDrive)||50);
+                st.personality.emotionDisplay = Math.round(Number(fullCand.emotionDisplay)||50);
+                st.personality.discipline     = Math.round(Number(fullCand.discipline)||50);
+                st.personality.dependency     = Math.round(Number(fullCand.dependency)||50);
+                st.personality.resilience     = Math.round(Number(fullCand.resilience)||50);
+                _saveCharState(npc.id, st);
+              }
+            }catch(e){}
+          }
+        }catch(e){}
+        removeCandidateByName(n);
+        if (parentContainer) _renderNewFriendsPage(parentContainer);
+        return npc;
+      }
+
+      function _showAIFriendPreview(cand, parentContainer){
+        try{
+          if (!cand || !cand.name) return;
+          const safe = _ensureAIFriendCandidateProfile(cand);
+          root.querySelectorAll('.wxCPOverlay').forEach(function(o){ try{ o.remove(); }catch(e){} });
+
+          const meta = [safe.occupation, safe.address].filter(Boolean).join('｜');
+          const profileText = _buildCandidateProfileText(safe) || '暂无设定';
+          const inner =
+            '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;">'
+            + '<div style="min-width:0;flex:1;">'
+            + '<div style="font-size:11px;color:rgba(20,24,28,.38);margin-bottom:6px;">AI 相关好友候选</div>'
+            + '<div style="font-size:20px;line-height:1.2;font-weight:700;color:rgba(20,24,28,.9);word-break:break-word;">' + esc(safe.name) + '</div>'
+            + (meta ? '<div style="margin-top:6px;font-size:11px;line-height:1.5;color:rgba(20,24,28,.46);word-break:break-word;">' + esc(meta) + '</div>' : '')
+            + '</div>'
+            + '<button data-act="close" style="appearance:none;border:0;background:rgba(255,255,255,.72);width:30px;height:30px;border-radius:999px;cursor:pointer;font-size:16px;line-height:1;color:rgba(20,24,28,.45);flex-shrink:0;box-shadow:inset 0 1px 0 rgba(255,255,255,.9);">×</button>'
+            + '</div>'
+            + '<div style="margin-top:12px;padding:12px 13px;border-radius:16px;background:rgba(255,255,255,.58);border:1px solid rgba(255,255,255,.5);white-space:pre-wrap;font-size:12.5px;line-height:1.72;word-break:break-word;color:rgba(20,24,28,.8);box-shadow:inset 0 1px 0 rgba(255,255,255,.78);">' + esc(profileText) + '</div>'
+            + '<div style="display:flex;gap:8px;margin-top:14px;">'
+            + '<button data-act="saveOnly" style="flex:1;appearance:none;border:1px solid rgba(0,0,0,.06);background:rgba(255,255,255,.72);border-radius:14px;padding:11px 10px;cursor:pointer;font-size:13px;color:rgba(20,24,28,.72);box-shadow:inset 0 1px 0 rgba(255,255,255,.82);">先放入候选</button>'
+            + '<button data-act="acceptNow" style="flex:1;appearance:none;border:0;background:var(--ph-accent,#07c160);color:#fff;border-radius:14px;padding:11px 10px;cursor:pointer;font-size:13px;font-weight:700;box-shadow:0 8px 18px rgba(7,193,96,.2);">直接加入通讯录</button>'
+            + '</div>';
+
+          const ov = (typeof _cpShowOverlay === 'function') ? _cpShowOverlay(inner) : null;
+          if (!ov) return;
+          const modal = ov.querySelector('.wxCPModal');
+          if (modal){
+            modal.style.maxWidth = '314px';
+            modal.style.width = 'calc(100% - 8px)';
+            modal.style.padding = '16px 14px 14px';
+            modal.style.borderRadius = '24px';
+            modal.style.background = 'var(--ph-glass-strong)';
+            modal.style.border = '1px solid var(--ph-glass-border)';
+          }
+
+          const close = function(){ try{ ov.remove(); }catch(e){} };
+          ov.querySelector('[data-act="close"]')?.addEventListener('click', close);
+          ov.querySelector('[data-act="saveOnly"]')?.addEventListener('click', function(){
+            close();
+            try{ toast('已加入新的朋友候选'); }catch(e){}
+          });
+          ov.querySelector('[data-act="acceptNow"]')?.addEventListener('click', function(){
+            const npc = _acceptCandidateIntoContacts(safe.name, parentContainer);
+            close();
+            try{ toast(npc ? ('已加入通讯录：' + safe.name) : '加入失败'); }catch(e){}
+          });
+        }catch(e){}
+      }
+
+      async function _generateAIFriendCandidate(parentContainer){
+        let usedFallback = false;
+        let cand = null;
+
+        try{
+          if (typeof PhoneAI !== 'undefined' && PhoneAI && typeof PhoneAI.chat === 'function'){
+            const db = loadContactsDB();
+            const stored = loadCandidates();
+            const existedNames = _uniq([].concat(
+              _safeArr(db.list).map(function(c){ return c && c.name; }),
+              _safeArr(stored.list).map(function(c){ return c && c.name; })
+            )).slice(0, 80);
+
+            let userName = '用户';
+            try{
+              const persona = _readSTPersona();
+              if (persona && persona.name) userName = String(persona.name).trim() || userName;
+              else {
+                const settings = phoneLoadSettings();
+                if (settings && settings.phoneName) userName = String(settings.phoneName).trim() || userName;
+              }
+            }catch(e){}
+
+            const systemPrompt = [
+              '你是 MEOW Phone 的“新的朋友生成器”。',
+              '请根据用户信息、世界观和地图环境，生成 1 个与用户强相关、可以自然出现在通讯录里的新好友候选。',
+              '这个人必须和用户有现实或剧情上的连接，例如：同事、邻居、同学、店主、房东、朋友的朋友、旧识、合作对象。',
+              '名字要自然，不要像系统名、网名、模板名。不要与已有联系人重名。',
+              '如果提供了地图 App 地点，住址请优先参考这些地点自然延展。',
+              '只返回一个 JSON 对象，不要解释，不要 markdown。',
+              '必须包含以下所有字段：name（姓名）, gender（性别）, age（年龄，如“23岁”）,',
+              'height（身高，如“170cm”）, figure（身材）, hairColor（发色）, eyeColor（瞳色）,',
+              'feature（外形特征/气质，一两句）, personality（性格描述）, hobby（爱好）,',
+              'address（住址）, occupation（职业）, identity（身份定位）,',
+              'relations（与用户的关系）, bio（生平简介2-3句）, status（当前状态）,',
+              'socialDrive（社交主动 0-100整数）, emotionDisplay（情绪外显 0-100）,',
+              'discipline（自律程度 0-100）, dependency（依赖倾向 0-100）, resilience（情绪弹性 0-100）,',
+              'profile（可直接写入角色设定的完整人物描述，必须涵盖所有关键信息）。'
+            ].join('\n');
+
+            const userPrompt = [
+              '当前用户：' + userName,
+              '',
+              '【用户相关信息】',
+              _buildAIFriendUserContext(),
+              '',
+              '【已有联系人或候选，禁止重名】',
+              existedNames.length ? existedNames.join('、') : '无',
+              '',
+              '请生成 1 个最适合现在加入“新的朋友”的候选。',
+              '只返回 JSON。'
+            ].join('\n');
+
+            const ret = await PhoneAI.chat({
+              system: systemPrompt,
+              messages: [{ role:'user', content:userPrompt }],
+              temperature: 0.88,
+              maxTokens: 420,
+              timeout: 70,
+              channel: 'background'
+            });
+
+            if (ret && ret.ok && ret.data){
+              cand = _parseAIFriendCandidate(ret.data);
+            } else if (ret && ret.error){
+              console.warn('[MEOW][AI Friend] generate failed:', ret.error);
+            }
+          }
+        }catch(e){
+          console.warn('[MEOW][AI Friend] generate exception:', e);
+        }
+
+        if (!cand || !cand.name){
+          cand = _buildFallbackAIFriendCandidate();
+          usedFallback = true;
+        }
+
+        cand = _ensureAIFriendCandidateProfile(cand);
+        if (!cand || !cand.name){
+          try{ toast('生成失败'); }catch(e){}
+          return false;
+        }
+
+        addCandidate(cand.name, 'ai', {
+          identity: cand.identity,
+          appearance: cand.appearance,
+          status: cand.status,
+          relations: cand.relations,
+          profile: cand.profile,
+          personality: cand.personality,
+          hobby: cand.hobby,
+          address: cand.address,
+          occupation: cand.occupation,
+          gender: cand.gender,
+          height: cand.height,
+          bio: cand.bio
+        });
+
+        const _aiNpc = _acceptCandidateIntoContacts(cand.name, parentContainer);
+        if (_aiNpc && _aiNpc.id){
+          try{ toast('已生成：' + cand.name + ' · 正在打开 OC 档案…'); }catch(e){}
+          setTimeout(function(){
+            try{ _renderCharBehaviorPage(_aiNpc.id); }catch(e){}
+            try{
+              var _tt = root.querySelector('[data-ph="appTitle"]');
+              if(_tt) _tt.textContent = cand.name + ' · OC 档案';
+            }catch(e){}
+          }, 350);
+        } else {
+          if (parentContainer) _renderNewFriendsPage(parentContainer);
+          _showAIFriendPreview(cand, parentContainer);
+          try{ toast(usedFallback ? ('AI 超时，备用好友：' + cand.name) : ('已生成：' + cand.name)); }catch(e){}
+        }
+        return true;
+      }
+
       // ========== C1: 新的朋友 子页面（四种导入方式 + 候选列表） ==========
       function _renderNewFriendsPage(parentContainer){
         // 合并：持久化候选列表，去掉已是好友的
@@ -10956,6 +11481,7 @@ ${lines}
         html += '<div class="wxContactHeader" data-act="c1ImportWB" style="margin:0;padding:12px 14px;border-bottom:1px solid rgba(0,0,0,.05);cursor:pointer;"><div class="wxCHIco">'+ _phFlatIcon('📖') +'</div><div class="wxCHName" style="flex:1;">世界书角色导入</div><div class="wxDArrow" style="color:var(--ph-text-dim)">›</div></div>';
         html += '<div class="wxContactHeader" data-act="c1ImportSTCard" style="margin:0;padding:12px 14px;border-bottom:1px solid rgba(0,0,0,.05);cursor:pointer;"><div class="wxCHIco">'+ _phFlatIcon('🎭') +'</div><div class="wxCHName" style="flex:1;">酒馆角色卡导入</div><div class="wxDArrow" style="color:var(--ph-text-dim)">›</div></div>';
         html += '<div class="wxContactHeader" data-act="c1ImportPersona" style="margin:0;padding:12px 14px;border-bottom:1px solid rgba(0,0,0,.05);cursor:pointer;"><div class="wxCHIco">'+ _phFlatIcon('👤') +'</div><div class="wxCHName" style="flex:1;">用户人设导入</div><div class="wxDArrow" style="color:var(--ph-text-dim)">›</div></div>';
+        html += '<div class="wxContactHeader" data-act="c1AIFriend" style="margin:0;padding:12px 14px;border-bottom:1px solid rgba(0,0,0,.05);cursor:pointer;"><div class="wxCHIco">'+ _phFlatIcon('✨') +'</div><div class="wxCHName" style="flex:1;">AI 生成相关好友</div><div class="wxDArrow" style="color:var(--ph-text-dim)">›</div></div>';
         html += '<div class="wxContactHeader" data-act="c1ScanMain" style="margin:0;padding:12px 14px;cursor:pointer;"><div class="wxCHIco">'+ _phFlatIcon('🔍') +'</div><div class="wxCHName" style="flex:1;">主线扫描</div><div class="wxDArrow" style="color:var(--ph-text-dim)">›</div></div>';
         html += '</div>';
 
@@ -10963,13 +11489,18 @@ ${lines}
         if (merged.length){
           html += '<div style="padding:16px 14px 4px;font-size:12px;color:rgba(20,24,28,.4);font-weight:500;display:flex;align-items:center;justify-content:space-between;"><span>候选联系人 (' + merged.length + ')</span><button data-act="wxHideAllCand" style="appearance:none;border:0;background:transparent;color:rgba(20,24,28,.35);font-size:11px;cursor:pointer;">全部清除</button></div>';
           for (const c of merged){
-            const srcTag = c.source === 'worldbook' ? _phFlatIcon('📖') : (c.source === 'stcard' ? _phFlatIcon('🎭') : (c.source === 'persona' ? _phFlatIcon('👤') : (c.source === 'scan' ? _phFlatIcon('🔍') : _phFlatIcon('➕'))));
-            const profileSnip = (c.identity || c.profile || '').slice(0,40);
+            const srcTag = c.source === 'worldbook' ? _phFlatIcon('📖') : (c.source === 'stcard' ? _phFlatIcon('🎭') : (c.source === 'persona' ? _phFlatIcon('👤') : (c.source === 'scan' ? _phFlatIcon('🔍') : (c.source === 'ai' ? _phFlatIcon('✨') : _phFlatIcon('➕')))));
+            const profileText = _buildCandidateProfileText(c);
+            const profileSnip = profileText.slice(0,40);
+            const metaTop = [c.occupation, c.address].filter(Boolean).join('｜');
+            const metaBottom = [c.personality, c.hobby].filter(Boolean).join('｜');
             html += '<div class="wxContactItem" style="display:flex;align-items:center;padding:10px 14px;">';
             html += '<div class="wxCIAvatar" style="background:var(--ph-glass-strong);border:1px solid var(--ph-glass-border);flex-shrink:0;font-size:0;display:flex;align-items:center;justify-content:center;">' + srcTag + '</div>';
             html += '<div style="flex:1;margin-left:10px;overflow:hidden;">';
             html += '<div class="wxCIName" style="font-size:14px;">' + esc(c.name) + '</div>';
-            if (profileSnip) html += '<div style="font-size:11px;color:rgba(20,24,28,.4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(profileSnip) + '</div>';
+            if (metaTop) html += '<div style="font-size:11px;color:rgba(20,24,28,.46);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;">' + esc(metaTop) + '</div>';
+            else if (profileSnip) html += '<div style="font-size:11px;color:rgba(20,24,28,.4);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;">' + esc(profileSnip) + '</div>';
+            if (metaBottom) html += '<div style="font-size:11px;color:rgba(20,24,28,.38);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px;">' + esc(metaBottom) + '</div>';
             html += '</div>';
             html += '<button data-act="phAcceptCand" data-name="' + esc(c.name) + '" style="appearance:none;border:0;background:var(--ph-accent,var(--ph-accent, #07c160));color:#fff;width:32px;height:32px;border-radius:50%;font-size:18px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;box-shadow:0 2px 8px var(--ph-shadow);">+</button>';
             html += '</div>';
@@ -11010,6 +11541,26 @@ ${lines}
           btn.addEventListener('click', ()=> _doPersonaImport(parentContainer));
         });
 
+        // C1: AI 生成一个与 user 相关的新好友
+        parentContainer.querySelectorAll('[data-act="c1AIFriend"]').forEach(btn=>{
+          btn.addEventListener('click', async ()=>{
+            if (btn.dataset.busy === '1') return;
+            const oldHtml = btn.innerHTML;
+            btn.dataset.busy = '1';
+            btn.style.pointerEvents = 'none';
+            btn.innerHTML = '<div class="wxCHIco">' + _phFlatIcon('✨') + '</div><div class="wxCHName" style="flex:1;">生成中…</div><div class="wxDArrow" style="color:var(--ph-text-dim)">···</div>';
+            try{
+              await _generateAIFriendCandidate(parentContainer);
+            }finally{
+              if (btn.isConnected){
+                btn.dataset.busy = '0';
+                btn.style.pointerEvents = '';
+                btn.innerHTML = oldHtml;
+              }
+            }
+          });
+        });
+
         // C1: 主线扫描（已限制 ≤ 5）
         parentContainer.querySelectorAll('[data-act="c1ScanMain"]').forEach(btn=>{
           btn.addEventListener('click', ()=>{
@@ -11032,19 +11583,8 @@ ${lines}
           btn.addEventListener('click', ()=>{
             const n = btn.getAttribute('data-name') || '';
             if (!n.trim()) return;
-            const cand = _safeArr(loadCandidates().list).find(x => x.name === n.trim());
-            addOrUpdateNPC({
-              name: n.trim(), alias: [],
-              profile: (cand && cand.profile) || '',
-              source: (cand && cand.source) || '',
-              identity: (cand && cand.identity) || '',
-              appearance: (cand && cand.appearance) || '',
-              status: (cand && cand.status) || '',
-              relations: (cand && cand.relations) || ''
-            });
-            removeCandidateByName(n.trim());
-            _renderNewFriendsPage(parentContainer);
-            try{ toast('已加入通讯录'); }catch(e){}
+            const npc = _acceptCandidateIntoContacts(n.trim(), parentContainer);
+            try{ toast(npc ? '已加入通讯录' : '加入失败'); }catch(e){}
           });
         });
       }
@@ -12231,21 +12771,86 @@ ${lines}
       }
       function _saveStickerPacks(d){ phoneSetG('sticker_packs_v1', d); }
 
+      function _openStickerCharGroupPicker(container){
+        try{
+          root.querySelectorAll('.wxConfirmOverlay').forEach(function(o){ o.remove(); });
+          const contacts = _safeArr(loadContactsDB().list).filter(function(c){ return c && (c.name || c.id); });
+          if (!contacts.length){ try{ toast('通讯录没有联系人'); }catch(e){} return; }
+
+          const packs = _loadStickerPacks();
+          const overlay = doc.createElement('div');
+          overlay.className = 'wxConfirmOverlay';
+
+          let html = `<div class="wxConfirmBox" style="min-width:280px;max-width:320px;width:calc(100% - 36px);text-align:left;max-height:78vh;overflow:hidden;display:flex;flex-direction:column;">
+            <div style="font-weight:700;font-size:15px;color:var(--ph-text);margin-bottom:8px;">选择好友创建专属表情包</div>
+            <div style="font-size:12px;color:var(--ph-text-sub);margin-bottom:12px;line-height:1.5;">直接从现有好友里选一个，立刻建立对应的专属表情分组。</div>
+            <div style="display:flex;flex-direction:column;gap:8px;max-height:50vh;overflow:auto;padding-right:2px;">`;
+
+          contacts.forEach(function(c){
+            const cid = String(c.id || c.name || '');
+            const cname = String(c.name || c.id || '未命名');
+            const existed = !!((packs.charGroups || {})[cid]);
+            const av = phoneGetAvatar(cid);
+            const avatarHtml = av
+              ? `<img src="${esc(av)}" style="width:100%;height:100%;object-fit:cover;border-radius:inherit;"/>`
+              : esc((c.avatar || cname || '?').charAt(0));
+            html += `<button data-act="stkCgPickOne" data-cid="${esc(cid)}" data-cname="${esc(cname)}" style="appearance:none;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.92);border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:10px;cursor:pointer;text-align:left;">
+              <div style="width:34px;height:34px;border-radius:10px;overflow:hidden;flex-shrink:0;background:rgba(0,0,0,.05);display:flex;align-items:center;justify-content:center;font-size:15px;color:rgba(20,24,28,.72);">${avatarHtml}</div>
+              <div style="flex:1;min-width:0;">
+                <div style="font-size:13px;font-weight:600;color:var(--ph-text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${esc(cname)}</div>
+                <div style="font-size:11px;color:var(--ph-text-sub);margin-top:2px;">${existed ? '已创建专属分组，点此进入' : '创建新的专属分组'}</div>
+              </div>
+              <div style="font-size:11px;color:${existed ? 'var(--ph-accent, #07c160)' : 'rgba(20,24,28,.4)'};font-weight:600;flex-shrink:0;">${existed ? '进入' : '创建'}</div>
+            </button>`;
+          });
+
+          html += `</div>
+            <div style="display:flex;gap:10px;margin-top:14px;">
+              <button data-act="stkCgPickCancel" style="flex:1;padding:10px 0;border-radius:12px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.78);color:var(--ph-text);font-size:13px;cursor:pointer;">取消</button>
+            </div>
+          </div>`;
+          overlay.innerHTML = html;
+          root.appendChild(overlay);
+
+          overlay.addEventListener('click', function(e){ if (e.target === overlay) overlay.remove(); });
+          overlay.querySelector('[data-act="stkCgPickCancel"]')?.addEventListener('click', function(){ overlay.remove(); });
+          overlay.querySelectorAll('[data-act="stkCgPickOne"]').forEach(function(btn){
+            btn.addEventListener('click', function(){
+              const cid = String(btn.getAttribute('data-cid') || '').trim();
+              const cname = String(btn.getAttribute('data-cname') || '').trim() || cid;
+              if (!cid) return;
+              const nextPacks = _loadStickerPacks();
+              if (!nextPacks.charGroups) nextPacks.charGroups = {};
+              const existed = !!nextPacks.charGroups[cid];
+              if (!nextPacks.charGroups[cid]) nextPacks.charGroups[cid] = [];
+              _saveStickerPacks(nextPacks);
+              container.__stickerGroup = 'cg_' + cid;
+              overlay.remove();
+              try{ toast(existed ? '已进入「' + cname + '」专属分组' : '已创建「' + cname + '」专属分组'); }catch(e){}
+              _renderStickersPage(container);
+            });
+          });
+        }catch(e){
+          console.warn('[MEOW][Sticker] open picker error:', e);
+          try{ toast('打开好友列表失败'); }catch(_e){}
+        }
+      }
+
       function _renderStickersPage(container){
         const packs = _loadStickerPacks();
         // 已有专属分组
-        const _cgKeys = Object.keys(packs.charGroups||{}).filter(function(k){ return _safeArr((packs.charGroups||{})[k]).length > 0; });
+        const _cgKeys = Object.keys(packs.charGroups||{});
         const _cgContacts = _safeArr(loadContactsDB().list);
         const _cgGroups = _cgKeys.map(function(cid){
           const _nc = _cgContacts.find(function(c){ return c.id===cid||c.name===cid; }) || { name: cid };
           return { key:'cg_'+cid, label:(_nc.name||cid).slice(0,5)+'专属', icon:'⭐', _cgId: cid };
         });
         const groups = [
-          { key:'user', label:'我的表情', icon:'👤' },
+          { key:'user', label:'我的', icon:'👤' },
           ..._cgGroups,
-          { key:'__newcg__', label:'+ 新建专属', icon:'➕' },
-          { key:'char', label:'角色通用', icon:'🤖' },
-          { key:'common', label:'通用表情', icon:'🌐' },
+          { key:'__newcg__', label:'新建', icon:'➕' },
+          { key:'char', label:'角色', icon:'🤖' },
+          { key:'common', label:'通用', icon:'🌐' },
         ];
         let curGroup = container.__stickerGroup || 'user';
         const _curEntry = groups.find(function(g){ return g.key===curGroup; });
@@ -12301,21 +12906,7 @@ ${lines}
         container.querySelectorAll('[data-act="stkGroup"]').forEach(b => b.addEventListener('click',()=>{
           const _gk = b.getAttribute('data-gkey');
           if (_gk === '__newcg__'){
-            // 新建角色专属分组
-            const _ncCList = _safeArr(loadContactsDB().list);
-            if (!_ncCList.length){ try{toast('通讯录没有联系人');}catch(e){} return; }
-            const _ncNames = _ncCList.map(function(c){ return c.name||c.id; }).join('、');
-            const _ncSel = prompt('输入要建立专属表情的角色名：\n可选：' + _ncNames);
-            if (!_ncSel || !_ncSel.trim()) return;
-            const _ncFound = _ncCList.find(function(c){ return (c.name||'')=== _ncSel.trim()||(c.id||'')===_ncSel.trim(); });
-            const _ncId = _ncFound ? (_ncFound.id||_ncFound.name||_ncSel.trim()) : _ncSel.trim();
-            const _ncPacks = _loadStickerPacks();
-            if (!_ncPacks.charGroups) _ncPacks.charGroups = {};
-            if (!_ncPacks.charGroups[_ncId]) _ncPacks.charGroups[_ncId] = [];
-            _saveStickerPacks(_ncPacks);
-            container.__stickerGroup = 'cg_' + _ncId;
-            try{toast('已创建「'+_ncSel.trim()+'」专属分组，上传表情后即可在聊天中使用');}catch(e){}
-            _renderStickersPage(container);
+            _openStickerCharGroupPicker(container);
             return;
           }
           container.__stickerGroup = _gk;
@@ -15132,7 +15723,9 @@ const npc = _wxGetChatTargetMeta(npcId);
           onlineSummaryPrompt:'',
           offlineSummaryTemplate:'',
           summaryCustomPrompt:'',
-          onlineChatPrompt:''
+          onlineChatPrompt:'',
+          ocAge:'', ocHeight:'', ocFigure:'',
+          ocHairColor:'', ocEyeColor:'', ocFeature:'', bio:''
         });
       }
       function _saveCharExtra(npcId, data){
@@ -15832,7 +16425,7 @@ const npc = _wxGetChatTargetMeta(npcId);
                     <span style="font-size:12px;color:rgba(20,24,28,.55);flex:1;">楼自动生成一次总结</span>
                   </div>
                   <div style="font-size:11px;color:rgba(20,24,28,.45);margin-bottom:6px;">线上总结词：</div>
-                  <textarea data-el="sumPromptOnline" rows="3" placeholder="例如：更偏手机聊天纪要、关系变化、关键信息点" style="width:100%;padding:8px 10px;border:1px solid rgba(0,0,0,.08);border-radius:8px;font-size:12px;outline:none;resize:vertical;font-family:inherit;line-height:1.5;box-sizing:border-box;background:rgba(255,255,255,.6);">${esc(charEx.onlineSummaryPrompt||'你是剧情记录员，只记录客观发生的事，不做任何评价或定论。对话有时间范围标注，请在 storyTime 里写出日期和时段。请输出纯 JSON：{"storyTime":"日期+时段","facts":["发生了什么事（只写事实）"],"quotes":["值得记录的原话"],"events":["具体事件，只写发生了什么"],"props":["出现的物品/地点"],"todos":[{"text":"待办","done":false}]}。严禁出现"关系取得突破""首次主动""关系进一步"之类的评价性语言。')}</textarea>
+                  <textarea data-el="sumPromptOnline" rows="3" placeholder="例如：更偏手机聊天纪要、关系变化、关键信息点" style="width:100%;padding:8px 10px;border:1px solid rgba(0,0,0,.08);border-radius:8px;font-size:12px;outline:none;resize:vertical;font-family:inherit;line-height:1.5;box-sizing:border-box;background:rgba(255,255,255,.6);">${esc(charEx.onlineSummaryPrompt||'你是剧情记录员，只记录客观发生的事，不做任何评价或定论。对话有时间范围标注，请在 storyTime 里写出日期和时段。请输出纯 JSON：{"storyTime":"日期+时段","facts":["发生了什么事（只写事实）"],"quotes":["值得记录的原话"],"events":["具体事件，只写发生了什么"],"props":["出现的物品/地点"],"todos":[{"text":"待办","done":false}]}。quotes 数组必须是纯字符串数组（string），不要返回对象或带 speaker 字段的结构。严禁出现"关系取得突破""首次主动""关系进一步"之类的评价性语言。')}</textarea>
                   <div style="font-size:11px;color:rgba(20,24,28,.45);margin:10px 0 6px;">线下总结模板：</div>
                   <textarea data-el="sumPromptOffline" rows="3" placeholder="例如：更偏线下见面、动作、场景、事件推进" style="width:100%;padding:8px 10px;border:1px solid rgba(0,0,0,.08);border-radius:8px;font-size:12px;outline:none;resize:vertical;font-family:inherit;line-height:1.5;box-sizing:border-box;background:rgba(255,255,255,.6);">${esc(charEx.offlineSummaryTemplate||'你是剧情记录员，只记录客观发生的事，不做任何评价或定论。以下内容来自线下见面/场景互动，对话有时间范围标注，请在 storyTime 里写出日期和时段。请输出纯 JSON：{"storyTime":"日期+时段","facts":["发生了什么事（只写事实）"],"quotes":["值得记录的原话"],"events":["具体事件，只写发生了什么"],"props":["出现的物品/地点"],"todos":[{"text":"待办","done":false}]}。严禁出现评价性语言，只记录行为本身。')}</textarea>
                   <div style="font-size:11px;color:rgba(20,24,28,.45);margin:10px 0 6px;">聊天专属总结词：</div>
@@ -16261,7 +16854,39 @@ const npc = _wxGetChatTargetMeta(npcId);
           }
         }
 
+        var _ce4OC = _loadCharExtra(contactId);
+        function _ocRow(lbl, key, ph, val, svgPath){
+          return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid rgba(0,0,0,.05);">'
+            +'<svg viewBox="0 0 24 24" fill="currentColor" style="width:15px;height:15px;flex-shrink:0;color:var(--ph-text-sub,rgba(20,24,28,.4));">'+svgPath+'</svg>'
+            +'<span style="font-size:12px;color:rgba(20,24,28,.5);min-width:36px;">'+lbl+'</span>'
+            +'<input data-oc="'+key+'" value="'+esc(val||'')+'" placeholder="'+ph+'"'
+            +' style="flex:1;border:none;outline:none;background:transparent;font-size:13px;color:var(--ph-text,rgba(20,24,28,.85));text-align:right;"/>'
+            +'</div>';
+        }
+        var _svgPerson='<path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>';
+        var _svgHeight='<path d="M12 2L4 9l1.4 1.4L11 4.8V21h2V4.8l5.6 5.6L20 9z"/>';
+        var _svgFigure='<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>';
+        var _svgHair='<path d="M12 2a9 9 0 0 0-9 9c0 4.17 2.84 7.67 6.69 8.69L12 21l2.31-1.31C18.16 18.67 21 15.17 21 11a9 9 0 0 0-9-9zm0 2c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z"/>';
+        var _svgEye='<path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>';
+        var _svgNote='<path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 7V3.5L18.5 9H13zm-2 8H7v-2h4v2zm4-4H7v-2h8v2zm0-4H7V7h8v2z"/>';
+
         var html = `<div style="padding-bottom:20px;">
+
+          <!-- OC 外形档案 -->
+          <div style="margin:12px 14px 0;font-size:11px;color:rgba(20,24,28,.4);letter-spacing:.3px;padding:0 0 4px;">外形档案</div>
+          <div style="background:var(--ph-glass,rgba(255,255,255,.75));border-radius:14px;border:1px solid var(--ph-glass-border,rgba(0,0,0,.07));overflow:hidden;margin:0 14px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);">
+            ${_ocRow('年龄','ocAge','未知',_ce4OC.ocAge,_svgPerson)}
+            ${_ocRow('身高','ocHeight','未知',_ce4OC.ocHeight,_svgHeight)}
+            ${_ocRow('身材','ocFigure','未知',_ce4OC.ocFigure,_svgFigure)}
+            ${_ocRow('发色','ocHairColor','未知',_ce4OC.ocHairColor,_svgHair)}
+            ${_ocRow('瞳色','ocEyeColor','未知',_ce4OC.ocEyeColor,_svgEye)}
+            <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;">
+              <svg viewBox="0 0 24 24" fill="currentColor" style="width:15px;height:15px;flex-shrink:0;margin-top:3px;color:var(--ph-text-sub,rgba(20,24,28,.4));">${_svgNote}</svg>
+              <span style="font-size:12px;color:rgba(20,24,28,.5);min-width:36px;padding-top:2px;">特征</span>
+              <textarea data-oc="ocFeature" placeholder="外形特征、气质描述…" rows="2"
+                style="flex:1;border:none;outline:none;background:transparent;font-size:13px;color:var(--ph-text,rgba(20,24,28,.85));resize:none;line-height:1.5;">${esc(_ce4OC.ocFeature||'')}</textarea>
+            </div>
+          </div>
 
           <!-- 行为参数 -->
           <div style="margin:12px 14px 0;font-size:11px;color:rgba(20,24,28,.4);letter-spacing:.3px;padding:0 0 4px;">行为参数</div>
@@ -16311,19 +16936,27 @@ const npc = _wxGetChatTargetMeta(npcId);
           <button data-act="cbSaveBehavior" data-npcid="${esc(contactId)}"
             style="display:block;width:calc(100% - 28px);margin:12px 14px 0;padding:12px;border-radius:12px;border:0;background:var(--ph-accent, #07c160);color:#fff;font-size:14px;font-weight:600;cursor:pointer;">保存</button>
 
-          <!-- ★ 性格分析卡片 -->
-          <div style="margin:12px 14px 0;font-size:11px;color:rgba(20,24,28,.4);letter-spacing:.3px;padding:0 0 4px;">🧠 性格分析</div>
-          <div style="background:var(--ph-glass, rgba(255,255,255,.75));border-radius:14px;border:1px solid var(--ph-glass-border, rgba(0,0,0,.07));margin:0 14px;padding:12px 14px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);">
+          <!-- ★ 性格分析卡片（SVG雷达图）-->
+          <div style="margin:12px 14px 0;font-size:11px;color:rgba(20,24,28,.4);letter-spacing:.3px;padding:0 0 4px;">性格分析</div>
+          <div style="background:var(--ph-glass, rgba(255,255,255,.75));border-radius:14px;border:1px solid var(--ph-glass-border, rgba(0,0,0,.07));margin:0 14px;padding:14px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);">
             ${(function(){
               var p = s.personality;
-              if (!p) return '<div style="font-size:12px;color:rgba(20,24,28,.4);margin-bottom:10px;">尚未分析，点击按钮让 AI 提取角色性格五维参数，驱动自主行为差异。</div>';
-              function pBar(label, val){ var c = val > 66 ? '#07c160' : val > 33 ? '#f39c12' : '#e74c3c';
-                return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:5px;"><span style="font-size:11px;color:rgba(20,24,28,.55);min-width:52px;">${label}</span><div style="flex:1;height:5px;background:rgba(0,0,0,.07);border-radius:3px;overflow:hidden;"><div style="height:100%;width:${val}%;background:${c};border-radius:3px;"></div></div><span style="font-size:10px;color:rgba(20,24,28,.35);min-width:20px;text-align:right;">${val}</span></div>`; }
-              return pBar('社交主动',p.socialDrive) + pBar('情绪外显',p.emotionDisplay) + pBar('自律程度',p.discipline) + pBar('依赖倾向',p.dependency) + pBar('情绪弹性',p.resilience);
+              if (!p) return '<div style="font-size:12px;color:rgba(20,24,28,.4);margin-bottom:10px;line-height:1.6;">尚未分析，点击下方按钮让 AI 提取角色性格五维参数。</div>';
+              var dims=[{l:'社交主动',v:p.socialDrive||50},{l:'情绪外显',v:p.emotionDisplay||50},{l:'自律程度',v:p.discipline||50},{l:'依赖倾向',v:p.dependency||50},{l:'情绪弹性',v:p.resilience||50}];
+              var cx=110,cy=105,r=72,n=5,PI2=Math.PI*2;
+              function pt(i,ratio){var a=i/n*PI2-Math.PI/2;return[cx+r*ratio*Math.cos(a),cy+r*ratio*Math.sin(a)];}
+              var grid=[0.33,0.66,1].map(function(ratio){var pts=[];for(var i=0;i<n;i++)pts.push(pt(i,ratio).join(','));return'<polygon points="'+pts.join(' ')+'" fill="none" stroke="rgba(0,0,0,.07)" stroke-width="1"/>';}).join('');
+              var axis='';for(var i=0;i<n;i++){var p2=pt(i,1);axis+='<line x1="'+cx+'" y1="'+cy+'" x2="'+p2[0]+'" y2="'+p2[1]+'" stroke="rgba(0,0,0,.08)" stroke-width="1"/>';}
+              var dpts=[];for(var i=0;i<n;i++)dpts.push(pt(i,dims[i].v/100).join(','));
+              var poly='<polygon points="'+dpts.join(' ')+'" fill="var(--ph-accent,#07c160)" fill-opacity=".14" stroke="var(--ph-accent,#07c160)" stroke-width="1.5"/>';
+              var dots='';for(var i=0;i<n;i++){var dp=pt(i,dims[i].v/100);dots+='<circle cx="'+dp[0]+'" cy="'+dp[1]+'" r="3" fill="var(--ph-accent,#07c160)"/>';}
+              var lbls='';for(var i=0;i<n;i++){var lp=pt(i,1.24);var anc=lp[0]<cx-4?'end':lp[0]>cx+4?'start':'middle';lbls+='<text x="'+lp[0]+'" y="'+lp[1]+'" text-anchor="'+anc+'" dominant-baseline="middle" font-size="10" fill="rgba(20,24,28,.55)">'+dims[i].l+'</text>';var np=pt(i,dims[i].v/100+0.16);lbls+='<text x="'+np[0]+'" y="'+np[1]+'" text-anchor="middle" dominant-baseline="middle" font-size="9" fill="var(--ph-accent,#07c160)" font-weight="600">'+dims[i].v+'</text>';}
+              return '<div style="display:flex;justify-content:center;"><svg width="220" height="210" viewBox="0 0 220 210" style="overflow:visible;">'+grid+axis+poly+dots+lbls+'</svg></div>';
             })()}
             <button data-act="cbExtractPersonality" data-npcid="${esc(contactId)}"
-              style="margin-top:6px;width:100%;padding:8px;border-radius:10px;border:1px solid var(--ph-glass-border, rgba(0,0,0,.08));background:rgba(255,255,255,.8);font-size:12px;color:rgba(20,24,28,.7);cursor:pointer;">
-              ${s.personality ? '🔄 重新分析性格' : '✨ AI 提取性格参数'}
+              style="margin-top:8px;width:100%;padding:9px;border-radius:10px;border:1px solid var(--ph-glass-border,rgba(0,0,0,.08));background:rgba(255,255,255,.8);font-size:12px;color:rgba(20,24,28,.7);cursor:pointer;display:flex;align-items:center;justify-content:center;gap:5px;">
+              <svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;opacity:.6;"><path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25zM9 12l-2-4.5L2.5 9l4.5-2L9 2.5l2 4.5 4.5 2-4.5 2zm10 1l-1.25 2.75L15 17l2.75 1.25L19 21l1.25-2.75L23 17l-2.75-1.25z"/></svg>
+              ${s.personality ? '重新分析性格' : 'AI 提取性格参数'}
             </button>
           </div>
 
@@ -16360,6 +16993,11 @@ const npc = _wxGetChatTargetMeta(npcId);
         // 保存
         body.querySelector('[data-act="cbSaveBehavior"]')?.addEventListener('click', function(){
           var nid = this.getAttribute('data-npcid') || contactId;
+          var ceOC2 = _loadCharExtra(nid);
+          body.querySelectorAll('[data-oc]').forEach(function(el){
+            var k = el.getAttribute('data-oc'); if(k) ceOC2[k] = String(el.value||'').trim();
+          });
+          _saveCharExtra(nid, ceOC2);
           var bNew = _loadCharBehavior(nid);
           body.querySelectorAll('input[data-sl]').forEach(function(inp){ bNew[inp.getAttribute('data-sl')] = Number(inp.value) / 100; });
           body.querySelectorAll('select[data-sel]').forEach(function(sel){ bNew[sel.getAttribute('data-sel')] = sel.value; });
@@ -16692,7 +17330,7 @@ const npc = _wxGetChatTargetMeta(npcId);
         const db = loadContactsDB();
         const npc = findContactById(db, contactId) || { id:contactId, name:String(contactId), avatar:String(contactId).charAt(0), profile:'' };
         const charEx = _loadCharExtra(contactId);
-        const mergedProfile = npc.profile || charEx.profile || '';
+        const mergedProfile = npc.profile || charEx.profile || charEx.aiFriendProfile || '';
 
         try{ const t = root.querySelector('[data-ph="appTitle"]'); if(t) t.textContent='角色设定'; }catch(e){}
         try{ const sp = root.querySelector('.phAppBarSpacer'); if(sp) sp.innerHTML=''; }catch(e){}
@@ -18285,6 +18923,15 @@ const npc = _wxGetChatTargetMeta(npcId);
         if (profile){
           parts.push('【角色设定 - ' + npc.name + '】\n' + profile);
         }
+        var _ocBits = [];
+        if (charEx.ocAge)       _ocBits.push('年龄：' + charEx.ocAge);
+        if (charEx.ocHeight)    _ocBits.push('身高：' + charEx.ocHeight);
+        if (charEx.ocFigure)    _ocBits.push('身材：' + charEx.ocFigure);
+        if (charEx.ocHairColor) _ocBits.push('发色：' + charEx.ocHairColor);
+        if (charEx.ocEyeColor)  _ocBits.push('瞳色：' + charEx.ocEyeColor);
+        if (charEx.ocFeature)   _ocBits.push('外形特征：' + charEx.ocFeature);
+        if (charEx.bio)         _ocBits.push('生平：' + charEx.bio);
+        if (_ocBits.length) parts.push('【外形档案 - ' + npc.name + '】\n' + _ocBits.join('\n'));
 
         // === 3. [用户身份]：C2 persona 联动 ===
         try{
@@ -19966,72 +20613,118 @@ const npc = _wxGetChatTargetMeta(npcId);
         // ---- 主动消息队列（延迟发送，行为做完才告诉你） ----
         // ---- AI 生成主动消息内容 ----
         async function _generateAIMsg(npcId, behaviorKey, behaviorLabel, s, opts){
-          try{
-            var db = loadContactsDB();
-            var npc = findContactById(db, npcId) || { name: String(npcId) };
-            var charEx = _loadCharExtra(npcId);
-            var targetMode = (opts && opts.mode) ? String(opts.mode) : 'online';
-            var promptTs = (opts && opts.atTs) ? Number(opts.atTs) : Date.now();
+  try{
+    var db = loadContactsDB();
+    var npc = findContactById(db, npcId) || { name: String(npcId) };
+    var charEx = _loadCharExtra(npcId);
+    var targetMode = (opts && opts.mode) ? String(opts.mode) : 'online';
+    var promptTs = (opts && opts.atTs) ? Number(opts.atTs) : Date.now();
 
-            // 读最近10条聊天记录作为上下文
-            var recentLogs = [];
-            try{
-              var raw = targetMode === 'online' && typeof _getLogForModeBranch === 'function'
-                ? _getLogForModeBranch(npcId, 'online')
-                : ((loadLogs().map || {})[String(npcId)] || []);
-              recentLogs = _safeArr(raw).slice(-10).map(function(m){
-                return (m.role==='me'?'用户':'角色') + '：' + String(m.text||'').slice(0,80);
-              });
-            }catch(e){}
+    var recentLogs = [];
+    try{
+      var raw = targetMode === 'online' && typeof _getLogForModeBranch === 'function'
+        ? _getLogForModeBranch(npcId, 'online')
+        : ((loadLogs().map || {})[String(npcId)] || []);
+      recentLogs = _safeArr(raw).slice(-10).map(function(m){
+        return (m.role === 'me' ? '用户' : '角色') + '：' + String(m.text || '').slice(0, 80);
+      });
+    }catch(e){}
 
-            var p = s.personality || {};
-            var socialDrive = p.socialDrive != null ? p.socialDrive : 50;
-            var emotionDisplay = p.emotionDisplay != null ? p.emotionDisplay : 50;
-            var personalityBlock = _buildPersonalityPromptBlock(npcId, { concise:true });
+    var p = s.personality || {};
+    var socialDrive = p.socialDrive != null ? p.socialDrive : 50;
+    var emotionDisplay = p.emotionDisplay != null ? p.emotionDisplay : 50;
+    var personalityBlock = _buildPersonalityPromptBlock(npcId, { concise:true });
+    var relationStage = s.bond || '普通';
+    var emotionCtx = _getRecentUserEmotionContext(npcId, targetMode);
 
-            var stateDesc = '';
-            if (s.attrs.energy < 30) stateDesc += '有点累，';
-            if (s.attrs.hunger < 30) stateDesc += '有点饿，';
-            if ((s.attrs.loneliness||0) > 65) stateDesc += '有点想你，';
-            stateDesc += '心情' + (s.moodText||'平静');
+    var stateDesc = '';
+    if (s.attrs.energy < 30) stateDesc += '有点累，';
+    if (s.attrs.hunger < 30) stateDesc += '有点饿，';
+    if ((s.attrs.loneliness || 0) > 65) stateDesc += '有点想你，';
+    stateDesc += '心情' + (s.moodText || '平静');
 
-            var temporalBlock = _buildTemporalPromptBlock(npcId, targetMode, promptTs);
-            var sysPrompt = '你正在扮演「' + (npc.name||npcId) + '」。\n' +
-              (npc.profile || npc.description || charEx.profile || '').slice(0,300) + '\n\n' +
-              (temporalBlock ? temporalBlock + '\n\n' : '') +
-              (personalityBlock ? personalityBlock + '\n\n' : '') +
-              '【行为背景】你刚刚' + behaviorLabel + '，' + stateDesc + '，想主动联系用户。\n' +
-              '【性格】' +
-              (socialDrive > 65 ? '比较主动爱聊天。' : socialDrive < 35 ? '平时话不多，这次难得主动。' : '') +
-              (emotionDisplay > 65 ? '情绪外放。' : emotionDisplay < 35 ? '情绪内敛。' : '') + '\n' +
-              (targetMode === 'online' && charEx.onlineChatPrompt ? '【线上聊天附加要求】\n' + String(charEx.onlineChatPrompt).trim() + '\n' : '') +
-              '【要求】发一条简短自然的消息，2-3句，像真实聊天，不要正式，不要引号，直接输出内容。若当前时段在工作/休息中，要让消息带一点忙里偷闲、稍后看到或刚空下来的感觉。不直接说想你之类的话，而是找话题' +
-              (recentLogs.length ? '\n【最近对话】\n' + recentLogs.join('\n') : '');
+    var temporalBlock = _buildTemporalPromptBlock(npcId, targetMode, promptTs);
+    var summaryBlocks = [];
+    try{
+      var sumOnline = getChatSummary(npcId, 'online');
+      if (sumOnline && sumOnline.summaryText) summaryBlocks.push('【线上关系摘要】\n' + String(sumOnline.summaryText).trim().slice(0, 700));
+    }catch(e){}
+    try{
+      var sumOffline = getChatSummary(npcId, 'offline');
+      if (sumOffline && sumOffline.summaryText) summaryBlocks.push('【线下经历摘要】\n' + String(sumOffline.summaryText).trim().slice(0, 500));
+    }catch(e){}
 
-            var result = await PhoneAI.chat({
-              system: sysPrompt,
-              messages: [{ role:'user', content:'（请直接输出那条消息）' }],
-              temperature: 0.9,
-              maxTokens: 80,
-              timeout: 45,
-              channel: 'proactive'
-            });
-            var proactiveKind = (opts && opts.kind) ? String(opts.kind) : (String(behaviorKey||'').indexOf('daily') >= 0 ? 'daily' : 'random');
-            if (result && result.ok && result.data){
-              var cleanText = String(result.data).trim().replace(/^["「『【]|["」』】]$/g, '').slice(0, 120);
-              if (cleanText){
-                try{ _pushProactiveDebug(npcId, proactiveKind, 'ai_ok', cleanText.slice(0, 80)); }catch(e){}
-                return cleanText;
-              }
-              try{ _setProactiveAttemptState(npcId, proactiveKind, { status:'fail', failReason:'AI 返回空文本' }); _pushProactiveDebug(npcId, proactiveKind, 'ai_empty', 'AI 返回空文本'); }catch(e){}
-              return null;
-            }
-            try{ _setProactiveAttemptState(npcId, proactiveKind, { status:'fail', failReason:(result && result.error) ? String(result.error) : 'AI 请求失败' }); _pushProactiveDebug(npcId, proactiveKind, 'ai_fail', (result && result.error) ? String(result.error) : 'AI 请求失败'); }catch(e){}
-            return null;
-          }catch(e){ console.warn('[LifeEngine] _generateAIMsg error:', e); try{ var proactiveKind2 = (opts && opts.kind) ? String(opts.kind) : (String(behaviorKey||'').indexOf('daily') >= 0 ? 'daily' : 'random'); _setProactiveAttemptState(npcId, proactiveKind2, { status:'fail', failReason:String((e&&e.message)||e||'未知异常') }); _pushProactiveDebug(npcId, proactiveKind2, 'ai_error', String((e&&e.message)||e||'未知异常')); }catch(_e){} return null; }
-        }
+    var smartRule = [
+      '【主动消息生成规则】',
+      '- 先根据关系阶段、最近对话、聊天总结、当前时间，再决定发什么。',
+      '- 不要写成固定模板式的生活播报，不要像系统通知。',
+      '- 如果最近用户在生气、受伤、冷淡，优先修复关系、回应情绪，不要突然转去聊无关日常。',
+      '- 如果关系较近（亲近/暧昧），可以更柔和、更贴近生活；如果关系普通或疏远，要克制有分寸。',
+      '- 内容要像这个角色自己会发的话，而不是万能模板。'
+    ].join('\n');
+    var relationRule = '【关系阶段】当前你和用户的关系：' + relationStage + '。' +
+      (relationStage === '暧昧' ? '可以带一点试探和在意。' :
+      relationStage === '亲近' ? '可以更自然地关心和分享。' :
+      relationStage === '疏远' ? '语气要克制一点，不要太亲密。' : '保持自然、有分寸。');
+    var emotionRule = emotionCtx && emotionCtx.kind && emotionCtx.kind !== 'normal'
+      ? ('【最近用户情绪】' + (emotionCtx.label || '用户情绪有波动') + '。最近用户原话参考：\n' + String(emotionCtx.recentText || '').slice(0, 240))
+      : '';
 
-        // ---- 主动消息队列（存元信息，flush 时再调 AI） ----
+    var sysPrompt = [
+      '你正在扮演「' + (npc.name || npcId) + '」。',
+      String(npc.profile || npc.description || charEx.profile || '').slice(0, 300),
+      temporalBlock || '',
+      personalityBlock || '',
+      relationRule,
+      smartRule,
+      emotionRule || '',
+      '【行为背景】你刚刚' + behaviorLabel + '，' + stateDesc + '，想主动联系用户。',
+      '【性格】' +
+        (socialDrive > 65 ? '比较主动爱聊天。' : socialDrive < 35 ? '平时话不多，这次难得主动。' : '') +
+        (emotionDisplay > 65 ? '情绪外放。' : emotionDisplay < 35 ? '情绪内敛。' : ''),
+      summaryBlocks.join('\n\n'),
+      (targetMode === 'online' && charEx.onlineChatPrompt ? ('【线上聊天附加要求】\n' + String(charEx.onlineChatPrompt).trim()) : ''),
+      '【输出要求】只发 1 条主动消息，像真实聊天软件里会发出的那种。可以是 1-3 句，但总长度尽量控制在 60 字内。若当前时段在工作/休息中，要让消息带一点忙里偷闲、稍后看到或刚空下来的感觉。不要用引号，不要解释自己在执行规则。' + (recentLogs.length ? ('\n【最近对话】\n' + recentLogs.join('\n')) : '')
+    ].filter(Boolean).join('\n\n');
+
+    var result = await PhoneAI.chat({
+      system: sysPrompt,
+      messages: [{ role:'user', content:'（请直接输出那条消息）' }],
+      temperature: 0.9,
+      maxTokens: 80,
+      timeout: 45,
+      channel: 'proactive'
+    });
+    var proactiveKind = (opts && opts.kind) ? String(opts.kind) : (String(behaviorKey || '').indexOf('daily') >= 0 ? 'daily' : 'random');
+    if (result && result.ok && result.data){
+      var cleanText = String(result.data).trim().replace(/^[\"「『【]|[\"」』】]$/g, '').slice(0, 120);
+      if (cleanText){
+        try{ _pushProactiveDebug(npcId, proactiveKind, 'ai_ok', cleanText.slice(0, 80)); }catch(e){}
+        return cleanText;
+      }
+      try{
+        _setProactiveAttemptState(npcId, proactiveKind, { status:'fail', failReason:'AI 返回空文本' });
+        _pushProactiveDebug(npcId, proactiveKind, 'ai_empty', 'AI 返回空文本');
+      }catch(e){}
+      return null;
+    }
+    try{
+      _setProactiveAttemptState(npcId, proactiveKind, { status:'fail', failReason:(result && result.error) ? String(result.error) : 'AI 请求失败' });
+      _pushProactiveDebug(npcId, proactiveKind, 'ai_fail', (result && result.error) ? String(result.error) : 'AI 请求失败');
+    }catch(e){}
+    return null;
+  }catch(e){
+    console.warn('[LifeEngine] _generateAIMsg error:', e);
+    try{
+      var proactiveKind2 = (opts && opts.kind) ? String(opts.kind) : (String(behaviorKey || '').indexOf('daily') >= 0 ? 'daily' : 'random');
+      _setProactiveAttemptState(npcId, proactiveKind2, { status:'fail', failReason:String((e && e.message) || e || '未知异常') });
+      _pushProactiveDebug(npcId, proactiveKind2, 'ai_error', String((e && e.message) || e || '未知异常'));
+    }catch(_e){}
+    return null;
+  }
+}
+
+// ---- 主动消息队列（存元信息，flush 时再调 AI） ----
         function _queueProactiveMsg(npcId, fallbackText, delayMin, behaviorKey, behaviorLabel){
           var delay = Math.max(0, delayMin || 0) * 60000 + _randomBetween(30, 180) * 1000;
           var key = 'msgqueue_' + String(npcId);
@@ -20279,6 +20972,55 @@ const npc = _wxGetChatTargetMeta(npcId);
         // 烦躁
         if (m >= 15) return '烦躁';
         return '生气';
+      }
+
+      function _analyzeUserEmotionSignal(text){
+        var t = String(text || '').trim();
+        var low = t.toLowerCase();
+        if (!t) return { kind:'normal', label:'', bypassSilent:false, bland:true };
+        var bland = /^(嗯+|哦+|喔+|好+|行+|知道了|随便|算了|…|\.\.\.|ok|okay)$/i.test(low);
+        if (/不想理|别烦|滚开|滚|讨厌|烦死|气死|你走|拉黑|别联系|冷静一下|别碰我|闭嘴|别回我/.test(t)) return { kind:'angry', label:'用户在生气或受伤', bypassSilent:true, bland:false };
+        if (/委屈|难过|想哭|崩溃|心情不好|好累|压力好大|睡不着|好烦|烦死了|受不了/.test(t)) return { kind:'sad', label:'用户情绪低落', bypassSilent:true, bland:false };
+        if (/对不起|抱歉|刚才语气不好|是我不好|我错了/.test(t)) return { kind:'apology', label:'用户在道歉或放软', bypassSilent:true, bland:false };
+        if (/在吗|陪我|别走|别不理我|你理理我|想你|抱抱|哄我/.test(t)) return { kind:'need', label:'用户在寻求陪伴或回应', bypassSilent:true, bland:false };
+        return { kind:'normal', label:'', bypassSilent:!bland && t.length >= 2, bland:bland };
+      }
+
+      function _buildUserTurnDirective(npcId, userText, stateObj){
+        try{
+          var emo = _analyzeUserEmotionSignal(userText);
+          var bond = (stateObj && stateObj.bond) || '普通';
+          var notes = [];
+          if (stateObj && stateObj.silentUntil > Date.now() && emo.bypassSilent){
+            notes.push('虽然你刚才想冷静一下或有些累，但用户已经主动来找你了，这一轮必须先接住对方，不要无视。');
+          }
+          if (emo.kind === 'angry'){
+            notes.push('用户这条消息明显在生气、受伤或想推开你。先回应情绪、解释或安抚，再决定要不要提别的话题。');
+            notes.push(bond === '亲近' || bond === '暧昧' ? '关系较近，可以放软、哄人、示弱一点，但仍保持角色性格。' : '关系还没那么近，安抚要克制、有分寸，不要油腻。');
+            notes.push('禁止把回复写成机械的日常播报，禁止突然聊无关小事。');
+          } else if (emo.kind === 'sad'){
+            notes.push('用户情绪低落，先安抚、陪伴、接情绪，不要先讲道理。');
+          } else if (emo.kind === 'apology'){
+            notes.push('用户在道歉或放软，顺着情绪接住对方，给回应，不要故意装作没看见。');
+          } else if (emo.kind === 'need'){
+            notes.push('用户现在想要你的回应或陪伴，回复要更及时、更有人味。');
+          } else if (stateObj && stateObj.silentUntil > Date.now() && emo.bypassSilent){
+            notes.push('不要因为沉默设定而跳过这轮回复，先自然回一句。');
+          }
+          return { bypassSilent: !!emo.bypassSilent, prompt: notes.join('\n') };
+        }catch(e){ return { bypassSilent:false, prompt:'' }; }
+      }
+
+      function _getRecentUserEmotionContext(npcId, targetMode){
+        try{
+          var raw = targetMode === 'online' && typeof _getLogForModeBranch === 'function'
+            ? _getLogForModeBranch(npcId, 'online')
+            : ((loadLogs().map || {})[String(npcId)] || []);
+          var userTexts = _safeArr(raw).filter(function(m){ return m && m.role === 'me' && m.text; }).slice(-4).map(function(m){ return String(m.text || '').slice(0, 120); });
+          var joined = userTexts.join('\n');
+          var emo = _analyzeUserEmotionSignal(joined);
+          return { kind: emo.kind, label: emo.label, recentText: joined };
+        }catch(e){ return { kind:'normal', label:'', recentText:'' }; }
       }
 
       function _updateCharStateFromMsg(npcId, userText){
@@ -22197,6 +22939,8 @@ const npc = _wxGetChatTargetMeta(npcId);
         // ===【B3】更新角色状态（纯规则，不调 API）===
         var charStateNow = null;
         try{ charStateNow = _updateCharStateFromMsg(npcId, text); }catch(e){}
+        var userTurnDirective = { bypassSilent:false, prompt:'' };
+        try{ userTurnDirective = _buildUserTurnDirective(npcId, text, charStateNow); }catch(e){}
 
         // === AI 自动回复 ===
         try{
@@ -22212,7 +22956,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           if (isBlacklisted(npc.name) || isBlacklisted(npc.id)) return;
 
           // ===【B3】沉默期检测：处于沉默期则延迟回复 ===
-          if (charStateNow && charStateNow.silentUntil > Date.now()){
+          if (charStateNow && charStateNow.silentUntil > Date.now() && !(userTurnDirective && userTurnDirective.bypassSilent)){
             var leftMs = charStateNow.silentUntil - Date.now();
             var seqBeforeSilent = PhoneAI._replySeqId;
             setTimeout(function(){
@@ -22265,7 +23009,10 @@ const npc = _wxGetChatTargetMeta(npcId);
           // 2. 构建上下文
           const contextN = _getChatContextN();
           const contextMessages = _getRecentMessagesForAPI(npcId, contextN);
-          const systemPrompt = buildSystemPrompt(npcId);
+          let systemPrompt = buildSystemPrompt(npcId);
+          if (userTurnDirective && userTurnDirective.prompt){
+            systemPrompt += '\n\n【当前这一轮回复要求】\n' + String(userTurnDirective.prompt).trim();
+          }
 
           // 3. 调用 API（线下模式回复像小说，字数多，超时时间加长）
           var _isOffline = (typeof _getChatMode === 'function') && _getChatMode(npcId) === 'offline';
@@ -22288,7 +23035,8 @@ const npc = _wxGetChatTargetMeta(npcId);
             // AbortError 静默（error 为 null）
             if (result.error){
               try{ _markPendingChatReply(npcId, { status:'pending', lastError:String(result.error), lastTryAt:Date.now(), source:'chat_request_fail' }); }catch(_e){}
-              try{ toast(_classifyRecoverableChatError(result.error) ? '连接中断，回到页面后会自动补发' : result.error); }catch(e){}
+              try{ if (_classifyRecoverableChatError(result.error)) _schedulePendingChatReplyRecovery('send_fail_retry', 1200, npcId); }catch(_e){}
+              try{ toast(_classifyRecoverableChatError(result.error) ? '连接中断，正在自动重试回复' : result.error); }catch(e){}
             }
             return;
           }
@@ -22349,6 +23097,7 @@ const npc = _wxGetChatTargetMeta(npcId);
         }catch(e){
           _hideTypingIndicator();
           try{ _markPendingChatReply(npcId, { status:'pending', lastError:String((e&&e.message)||e||'未知异常'), lastTryAt:Date.now(), source:'chat_exception' }); }catch(_e){}
+          try{ _schedulePendingChatReplyRecovery('chat_exception_retry', 1200, npcId); }catch(_e){}
           // 不崩原则：吞掉异常，不影响后续操作
           try{ if (e && e.name !== 'AbortError') console.warn('[PhoneAI]', e); }catch(_){}
         }
@@ -23623,14 +24372,17 @@ const npc = _wxGetChatTargetMeta(npcId);
           var ce = _loadCharExtra(npcId);
           if (ce.autoSummary){
             var curMode = _normChatMode(_getChatMode(npcId));
-            // ★ 线下模式不走自动触发（只走切场景/退出线下），避免重复总结
-            if (curMode !== 'offline'){
-              var everyN = Math.max(5, ce.autoSumEvery || 20);
-              var pending = _getTimelinePendingRange(npcId, curMode, everyN);
-              if (pending && (pending.toIdx - pending.fromIdx + 1) >= everyN){
-                console.log('[AutoSum] 触发(线上): 待总结 #'+(pending.fromIdx+1)+'~'+(pending.toIdx+1));
-                setTimeout(function(){ _triggerAutoSummary(npcId, curMode); }, 2000);
-              }
+            // ★ 线上线下分别用各自的N
+            var everyN = curMode === 'offline'
+              ? Math.max(5, ce.autoSumEveryOffline || 30)
+              : Math.max(5, ce.autoSumEvery || 20);
+            // 用 _getTimelinePendingRange 检查是否有足够的未总结消息
+            var pending = _getTimelinePendingRange(npcId, curMode, everyN);
+            if (pending && (pending.toIdx - pending.fromIdx + 1) >= everyN){
+              console.log('[AutoSum] 触发: 待总结 #'+(pending.fromIdx+1)+'~'+(pending.toIdx+1));
+              setTimeout(function(){
+                _triggerAutoSummary(npcId, curMode);
+              }, 2000);
             }
           }
         }catch(e){}
@@ -27236,80 +27988,7 @@ function _loadSceneData(npcId){
   return _phLoad('scene_'+String(npcId), { name:'', location:'', description:'', presetData: SCENE_PRESET_DEFAULT });
 }
 function _saveSceneData(npcId, data){
-  try{
-    var _prev = _loadSceneData(npcId);
-    if (_prev && _prev.name && data && data.name && _prev.name !== data.name){
-      _tlSilentSummaryIfNeeded(npcId, 'offline');
-    }
-  }catch(e){}
   _phSave('scene_'+String(npcId), data);
-}
-
-// ★ 显示退出线下时的总结选项弹框（手机框内风格）
-function _showExitSummaryDialog(npcId){
-  var ov = doc.createElement('div');
-  ov.style.cssText = 'position:absolute;inset:0;z-index:9999;display:flex;align-items:flex-end;padding:0 0 80px;justify-content:center;';
-  ov.innerHTML = '<div style="width:calc(100% - 28px);background:var(--ph-glass,rgba(255,255,255,.95));backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-radius:16px;border:1px solid var(--ph-glass-border,rgba(0,0,0,.08));padding:16px 14px 12px;box-shadow:0 4px 24px rgba(0,0,0,.12);">'
-    + '<div style="font-size:13px;font-weight:600;color:var(--ph-text,rgba(20,24,28,.88));margin-bottom:4px;">剧情记录</div>'
-    + '<div style="font-size:11px;color:var(--ph-text-sub,rgba(20,24,28,.45));margin-bottom:12px;">本次线下有未总结的消息，需要现在记录吗？</div>'
-    + '<div style="display:flex;gap:8px;">'
-    + '<button data-el="exitSumLater" style="flex:1;padding:9px;border-radius:10px;border:1px solid var(--ph-glass-border,rgba(0,0,0,.08));background:var(--ph-glass,rgba(255,255,255,.9));font-size:12px;color:var(--ph-text-sub,rgba(20,24,28,.5));cursor:pointer;">下次再总结</button>'
-    + '<button data-el="exitSumNow" style="flex:2;padding:9px;border-radius:10px;border:0;background:var(--ph-accent,#07c160);color:#fff;font-size:12px;font-weight:600;cursor:pointer;">退出并总结</button>'
-    + '</div></div>';
-
-  var phoneEl = root;
-  if (phoneEl) phoneEl.appendChild(ov);
-
-  ov.querySelector('[data-el="exitSumLater"]').addEventListener('click', function(){
-    ov.remove();
-  });
-  ov.querySelector('[data-el="exitSumNow"]').addEventListener('click', function(){
-    ov.remove();
-    _tlSilentSummaryIfNeeded(npcId, 'offline');
-  });
-}
-
-// ★ 静默总结（切场景触发），带手机框内可见进度提示
-async function _tlSilentSummaryIfNeeded(npcId, mode){
-  try{
-    var apiCfg = PhoneAI._getConfig('background');
-    if (!apiCfg.endpoint || !apiCfg.key) return;
-    var pending = _getPendingForNpc(npcId, mode);
-    if (!pending || (pending.toIdx - pending.fromIdx + 1) < 3) return;
-    var _cnt = pending.toIdx - pending.fromIdx + 1;
-    console.log('[TL] 触发总结', _cnt, '条');
-
-    // 在手机框内右下角显示进度小标签
-    var _tag = null;
-    try{
-      _tag = doc.createElement('div');
-      _tag.style.cssText = 'position:absolute;bottom:64px;right:10px;z-index:9990;background:var(--ph-glass,rgba(255,255,255,.92));backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border:1px solid var(--ph-glass-border,rgba(0,0,0,.08));border-radius:20px;padding:5px 10px;font-size:10px;color:var(--ph-text-sub,rgba(20,24,28,.5));display:flex;align-items:center;gap:5px;box-shadow:0 2px 10px rgba(0,0,0,.08);pointer-events:none;';
-      _tag.innerHTML = '<span style="width:6px;height:6px;border-radius:50%;background:var(--ph-accent,#07c160);animation:meowPulse 1s infinite;flex-shrink:0;"></span><span>正在记录剧情…</span>';
-      if (root) root.appendChild(_tag);
-    }catch(e){}
-
-    await _generateTimelineEntry(npcId, pending.fromIdx, pending.toIdx, mode, { silent: true });
-
-    // 成功后更新提示
-    try{
-      if (_tag){
-        _tag.innerHTML = '<span style="color:var(--ph-accent,#07c160);">✓</span><span>剧情已记录</span>';
-        _tag.style.pointerEvents = 'none';
-        setTimeout(function(){ try{ _tag.remove(); }catch(e){} }, 2500);
-      }
-    }catch(e){}
-  }catch(e){
-    console.warn('[TL] 总结失败:', e);
-    try{ if(_tag) _tag.remove(); }catch(e2){}
-  }
-}
-
-function _getPendingForNpc(npcId, mode){
-  // 总量全取（不限条数），用 endTs 精准定位起点
-  try{
-    var tm = _normChatMode(mode || 'offline');
-    return _getTimelinePendingRange(npcId, tm, 99999);
-  }catch(e){ return null; }
 }
 
 // ========== Phase 3C：自定义样式系统 ==========
@@ -28192,48 +28871,6 @@ function _syncSummaryFromTimeline(npcId, mode){
   existing.updatedAt = Date.now();
   saveChatSummary(npcId, existing, mode);
 }
-function _getTimelinePendingRangeByTime(npcId, mode, gapMinutes, maxFallback){
-  var targetMode = _normChatMode(mode || _getChatMode(npcId));
-  var log = _getLogForModeBranch(npcId, targetMode);
-  if (log.length === 0) return null;
-  var tl = _loadTimeline(npcId);
-  var bucket = _getTimelineModeState(tl, targetMode, true);
-  var lastEnd = 0;
-  if (bucket.entries.length > 0){
-    var lastE = bucket.entries[bucket.entries.length - 1];
-    if (lastE.endTs && lastE.endTs > 0){
-      var _btStart = Math.max(0, (lastE.range[1]||0) - 3);
-      var _btMi = -1;
-      for (var bti = _btStart; bti < log.length; bti++){
-        if (Number((log[bti] && log[bti].t) || 0) > lastE.endTs){ _btMi = bti; break; }
-      }
-      lastEnd = (_btMi >= 0) ? _btMi : Math.min(lastE.range[1] + 1, log.length);
-    } else {
-      lastEnd = Math.min(lastE.range[1] + 1, log.length);
-    }
-  }
-  if (lastEnd >= log.length) return null;
-  var threshold = (gapMinutes || 60) * 60000;
-  var fallback  = maxFallback || 40;
-  var hasTs = false;
-  for (var k = lastEnd; k < Math.min(lastEnd + 5, log.length); k++){
-    if (log[k] && log[k].t && Number(log[k].t) > 0){ hasTs = true; break; }
-  }
-  var endIdx = log.length - 1;
-  if (hasTs){
-    for (var i = lastEnd + 1; i < log.length; i++){
-      var t1 = Number((log[i-1] && log[i-1].t) || 0);
-      var t2 = Number((log[i]   && log[i].t)   || 0);
-      if (t1 > 0 && t2 > 0 && (t2 - t1) >= threshold){ endIdx = i - 1; break; }
-    }
-    var hardCap = lastEnd + fallback * 3 - 1;
-    if (endIdx > hardCap) endIdx = hardCap;
-  } else {
-    endIdx = Math.min(lastEnd + fallback - 1, log.length - 1);
-  }
-  return { fromIdx: lastEnd, toIdx: endIdx, logLength: log.length, hasMore: endIdx < log.length - 1 };
-}
-
 function _getTimelinePendingRange(npcId, mode, maxChunk){
   var targetMode = _normChatMode(mode || _getChatMode(npcId));
   var log = _getLogForModeBranch(npcId, targetMode);
@@ -28246,37 +28883,24 @@ function _getTimelinePendingRange(npcId, mode, maxChunk){
   if(bucket.entries.length > 0){
     var lastEntry = bucket.entries[bucket.entries.length - 1];
 
-    // ★ 策略1：endTs（时间戳锚点）——最准确
-    if(lastEntry.endTs && lastEntry.endTs > 0){
-      var _tsFrom = Math.max(0, (lastEntry.range[1] || 0) - 3);
-      var _tsMi = -1;
-      for(var i = _tsFrom; i < log.length; i++){
-        if(Number((log[i] && log[i].t) || 0) > lastEntry.endTs){ _tsMi = i; break; }
-      }
-      lastEnd = (_tsMi >= 0) ? _tsMi : Math.min(lastEntry.range[1] + 1, log.length);
-    } else if(lastEntry.tailHashes && lastEntry.tailHashes.length > 0){
-      // ★ 策略2（兼容旧数据）：tailHashes 近邻匹配
-      var hashSet = {};
-      lastEntry.tailHashes.forEach(function(h){ hashSet[h] = true; });
-      var totalHashes = lastEntry.tailHashes.length;
-      var matchIdx = -1;
-      var rangeEnd = lastEntry.range[1];
-      var sStart = Math.max(0, rangeEnd - 5);
-      var sEnd   = Math.min(log.length - 1, rangeEnd + 10);
-      var nearCount = 0, nearLast = -1;
-      for(var i = sStart; i <= sEnd; i++){
-        if(hashSet[_msgHash(log[i])]){ nearCount++; nearLast = i; }
-      }
-      if(nearCount >= Math.min(2, totalHashes)){
-        matchIdx = nearLast;
-      } else {
-        for(var j = log.length - 1; j >= 0; j--){
-          if(hashSet[_msgHash(log[j])]){ matchIdx = j; break; }
-        }
-      }
+    // ★ 思路二：优先用 tailHashes 定位，不依赖位置索引
+    if(lastEntry.tailHashes && lastEntry.tailHashes.length > 0){
+      // 必须按顺序匹配“末尾连续几条消息”，不能只命中任意一条
+      // 否则一旦后面又出现同一句/同长度消息，就会把中间消息误跳过
+      var matchIdx = _findTailHashSeqEnd(log, lastEntry.tailHashes);
       if(matchIdx >= 0){
-        lastEnd = matchIdx + 1;
+        lastEnd = matchIdx + 1; // 从上一块真正的末尾之后继续
+      } else if (lastEntry.tailAnchor && lastEntry.tailAnchor.t){
+        // 尾消息被编辑导致哈希变更：尝试用时间戳+角色定位
+        var aT = Number(lastEntry.tailAnchor.t || 0);
+        var aR = String(lastEntry.tailAnchor.role || '');
+        var idx2 = -1;
+        for (var j = log.length - 1; j >= 0; j--){
+          if (Number(log[j] && log[j].t || 0) === aT && String(log[j] && log[j].role || '') === aR){ idx2 = j; break; }
+        }
+        lastEnd = idx2 >= 0 ? (idx2 + 1) : Math.min(lastEntry.range[1] + 1, log.length);
       } else {
+        // 连续尾指纹找不到（消息被删/改）→ fallback 到 range 索引
         lastEnd = Math.min(lastEntry.range[1] + 1, log.length);
       }
     } else {
@@ -28322,8 +28946,26 @@ function _tlApiClearQueue(){
   _tlApiQueue.length = 0;
 }
 
+function _normalizeMsgTextForHash(m){
+  try{
+    var t = m && m.text;
+    if (t && typeof t === 'object') return JSON.stringify(t);
+    return String(t || '');
+  }catch(e){
+    return String((m && m.text) || '');
+  }
+}
+
 function _generateSourceHash(msgs){
-  var str = msgs.map(function(m){ return (m.role||'') + ':' + String(m.text||'').length; }).join('|');
+  var str = _safeArr(msgs).map(function(m){
+    return [
+      m && m.role || '',
+      Number(m && m.t || 0),
+      _normalizeMsgTextForHash(m),
+      m && m.mode || '',
+      m && m.branch || ''
+    ].join('||');
+  }).join('\n---\n');
   var hash = 0;
   for (var i = 0; i < str.length; i++){
     hash = ((hash << 5) - hash) + str.charCodeAt(i);
@@ -28332,13 +28974,15 @@ function _generateSourceHash(msgs){
   return 'h_' + Math.abs(hash).toString(36);
 }
 
-// 对单条消息生成短哈希（用于思路二：末尾3条消息定位）
+// 对单条消息生成短哈希（用于时间线进度定位）
 function _msgHash(m){
-  var _t = m.text;
-  var _ts = (typeof _t === 'string') ? _t
-    : (_t && typeof _t === 'object') ? String(_t.text || _t.content || _t.message || '[obj]')
-    : String(_t || '');
-  var str = (m.role||'') + '|' + _ts.slice(0, 80);
+  var str = [
+    m && m.role || '',
+    Number(m && m.t || 0),
+    _normalizeMsgTextForHash(m),
+    m && m.mode || '',
+    m && m.branch || ''
+  ].join('|');
   var h = 0;
   for(var i = 0; i < str.length; i++){ h = ((h << 5) - h) + str.charCodeAt(i); h |= 0; }
   return Math.abs(h).toString(36);
@@ -28346,7 +28990,23 @@ function _msgHash(m){
 
 // 生成区间末尾最多3条消息的哈希数组（用于定位总结进度）
 function _tailHashes(msgs){
-  return msgs.slice(-3).map(_msgHash);
+  return _safeArr(msgs).slice(-1).map(_msgHash);
+}
+
+// 在日志中查找“末尾 3 条消息哈希”这段连续序列最后一条的位置
+function _findTailHashSeqEnd(log, tailHashes){
+  var hashes = _safeArr(tailHashes).filter(Boolean);
+  if (!hashes.length) return -1;
+  if (!log || !log.length) return -1;
+  var need = hashes.length;
+  for (var end = log.length - 1; end >= need - 1; end--){
+    var ok = true;
+    for (var k = 0; k < need; k++){
+      if (_msgHash(log[end - need + 1 + k]) !== hashes[k]){ ok = false; break; }
+    }
+    if (ok) return end;
+  }
+  return -1;
 }
 
 // 独立版本的 entry display 重建（供 _generateTimelineEntry 内部去重使用）
@@ -28355,14 +29015,9 @@ function _rebuildEntryDisplayText(entry){
   var s = entry.structured, display = [];
   if (s.storyTime) display.push('⏰ ' + s.storyTime);
   if (s.facts && s.facts.length) display.push('📋 事实：\n' + s.facts.map(function(f){ return '  · ' + f; }).join('\n'));
-  if (s.quotes && s.quotes.length) display.push('💬 原话：\n' + s.quotes.map(function(q){
-    var _qs = (typeof q === 'string') ? q
-      : (q && typeof q === 'object') ? String(q.text || q.content || q.quote || JSON.stringify(q)).slice(0,200)
-      : String(q||'');
-    return '  「' + _qs + '」';
-  }).join('\n'));
-  if (s.events && s.events.length) display.push('⚡ 转折：\n' + s.events.map(function(t){ return '  · ' + t; }).join('\n'));
-  else if (s.turning && s.turning.length) display.push('⚡ 转折：\n' + s.turning.map(function(t){ return '  · ' + t; }).join('\n'));
+  if (s.quotes && s.quotes.length) display.push('💬 原话：\n' + s.quotes.map(function(q){ var v = (q && typeof q === 'object') ? (q.text || q.quote || JSON.stringify(q)) : q; return '  「' + String(v||'') + '」'; }).join('\n'));
+  if (s.events && s.events.length) display.push('📌 事件：\n' + s.events.map(function(t){ return '  · ' + t; }).join('\n'));
+  else if (s.turning && s.turning.length) display.push('📌 事件：\n' + s.turning.map(function(t){ return '  · ' + t; }).join('\n'));
   if (s.props && s.props.length) display.push('🎒 道具：' + s.props.join('、'));
   if (s.todos && s.todos.length) display.push('📝 待办：\n' + s.todos.map(function(t){ return '  ' + (t.done ? '✅' : '☐') + ' ' + t.text; }).join('\n'));
   entry.displayText = display.join('\n\n');
@@ -28378,11 +29033,9 @@ async function _generateTimelineEntry(npcId, fromIdx, toIdx, mode, opts){
   var sourceHash = _generateSourceHash(selected);
   var tl = _loadTimeline(npcId);
   var tlMode = _getTimelineModeState(tl, targetMode, true);
-  if (!(opts && opts.forceRegen)){
-    if (tlMode.entries.some(function(e){ return e.sourceHash === sourceHash; })){
-      if (!(opts && opts.silent)) { try{ toast('这段内容已经总结过了'); }catch(e){} }
-      return null;
-    }
+  if (tlMode.entries.some(function(e){ return e.sourceHash === sourceHash; })){
+    if (!(opts && opts.silent)) { try{ toast('这段内容已经总结过了'); }catch(e){} }
+    return null;
   }
 
   var db = loadContactsDB();
@@ -28390,16 +29043,8 @@ async function _generateTimelineEntry(npcId, fromIdx, toIdx, mode, opts){
 
   // 消息正文不加时间前缀，日期范围单独作为上下文注入
   var dialogText = selected.map(function(m){
-    var _rawText = m.text;
-    var _safeText;
-    if (typeof _rawText === 'string') {
-      _safeText = _rawText;
-    } else if (_rawText && typeof _rawText === 'object') {
-      _safeText = String(_rawText.text || _rawText.content || _rawText.message || '') || '[图片/附件]';
-    } else {
-      _safeText = String(_rawText || '');
-    }
-    return (m.role === 'me' ? '用户' : npc.name) + ': ' + _safeText.slice(0, 300);
+    var _txt = (m && typeof m.text === 'object') ? JSON.stringify(m.text) : _normalizeMsgTextForHash(m);
+    return (m.role === 'me' ? '用户' : npc.name) + ': ' + _txt.slice(0, 300);
   }).join('\n');
 
   // 计算这批消息的真实日期范围
@@ -28451,18 +29096,18 @@ async function _generateTimelineEntry(npcId, fromIdx, toIdx, mode, opts){
 {
   "storyTime": "日期+时段，如：3月17日 深夜至18日凌晨",
   "facts": ["发生了什么事（只写事实，不写这意味着什么）"],
-  "quotes": ["值得记录的原话（每项必须是纯字符串）"],
+  "quotes": ["值得记录的原话（必须是纯字符串，不要对象）"],
   "events": ["值得标注的具体事件，只写发生了什么，不写关系影响或意义"],
   "props": ["出现或使用的具体物品/地点"],
   "todos": [{"text":"待办内容","done":false}]
 }
 ${todoHint}
-严禁出现"关系取得突破""首次主动""关系进一步"之类的评价性语言，只记录行为本身。`
+quotes 数组必须是纯字符串数组（string），不要返回对象或带 speaker 字段的结构。严禁出现"关系取得突破""首次主动""关系进一步"之类的评价性语言，只记录行为本身。`
     : `你是剧情记录员，只记录客观发生的事，不做任何评价或定论。对话有时间范围标注，请在 storyTime 里写出日期和时段（如"3月15日 晚上至次日中午"）。请输出纯 JSON（不要 markdown 代码块）：
 {
   "storyTime": "日期+时段，如：3月15日 晚上至次日中午",
   "facts": ["发生了什么事（只写事实，不写这意味着什么）"],
-  "quotes": ["值得记录的原话（每项必须是纯字符串）"],
+  "quotes": ["值得记录的原话（必须是纯字符串，不要对象）"],
   "events": ["值得标注的具体事件，只写发生了什么，不写关系影响或意义"],
   "props": ["出现或使用的具体物品/地点"],
   "todos": [{"text":"待办内容","done":false}]
@@ -28490,6 +29135,11 @@ ${todoHint}
     try{
       raw = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
       structured = JSON.parse(raw);
+      if (structured && Array.isArray(structured.quotes)) {
+        structured.quotes = structured.quotes.map(function(q){
+          return (q && typeof q === 'object') ? (q.text || q.quote || JSON.stringify(q)) : String(q || '');
+        }).filter(Boolean);
+      }
     }catch(e){
       structured = { facts:[raw], quotes:[], turning:[], props:[], todos:[] };
     }
@@ -28533,25 +29183,18 @@ ${todoHint}
     var display = [];
     if (structured.storyTime) display.push('⏰ ' + structured.storyTime);
     if (structured.facts && structured.facts.length) display.push('📋 事实：\n' + structured.facts.map(function(f){ return '  · ' + f; }).join('\n'));
-    if (structured.quotes && structured.quotes.length) display.push('💬 原话：\n' + structured.quotes.map(function(q){
-      var _qs = (typeof q === 'string') ? q
-        : (q && typeof q === 'object') ? String(q.text || q.content || q.quote || JSON.stringify(q)).slice(0,200)
-        : String(q||'');
-      return '  「' + _qs + '」';
-    }).join('\n'));
+    if (structured.quotes && structured.quotes.length) display.push('💬 原话：\n' + structured.quotes.map(function(q){ var v = (q && typeof q === 'object') ? (q.text || q.quote || JSON.stringify(q)) : q; return '  「' + String(v||'') + '」'; }).join('\n'));
     if (structured.events && structured.events.length) display.push('⚡ 转折：\n' + structured.events.map(function(t){ return '  · ' + t; }).join('\n'));
     if (structured.props && structured.props.length) display.push('🎒 道具：' + structured.props.join('、'));
     if (structured.todos && structured.todos.length) display.push('📝 待办：\n' + structured.todos.map(function(t){ return '  ' + (t.done ? '✅' : '☐') + ' ' + t.text; }).join('\n'));
 
-    var _lastMsg4ts = selected[selected.length - 1];
-    var _endTs4entry = (_lastMsg4ts && _lastMsg4ts.t) ? Number(_lastMsg4ts.t) : 0;
     var entry = {
       id: 'tl_' + Date.now().toString(36),
       range: [fromIdx, toIdx],
-      endTs: _endTs4entry,
       mode: targetMode,
       sourceHash: sourceHash,
-      tailHashes: _tailHashes(selected), // 保留兼容旧数据
+      tailHashes: _tailHashes(selected), // ★ 末尾消息哈希，用于定位总结进度
+      tailAnchor: { t: (_lastTs||0), role: (selected[selected.length-1] && selected[selected.length-1].role) || '' },
       promptVersion: 2,
       storyTime: structured.storyTime || '',
       structured: structured,
@@ -28632,25 +29275,6 @@ function _openTimelineViewer(npcId){
       return Math.max(5, ce.autoSumEvery || 20);
     }catch(e){ return viewMode === 'offline' ? 30 : 20; }
   }
-  function _isTimeMode(){
-    try{
-      if (_normChatMode(viewMode) !== 'offline') return false;
-      var ce = _loadCharExtra(npcId);
-      return ce.tlTimeMode !== false;
-    }catch(e){ return false; }
-  }
-  function _getGapMinutes(){
-    try{
-      var ce = _loadCharExtra(npcId);
-      return Math.max(10, ce.tlGapMinutes || 60);
-    }catch(e){ return 60; }
-  }
-  function _getPending(){
-    if (_isTimeMode()){
-      return _getTimelinePendingRangeByTime(npcId, viewMode, _getGapMinutes(), _getChunkSize());
-    }
-    return _getTimelinePendingRange(npcId, viewMode, _getChunkSize());
-  }
   function _getPendingInfo(){
     var chunkSize = _getChunkSize();
     var targetMode = _normChatMode(viewMode);
@@ -28666,7 +29290,7 @@ function _openTimelineViewer(npcId){
     var s = entry.structured, display = [];
     if (s.storyTime) display.push('⏰ ' + s.storyTime);
     if (s.facts && s.facts.length) display.push('📋 事实：\n' + s.facts.map(function(f){ return '  · ' + f; }).join('\n'));
-    if (s.quotes && s.quotes.length) display.push('💬 原话：\n' + s.quotes.map(function(q){ return '  「' + q + '」'; }).join('\n'));
+    if (s.quotes && s.quotes.length) display.push('💬 原话：\n' + s.quotes.map(function(q){ var v = (q && typeof q === 'object') ? (q.text || q.quote || JSON.stringify(q)) : q; return '  「' + String(v||'') + '」'; }).join('\n'));
     if (s.events && s.events.length) display.push('📌 事件：\n' + s.events.map(function(t){ return '  · ' + t; }).join('\n'));
     else if (s.turning && s.turning.length) display.push('📌 事件：\n' + s.turning.map(function(t){ return '  · ' + t; }).join('\n'));
     if (s.props && s.props.length) display.push('🎒 道具：' + s.props.join('、'));
@@ -28724,9 +29348,9 @@ function _openTimelineViewer(npcId){
         + '<span style="font-size:10px;color:rgba(20,24,28,.25);">'+(e.storyTime || new Date(e.createdAt).toLocaleString())+'</span>'
         + '</div>'
         + '<div style="font-size:12px;color:rgba(20,24,28,.7);white-space:pre-wrap;line-height:1.6;">'+esc(displayText)+'</div>'
-        + '<div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap;">'
+        + '<div style="margin-top:6px;display:flex;gap:4px;">'
         + '<button data-act="tlEdit" data-tlidx="'+idx+'" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,.06);background:rgba(255,255,255,.9);cursor:pointer;color:rgba(20,24,28,.45);">编辑</button>'
-        + '<button data-act="tlRegen" data-tlidx="'+idx+'" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,.06);background:rgba(255,255,255,.9);cursor:pointer;color:rgba(20,24,28,.55);">&#x1F504; 重新生成</button>'
+        + '<button data-act="tlRegen" data-tlidx="'+idx+'" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,.06);background:rgba(255,255,255,.9);cursor:pointer;color:rgba(20,24,28,.45);">重新生成</button>'
         + (isConfirming
           ? '<button data-act="tlDelConfirm" data-tlidx="'+idx+'" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(20,24,28,.2);background:rgba(20,24,28,.08);color:rgba(20,24,28,.6);cursor:pointer;font-weight:600;">确认删除</button>'
             + '<button data-act="tlDelCancel" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,.06);background:rgba(255,255,255,.9);cursor:pointer;color:rgba(20,24,28,.45);">取消</button>'
@@ -28793,7 +29417,10 @@ function _openTimelineViewer(npcId){
       + '<div style="font-size:11px;color:rgba(20,24,28,.4);margin-bottom:4px;">当前查看：'+ _modeLabel(viewMode) +' · 共 '+entries.length+' 个摘要块</div>'
       + '<div style="font-size:10px;color:rgba(20,24,28,.35);margin:2px 0;">'+statusText+'</div>'
       + '<div style="display:flex;align-items:center;gap:6px;margin:6px 0 4px;">'
-      + '<span style="font-size:10px;color:rgba(20,24,28,.4);">切场景/退出线下自动总结，或点下方手动生成</span>'
+      + '<span style="font-size:10px;color:rgba(20,24,28,.4);">每次总结</span>'
+      + '<input data-el="chunkInput" type="number" min="5" max="99999" value="'+_getChunkSize()+'" style="width:60px;padding:2px 4px;border-radius:4px;border:1px solid rgba(0,0,0,.1);font-size:11px;text-align:center;" />'
+      + '<span style="font-size:10px;color:rgba(20,24,28,.4);">条消息'+(viewMode==='offline'?' (线下建议30)':'')+' </span>'
+      + '<button data-act="chunkSave" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.9);cursor:pointer;">保存</button>'
       + (entries.length > 0 ? '<button data-act="tlClearAll" style="font-size:10px;padding:2px 8px;border-radius:4px;border:1px solid rgba(0,0,0,.06);background:rgba(255,255,255,.9);color:rgba(20,24,28,.4);cursor:pointer;margin-left:auto;">清除全部</button>' : '')
       + '</div>'
       + renderTodos(entries);
@@ -28923,50 +29550,55 @@ function _openTimelineViewer(npcId){
       showEditOverlay(parseInt(t.getAttribute('data-tlidx')));
       return;
     }
-    // ---- 重新生成单条 ----
+    // ---- 重新生成（用于修复旧条目/补漏）----
     if (act === 'tlRegen'){
-      var regenIdx = parseInt(t.getAttribute('data-tlidx'));
+      var idxR = parseInt(t.getAttribute('data-tlidx'));
+      if (isGenerating){ try{ toast('正在生成中…'); }catch(e){} return; }
       var tlR = _loadTimeline(npcId);
-      var bktR = _getTimelineModeState(tlR, viewMode, true);
-      var entR = bktR.entries[regenIdx];
-      if (!entR) return;
+      var bucketR = _getTimelineModeState(tlR, viewMode, true);
+      var entR = bucketR.entries[idxR];
+      if (!entR || !entR.range){ try{ toast('找不到该条目'); }catch(e){} return; }
       var fromR = entR.range[0], toR = entR.range[1];
-      if (isGenerating){ try{toast('请等待当前总结完成');}catch(e){} return; }
-      isGenerating = true; genAborted = false;
-      refresh();
+      // 先移除旧条目，避免 sourceHash 去重挡住
+      bucketR.entries.splice(idxR, 1);
+      _saveTimeline(npcId, tlR);
+      _syncSummaryFromTimeline(npcId, viewMode);
+      isGenerating = true;
+      refresh(true);
       (async function(){
         try{
-          // 清掉旧 sourceHash 让去重不阻止
-          var tlR2 = _loadTimeline(npcId);
-          var bktR2 = _getTimelineModeState(tlR2, viewMode, true);
-          if (bktR2.entries[regenIdx]){
-            bktR2.entries[regenIdx].sourceHash = 'REGEN_' + Date.now();
-            _saveTimeline(npcId, tlR2);
-          }
-          var progEl = modal.querySelector('[data-el="tlProgressText"]');
-          if (progEl) progEl.textContent = '正在重新生成 #'+(fromR+1)+'~'+(toR+1)+'…';
-          var newE = await _tlApiEnqueue(function(){
-            return _generateTimelineEntry(npcId, fromR, toR, viewMode, { forceRegen: true });
-          });
+          var newE = await _generateTimelineEntry(npcId, fromR, toR, viewMode, { silent:true, regen:true });
           if (newE){
-            // 删掉旧的（sourceHash 以 REGEN_ 开头）
-            var tlR3 = _loadTimeline(npcId);
-            var bktR3 = _getTimelineModeState(tlR3, viewMode, true);
-            var oldRi = bktR3.entries.findIndex(function(e){
-              return String(e.sourceHash||'').startsWith('REGEN_') && e.range[0] === fromR;
-            });
-            if (oldRi >= 0) bktR3.entries.splice(oldRi, 1);
-            _saveTimeline(npcId, tlR3);
+            var tl2 = _loadTimeline(npcId);
+            var b2 = _getTimelineModeState(tl2, viewMode, true);
+            // _generateTimelineEntry 默认 push 到末尾，这里挪回原位置
+            var last = b2.entries.pop();
+            if (last) b2.entries.splice(Math.min(idxR, b2.entries.length), 0, last);
+            _saveTimeline(npcId, tl2);
             _syncSummaryFromTimeline(npcId, viewMode);
-            try{toast('重新生成完成 ✓');}catch(e){}
+            try{ toast('已重新生成'); }catch(e){}
           } else {
-            try{toast('重新生成失败，请检查 API 配置');}catch(e){}
+            // 失败：把旧条目放回去（尽量不让用户丢数据）
+            var tl3 = _loadTimeline(npcId);
+            var b3 = _getTimelineModeState(tl3, viewMode, true);
+            b3.entries.splice(Math.min(idxR, b3.entries.length), 0, entR);
+            _saveTimeline(npcId, tl3);
+            _syncSummaryFromTimeline(npcId, viewMode);
+            try{ toast('重新生成失败，已还原旧条目'); }catch(e){}
           }
         }catch(e){
-          try{toast('出错: '+((e&&e.message)||String(e)));}catch(e2){}
+          // 异常：还原旧条目
+          try{
+            var tl4 = _loadTimeline(npcId);
+            var b4 = _getTimelineModeState(tl4, viewMode, true);
+            b4.entries.splice(Math.min(idxR, b4.entries.length), 0, entR);
+            _saveTimeline(npcId, tl4);
+            _syncSummaryFromTimeline(npcId, viewMode);
+          }catch(_e){}
+          try{ toast('重新生成失败'); }catch(_e){}
         }finally{
           isGenerating = false;
-          if (modal && modal.querySelector('[data-el="tlRoot"]')) refresh();
+          refresh(true);
         }
       })();
       return;
@@ -29040,8 +29672,23 @@ function _openTimelineViewer(npcId){
       });
       return;
     }
-    // chunkSave/tlToggleTimeMode 已移除，兼容保留空处理
-    if (act === 'chunkSave' || act === 'tlToggleTimeMode'){ return; }
+    // ---- 分批大小 ----
+    if (act === 'chunkSave'){
+      var inp = modal.querySelector('[data-el="chunkInput"]');
+      if (!inp) return;
+      var _maxChunk = 99999;
+      var v = Math.max(5, Math.min(_maxChunk, parseInt(inp.value) || (viewMode === 'offline' ? 30 : 20)));
+      var ce = _loadCharExtra(npcId);
+      if(viewMode === 'offline'){
+        ce.autoSumEveryOffline = v;
+      } else {
+        ce.autoSumEvery = v;
+      }
+      _saveCharExtra(npcId, ce);
+      try{ toast('已保存：每次 '+v+' 条'); }catch(e){}
+      refresh();
+      return;
+    }
     // ---- 清除全部 ----
     if (act === 'tlClearAll'){
       // 用二次点击：第一次变红，第二次真删
@@ -29083,18 +29730,19 @@ function _openTimelineViewer(npcId){
     if (act === 'tlGenerate'){
       if (isGenerating) return;
       (async function(){
-        var pending = _getPending();
-        console.log('[TL] 生成, pending=', JSON.stringify(pending), 'timeMode=', _isTimeMode());
+        var chunkSize = _getChunkSize();
+        var pending = _getTimelinePendingRange(npcId, viewMode, chunkSize);
+        console.log('[TL] 生成, pending=', JSON.stringify(pending));
         if (!pending){ try{ toast('没有新的未总结消息'); }catch(e){} return; }
         isGenerating = true; genAborted = false;
         refresh();
         var batchNo = 0;
         while(!genAborted){
-          var p = _getPending();
+          var p = _getTimelinePendingRange(npcId, viewMode, chunkSize);
           if (!p) break;
           batchNo++;
           var progEl = modal.querySelector('[data-el="tlProgressText"]');
-          if (progEl) progEl.textContent = '第 '+batchNo+' 批 '+(_isTimeMode()?'(时间)':'(条数)')+'：#'+(p.fromIdx+1)+'~'+(p.toIdx+1);
+          if (progEl) progEl.textContent = '第 '+batchNo+' 批：#'+(p.fromIdx+1)+'~'+(p.toIdx+1);
           try{
             var entry = await _tlApiEnqueue(function(){
               return _generateTimelineEntry(npcId, p.fromIdx, p.toIdx, viewMode);
@@ -29102,7 +29750,7 @@ function _openTimelineViewer(npcId){
             if (!entry) break;
             if (!modal.querySelector('[data-el="tlRoot"]')) break;
             refresh(); isGenerating = true;
-            if (!_getPending()) break;
+            if (!_getTimelinePendingRange(npcId, viewMode, chunkSize)) break;
             await new Promise(function(r){ setTimeout(r, 500); });
           }catch(e){
             try{ toast('出错: '+((e&&e.message)||'')); }catch(e2){}
