@@ -2,12 +2,12 @@
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f7f4f0">
 <title>喵喵小手机</title>
-<style>*{margin:0;padding:0;box-sizing:border-box;}html,body{height:100%;height:100dvh;width:100%;overflow:hidden;background:var(--ph-bg-primary,#f5f2ee);-webkit-text-size-adjust:100%;touch-action:manipulation;}</style>
+<style>*{margin:0;padding:0;box-sizing:border-box;}html{position:fixed;width:100%;height:100%;overflow:hidden;}body{width:100%;height:100%;overflow:hidden;background:var(--ph-bg-primary,#f5f2ee);-webkit-text-size-adjust:100%;touch-action:manipulation;}</style>
 </head>
 <body>
 <script>
@@ -137,10 +137,16 @@
   const style = document.createElement('style');
   style.textContent = `
     /* ── 独立运行：body 黑色背景 ── */
-    html, body {
+    html {
+      position: fixed;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+    }
+    body {
       margin: 0; padding: 0;
-      height: 100%; height: 100dvh;
-      /* 背景和 app 一致，避免未覆盖区域露出黑色 */
+      width: 100%; height: 100%;
+      overflow: hidden;
       background: var(--ph-bg-primary, #f5f2ee);
       font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Helvetica Neue', sans-serif;
     }
@@ -221,9 +227,18 @@
       overflow: hidden !important;
     }
 
-    /* ── wxTabbar 底部安全区（内置 CSS 已有，这里加强） ── */
+    /* ── 学 jrsy：wxTabbar 用 fixed 定位贴底，彻底不依赖父容器高度 ── */
     #meow-phone-root .wxTabbar {
+      position: fixed !important;
+      bottom: 0 !important;
+      left: 0 !important;
+      right: 0 !important;
       padding-bottom: max(6px, env(safe-area-inset-bottom, 0px)) !important;
+      z-index: 9999 !important;
+    }
+    /* wxChatShell 内容区底部要给 wxTabbar 留出空间 */
+    #meow-phone-root .wxChatContent {
+      padding-bottom: 60px !important;
     }
   `;
   document.head.appendChild(style);
