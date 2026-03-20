@@ -10519,43 +10519,153 @@ ${lines}
       // 添加自定义好友弹窗（通讯录右上角 + / 聊天页 ⋯ → 同一弹窗）
       function _openAddFriendDialog(){
         root.querySelectorAll('.wxConfirmOverlay').forEach(o=>o.remove());
+        // ★ 升级版：双模式（手动填写 / AI 生成）
+        _showAddFriendPanel();
+      }
 
-        const overlay = doc.createElement('div');
-        overlay.className = 'wxConfirmOverlay';
-        overlay.innerHTML = `<div class="wxConfirmBox" style="min-width:260px;text-align:left;">
-          <div style="font-weight:700;font-size:15px;color:rgba(20,24,28,.88);margin-bottom:14px;text-align:center;">添加好友</div>
+      function _showAddFriendPanel(){
+        function chipGroup(groupId, label, items){
+          var chips = items.map(function(item){
+            var first = item.val === items[0].val;
+            return '<button data-chip="'+groupId+'" data-val="'+esc(item.val)+'"'
+              +' style="padding:5px 11px;border-radius:18px;font-size:11px;cursor:pointer;font-family:inherit;'
+              +'border:1px solid '+(first?'var(--ph-accent,#07c160)':'rgba(0,0,0,.1)')+';'
+              +'background:'+(first?'var(--ph-accent,#07c160)':'rgba(255,255,255,.85)')+';'
+              +'color:'+(first?'#fff':'rgba(20,24,28,.7)')+';'
+              +'-webkit-tap-highlight-color:transparent;">'+esc(item.label)+'</button>';
+          }).join('');
+          return '<div style="margin-bottom:12px;">'
+            +'<div style="font-size:10.5px;color:rgba(20,24,28,.42);margin-bottom:6px;letter-spacing:.3px;">'+label+'</div>'
+            +'<div style="display:flex;flex-wrap:wrap;gap:6px;">'+chips+'</div></div>';
+        }
+        var _ico = '<path d="M19 9l1.25-2.75L23 5l-2.75-1.25L19 1l-1.25 2.75L15 5l2.75 1.25zM9 12l-2-4.5L2.5 9l4.5-2L9 2.5l2 4.5 4.5 2-4.5 2zm10 1l-1.25 2.75L15 17l2.75 1.25L19 21l1.25-2.75L23 17l-2.75-1.25z"/>';
+        var _icoUser = '<path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>';
 
-          <div style="margin-bottom:10px;">
-            <div style="font-size:12px;color:rgba(20,24,28,.55);margin-bottom:4px;">好友名称 *</div>
-            <input data-field="name" placeholder="角色名" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;outline:none;"/>
-          </div>
+        // 共用输入框区（手动模式）
+        var manualHTML =
+          '<div data-pane="manual">'
+          +'<div style="margin-bottom:9px;">'
+          +'<div style="font-size:10.5px;color:rgba(20,24,28,.42);margin-bottom:5px;">\u5c55\u793a\u540d\u79f0\u00a0<span style="color:#e74c3c;">*</span></div>'
+          +'<input data-field="name" placeholder="\u89d2\u8272\u540d" style="width:100%;box-sizing:border-box;padding:8px 11px;border:1px solid rgba(0,0,0,.1);border-radius:10px;font-size:13px;outline:none;background:rgba(255,255,255,.85);font-family:inherit;"/></div>'
+          +'<div style="margin-bottom:9px;">'
+          +'<div style="font-size:10.5px;color:rgba(20,24,28,.42);margin-bottom:5px;">\u4eba\u7269\u8bbe\u5b9a</div>'
+          +'<textarea data-field="profile" placeholder="\u6027\u683c\u3001\u80cc\u666f\u3001\u53e3\u5934\u7985\u2026" rows="3" style="width:100%;box-sizing:border-box;padding:8px 11px;border:1px solid rgba(0,0,0,.1);border-radius:10px;font-size:13px;outline:none;resize:none;background:rgba(255,255,255,.85);font-family:inherit;line-height:1.5;"></textarea></div>'
+          +'<div style="display:flex;gap:8px;margin-top:4px;">'
+          +'<button data-el="manualCancel" style="flex:1;padding:10px;border-radius:11px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.85);font-size:13px;color:rgba(20,24,28,.5);cursor:pointer;font-family:inherit;">\u53d6\u6d88</button>'
+          +'<button data-el="manualConfirm" style="flex:2;padding:10px;border-radius:11px;border:none;background:var(--ph-accent-grad,linear-gradient(135deg,#07c160,#06a050));color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">\u6dfb\u52a0</button>'
+          +'</div></div>';
 
-          <div style="margin-bottom:10px;">
-            <div style="font-size:12px;color:rgba(20,24,28,.55);margin-bottom:4px;">昵称</div>
-            <input data-field="alias" placeholder="可选" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;outline:none;"/>
-          </div>
+        // AI 模式选项区
+        var aiHTML =
+          '<div data-pane="ai" style="display:none;">'
+          + chipGroup('gender','\u6027\u522b',[{val:'\u4e0d\u9650',label:'\u4e0d\u9650'},{val:'\u7537',label:'\u7537'},{val:'\u5973',label:'\u5973'},{val:'\u4e2d\u6027',label:'\u4e2d\u6027'}])
+          + chipGroup('ageRange','\u5e74\u9f84\u6bb5',[{val:'\u4e0d\u9650',label:'\u4e0d\u9650'},{val:'\u9752\u5c11\u5e74(16-19\u5c81)',label:'\u9752\u5c11\u5e74'},{val:'\u9752\u5e74(20-28\u5c81)',label:'\u9752\u5e74'},{val:'\u6210\u719f(29-40\u5c81)',label:'\u6210\u719f'},{val:'\u4e2d\u5e74',label:'\u4e2d\u5e74'}])
+          + chipGroup('relation','\u4e0e\u6211\u7684\u5173\u7cfb',[{val:'\u4e0d\u9650',label:'\u4e0d\u9650'},{val:'\u540c\u5b66',label:'\u540c\u5b66'},{val:'\u540c\u4e8b',label:'\u540c\u4e8b'},{val:'\u90bb\u5c45',label:'\u90bb\u5c45'},{val:'\u65e7\u8bc6',label:'\u65e7\u8bc6'},{val:'\u670b\u53cb\u4ecb\u7ecd',label:'\u670b\u53cb\u4ecb\u7ecd'}])
+          + chipGroup('personality','\u6027\u683c\u5012\u5411',[{val:'\u4e0d\u9650',label:'\u4e0d\u9650'},{val:'\u6d3b\u6cfc\u5916\u5411',label:'\u5916\u5411'},{val:'\u5b89\u9759\u5185\u5411',label:'\u5185\u5411'},{val:'\u795e\u79d8\u96be\u6349\u6478',label:'\u795e\u79d8'},{val:'\u6e29\u67d4\u4f53\u8d34',label:'\u6e29\u67d4'},{val:'\u6bd2\u820c\u5e7d\u9ed8',label:'\u6bd2\u820c'}])
+          + chipGroup('nameStyle','\u540d\u5b57\u98ce\u683c',[{val:'\u4e0d\u9650',label:'\u4e0d\u9650'},{val:'\u73b0\u4ee3\u4e2d\u6587',label:'\u73b0\u4ee3\u4e2d\u6587'},{val:'\u53e4\u98ce\u96c5\u81f4',label:'\u53e4\u98ce'},{val:'\u65e5\u7cfb\u98ce\u683c',label:'\u65e5\u7cfb'},{val:'\u6b27\u7f8e\u98ce\u683c',label:'\u6b27\u7f8e'},{val:'\u6e05\u51b7\u7b80\u6d01',label:'\u6e05\u51b7\u7b80\u6d01'}])
+          +'<div style="margin-bottom:12px;">'
+          +'<div style="font-size:10.5px;color:rgba(20,24,28,.42);margin-bottom:6px;">\u8865\u5145\u8bf4\u660e\uff08\u53ef\u9009\uff09</div>'
+          +'<input data-field="aiNote" placeholder="\u4f8b\u5982\uff1a\u548c\u548d\u548c\u5496\u5561\u5e08\u3001\u7279\u522b\u7231\u732b\u2026" style="width:100%;box-sizing:border-box;padding:8px 11px;border:1px solid rgba(0,0,0,.1);border-radius:10px;font-size:13px;outline:none;background:rgba(255,255,255,.85);font-family:inherit;"/></div>'
+          +'<div style="display:flex;gap:8px;">'
+          +'<button data-el="aiCancel" style="flex:1;padding:10px;border-radius:11px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.85);font-size:13px;color:rgba(20,24,28,.5);cursor:pointer;font-family:inherit;">\u53d6\u6d88</button>'
+          +'<button data-el="aiGenerate" style="flex:2;padding:10px;border-radius:11px;border:none;background:var(--ph-accent-grad,linear-gradient(135deg,#07c160,#06a050));color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;display:flex;align-items:center;justify-content:center;gap:5px;">'
+          +'<svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;">'+_ico+'</svg>AI \u751f\u6210</button>'
+          +'</div></div>';
 
-          <div style="margin-bottom:10px;">
-            <div style="font-size:12px;color:rgba(20,24,28,.55);margin-bottom:4px;">备注</div>
-            <input data-field="remark" placeholder="可选" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;outline:none;"/>
-          </div>
+        var inner =
+          '<div style="font-size:15px;font-weight:700;color:var(--ph-text,rgba(20,24,28,.88));margin-bottom:14px;">\u6dfb\u52a0\u597d\u53cb</div>'
+          // Tab 切换
+          +'<div style="display:flex;gap:0;margin-bottom:14px;background:rgba(0,0,0,.05);border-radius:10px;padding:3px;">'
+          +'<button data-tab="manual" style="flex:1;padding:7px;border-radius:8px;border:none;background:#fff;color:rgba(20,24,28,.8);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;box-shadow:0 1px 4px rgba(0,0,0,.08);">'
+          +'<svg viewBox="0 0 24 24" fill="currentColor" style="width:12px;height:12px;margin-right:4px;vertical-align:-1px;">'+_icoUser+'</svg>\u624b\u52a8\u586b\u5199</button>'
+          +'<button data-tab="ai" style="flex:1;padding:7px;border-radius:8px;border:none;background:transparent;color:rgba(20,24,28,.45);font-size:12px;cursor:pointer;font-family:inherit;">'
+          +'<svg viewBox="0 0 24 24" fill="currentColor" style="width:12px;height:12px;margin-right:4px;vertical-align:-1px;">'+_ico+'</svg>AI \u751f\u6210</button>'
+          +'</div>'
+          + manualHTML + aiHTML;
 
-          <div style="margin-bottom:14px;">
-            <div style="font-size:12px;color:rgba(20,24,28,.55);margin-bottom:4px;">人物设定</div>
-            <textarea data-field="profile" placeholder="角色简介/设定（可选）" rows="3" style="width:100%;box-sizing:border-box;padding:8px 10px;border:1px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;outline:none;resize:vertical;"></textarea>
-          </div>
+        var ov = _cpShowOverlay(inner);
+        if (!ov) return;
+        var modal = ov.querySelector('.wxCPModal');
+        if (modal){
+          modal.style.maxWidth = '320px'; modal.style.width = 'calc(100% - 16px)';
+          modal.style.padding = '18px 16px 16px'; modal.style.borderRadius = '20px';
+          modal.style.maxHeight = '88vh'; modal.style.overflowY = 'auto';
+        }
+        var close = function(){ ov.remove(); };
 
-          <div style="display:flex;gap:8px;">
-            <button data-act="wxAddFriendCancel" style="flex:1;padding:10px;border-radius:8px;border:1px solid rgba(0,0,0,.10);background:#fff;color:rgba(20,24,28,.60);font-size:13px;cursor:pointer;">取消</button>
-            <button data-act="wxAddFriendConfirm" style="flex:1;padding:10px;border-radius:8px;border:0;background:var(--ph-accent, var(--ph-accent, #07c160));color:#fff;font-size:13px;font-weight:600;cursor:pointer;">添加</button>
-          </div>
-        </div>`;
+        // Tab 切换逻辑
+        ov.querySelectorAll('[data-tab]').forEach(function(tb){
+          tb.addEventListener('click', function(){
+            var t = this.getAttribute('data-tab');
+            ov.querySelectorAll('[data-tab]').forEach(function(b){
+              var on = b.getAttribute('data-tab') === t;
+              b.style.background = on ? '#fff' : 'transparent';
+              b.style.color = on ? 'rgba(20,24,28,.8)' : 'rgba(20,24,28,.45)';
+              b.style.fontWeight = on ? '600' : '400';
+              b.style.boxShadow = on ? '0 1px 4px rgba(0,0,0,.08)' : 'none';
+            });
+            ov.querySelectorAll('[data-pane]').forEach(function(p){
+              p.style.display = p.getAttribute('data-pane') === t ? '' : 'none';
+            });
+          });
+        });
 
-        root.appendChild(overlay);
+        // 芯片单选
+        ov.addEventListener('click', function(e){
+          var chip = e.target.closest('[data-chip]'); if (!chip) return;
+          var gid = chip.getAttribute('data-chip');
+          ov.querySelectorAll('[data-chip="'+gid+'"]').forEach(function(c){
+            var on = c === chip;
+            c.style.background = on ? 'var(--ph-accent,#07c160)' : 'rgba(255,255,255,.85)';
+            c.style.color = on ? '#fff' : 'rgba(20,24,28,.7)';
+            c.style.borderColor = on ? 'var(--ph-accent,#07c160)' : 'rgba(0,0,0,.1)';
+          });
+        });
 
-        overlay.addEventListener('click',(e)=>{ if (e.target === overlay) overlay.remove(); });
-        const nameInp = overlay.querySelector('[data-field="name"]');
-        if (nameInp) setTimeout(()=>{ try{nameInp.focus();}catch(e){} }, 120);
+        // 手动添加
+        ov.querySelector('[data-el="manualCancel"]')?.addEventListener('click', close);
+        ov.querySelector('[data-el="manualConfirm"]')?.addEventListener('click', function(){
+          var name = (ov.querySelector('[data-field="name"]')?.value||'').trim();
+          if (!name){ try{toast('\u8bf7\u8f93\u5165\u89d2\u8272\u540d\u79f0');}catch(e){} return; }
+          var profile = (ov.querySelector('[data-field="profile"]')?.value||'').trim();
+          var db = loadContactsDB(); db.list ||= [];
+          var npc = db.list.find(function(x){ return String(x?.name||'').trim() === name; });
+          if (!npc){
+            npc = { id:_wxMakeIdFromName(name), name, alias:[], remark:'', profile:'', avatar:name.charAt(0)||'\u{1F464}', createdAt:_now(), updatedAt:_now(), kind:'friend' };
+            db.list.push(npc);
+          }
+          if (profile) npc.profile = profile;
+          npc.updatedAt = _now();
+          saveContactsDB(db);
+          try{ ensureThread(npc.id, npc.name, npc.avatar); }catch(e){}
+          close();
+          try{toast('\u5df2\u6dfb\u52a0\uff1a'+name);}catch(e){}
+          _wxRefreshChatsUI();
+          // 跳转到 OC 页
+          setTimeout(function(){
+            try{
+              state._innerStack.push(function(){ openApp('chats'); });
+              _renderCharBehaviorPage(npc.id);
+              var tt=root.querySelector('[data-ph="appTitle"]'); if(tt) tt.textContent=name+' \u00b7 OC \u6863\u6848';
+            }catch(e){}
+          }, 200);
+        });
+
+        // AI 生成
+        ov.querySelector('[data-el="aiCancel"]')?.addEventListener('click', close);
+        ov.querySelector('[data-el="aiGenerate"]')?.addEventListener('click', async function(){
+          var opts = {};
+          ['gender','ageRange','relation','personality','nameStyle'].forEach(function(gid){
+            var sel = ov.querySelector('[data-chip="'+gid+'"][style*="#07c160"]') || ov.querySelector('[data-chip="'+gid+'"]');
+            opts[gid] = sel ? sel.getAttribute('data-val') : '\u4e0d\u9650';
+          });
+          var note = (ov.querySelector('[data-field="aiNote"]')?.value||'');
+          close();
+          try{ await _generateAIFriendCandidate(null, opts, note); }catch(e){}
+        });
+
+        // focus 手动输入
+        setTimeout(function(){ try{ ov.querySelector('[data-field="name"]')?.focus(); }catch(e){} }, 120);
       }
 
       function _wxUniq(arr){
@@ -11531,7 +11641,12 @@ function _buildFallbackAIFriendCandidate(){
         if (_aiNpc && _aiNpc.id){
           try{ toast('已生成：' + cand.name + ' · 正在打开 OC 档案…'); }catch(e){}
           setTimeout(function(){
-            try{ _renderCharBehaviorPage(_aiNpc.id); }catch(e){}
+            try{
+              // ★ 压栈确保返回键能回到上一页
+              state._innerStack = state._innerStack || [];
+              state._innerStack.push(function(){ _renderNewFriendsPage(root.querySelector('[data-ph="appBody"]')); });
+              _renderCharBehaviorPage(_aiNpc.id);
+            }catch(e){}
             try{
               var _tt = root.querySelector('[data-ph="appTitle"]');
               if(_tt) _tt.textContent = cand.name + ' · OC 档案';
@@ -11635,21 +11750,9 @@ function _buildFallbackAIFriendCandidate(){
 
         // C1: AI 生成一个与 user 相关的新好友
         parentContainer.querySelectorAll('[data-act="c1AIFriend"]').forEach(btn=>{
-          btn.addEventListener('click', async ()=>{
+          btn.addEventListener('click', ()=>{
             if (btn.dataset.busy === '1') return;
-            const oldHtml = btn.innerHTML;
-            btn.dataset.busy = '1';
-            btn.style.pointerEvents = 'none';
-            btn.innerHTML = '<div class="wxCHIco">' + _phFlatIcon('✨') + '</div><div class="wxCHName" style="flex:1;">生成中…</div><div class="wxDArrow" style="color:var(--ph-text-dim)">···</div>';
-            try{
-              await _generateAIFriendCandidate(parentContainer);
-            }finally{
-              if (btn.isConnected){
-                btn.dataset.busy = '0';
-                btn.style.pointerEvents = '';
-                btn.innerHTML = oldHtml;
-              }
-            }
+            _showAIFriendOptionsPanel(parentContainer, btn);
           });
         });
 
