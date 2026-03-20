@@ -7808,6 +7808,15 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
           }
           if (act === 'wxCSSaveProfile'){
             const nid = t.getAttribute('data-npcid') || state.chatTarget;
+            // ★ 保存 OC 外形字段
+            const _body4oc = root.querySelector('[data-ph="appBody"]');
+            if (_body4oc){
+              const ceOC3 = _loadCharExtra(nid);
+              _body4oc.querySelectorAll('[data-oc]').forEach(function(el){
+                const k = el.getAttribute('data-oc'); if(k) ceOC3[k] = String(el.value||'').trim();
+              });
+              _saveCharExtra(nid, ceOC3);
+            }
             const nameInp = root.querySelector('[data-el="csName"]');
             const profInp = root.querySelector('[data-el="csProfile"]');
             if (nameInp && profInp){
@@ -12924,6 +12933,43 @@ function _buildFallbackAIFriendCandidate(){
           <button data-act="personaAdd" style="width:100%;padding:10px;border-radius:12px;border:1px solid rgba(0,0,0,.1);background:#fff;color:rgba(20,24,28,.7);font-size:13px;cursor:pointer;">+ 新建人设</button>
         </div>`;
 
+        // ★ 当前人设 OC 档案
+        const _curP = list.find(function(p){ return p.id === active.id; });
+        if (_curP) {
+          const _hasOC = _curP.ocAge||_curP.ocHeight||_curP.ocFigure||_curP.ocHairColor||_curP.ocEyeColor||_curP.ocFeature;
+          if (_hasOC || _curP.personality || _curP.bio) {
+            html += '<div style="margin:0 14px 6px;font-size:11px;color:rgba(20,24,28,.4);letter-spacing:.3px;">人设档案</div>';
+            if (_hasOC) {
+              const _oF=[['年龄',_curP.ocAge],['身高',_curP.ocHeight],['发色',_curP.ocHairColor],['瞳色',_curP.ocEyeColor]].filter(function(x){return x[1];});
+              html += '<div style="margin:0 14px 10px;background:var(--ph-glass-strong);border:1px solid var(--ph-glass-border);border-radius:12px;padding:12px 14px;">';
+              html += _oF.map(function(f){return '<span style="display:inline-block;font-size:12px;color:rgba(20,24,28,.6);background:rgba(0,0,0,.04);border-radius:8px;padding:3px 8px;margin:2px;">'+esc(f[0])+'：'+esc(f[1])+'</span>';}).join('');
+              if (_curP.ocFeature) html += '<div style="font-size:12px;color:rgba(20,24,28,.55);margin-top:8px;line-height:1.5;">'+esc(_curP.ocFeature)+'</div>';
+              html += '</div>';
+            }
+            if (_curP.personality) {
+              const _pp=_curP.personality;
+              const _dims=[{l:'社交主动',v:_pp.socialDrive||50},{l:'情绪外显',v:_pp.emotionDisplay||50},{l:'自律程度',v:_pp.discipline||50},{l:'依赖倾向',v:_pp.dependency||50},{l:'情绪弹性',v:_pp.resilience||50}];
+              const cx=110,cy=105,r=68,n5=5,PI2=Math.PI*2;
+              function _ppt(i,ratio){const a=i/n5*PI2-Math.PI/2;return[cx+r*ratio*Math.cos(a),cy+r*ratio*Math.sin(a)];}
+              let _pgrid='';[0.33,0.66,1].forEach(function(ratio){const pts=[];for(let i=0;i<n5;i++)pts.push(_ppt(i,ratio).join(','));_pgrid+='<polygon points="'+pts.join(' ')+'" fill="none" stroke="rgba(0,0,0,.07)" stroke-width="1"/>';});
+              let _paxis='';for(let i=0;i<n5;i++){const p2=_ppt(i,1);_paxis+='<line x1="'+cx+'" y1="'+cy+'" x2="'+p2[0]+'" y2="'+p2[1]+'" stroke="rgba(0,0,0,.08)" stroke-width="1"/>';}
+              const _pdpts=[];for(let i=0;i<n5;i++)_pdpts.push(_ppt(i,_dims[i].v/100).join(','));
+              let _pdots='';for(let i=0;i<n5;i++){const dp=_ppt(i,_dims[i].v/100);_pdots+='<circle cx="'+dp[0]+'" cy="'+dp[1]+'" r="3" fill="var(--ph-accent,#07c160)"/>';}
+              let _plbls='';for(let i=0;i<n5;i++){const lp=_ppt(i,1.26);const anc=lp[0]<cx-4?'end':lp[0]>cx+4?'start':'middle';_plbls+='<text x="'+lp[0]+'" y="'+lp[1]+'" text-anchor="'+anc+'" dominant-baseline="middle" font-size="10" fill="rgba(20,24,28,.55)">'+_dims[i].l+'</text>';}
+              const _ppoly='<polygon points="'+_pdpts.join(' ')+'" fill="var(--ph-accent,#07c160)" fill-opacity=".14" stroke="var(--ph-accent,#07c160)" stroke-width="1.5"/>';
+              html += '<div style="margin:0 14px 10px;">'
+                +'<div style="font-size:11px;color:rgba(20,24,28,.4);margin-bottom:6px;">性格分析</div>'
+                +'<div style="background:var(--ph-glass-strong);border:1px solid var(--ph-glass-border);border-radius:12px;display:flex;justify-content:center;">'
+                +'<svg width="220" height="210" viewBox="0 0 220 210">'+_pgrid+_paxis+_ppoly+_pdots+_plbls+'</svg></div></div>';
+            }
+            if (_curP.bio) {
+              html += '<div style="margin:0 14px 10px;">'
+                +'<div style="font-size:11px;color:rgba(20,24,28,.4);margin-bottom:6px;">生平简介</div>'
+                +'<div style="background:var(--ph-glass-strong);border:1px solid var(--ph-glass-border);border-radius:12px;padding:12px 14px;font-size:12px;color:rgba(20,24,28,.7);line-height:1.65;white-space:pre-wrap;">'+esc(_curP.bio)+'</div></div>';
+            }
+          }
+        }
+
         // 人设列表
         if (!list.length){
           html += `<div style="padding:30px 14px;text-align:center;font-size:12px;color:rgba(20,24,28,.35);">暂无人设，点击上方新建</div>`;
@@ -13069,6 +13115,14 @@ function _buildFallbackAIFriendCandidate(){
           +'<div style="font-size:10.5px;color:rgba(20,24,28,.4);margin-bottom:5px;">人设内容 <span style="color:#e74c3c;font-size:10px;">*</span></div>'
           +'<textarea data-pf="pText" rows="6" placeholder="描述你的人设…"'
           +' style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid rgba(0,0,0,.1);border-radius:12px;font-size:13px;outline:none;resize:none;background:rgba(255,255,255,.9);font-family:inherit;line-height:1.55;">'+esc(existing?.text||'')+'</textarea></div>'
+          +'<div style="margin-bottom:10px;">'
+          +'<div style="font-size:10.5px;color:rgba(20,24,28,.4);margin-bottom:5px;">外形（可选）</div>'
+          +'<div style="display:flex;flex-wrap:wrap;gap:6px;">'
+          +[['年龄','ocAge'],['身高','ocHeight'],['发色','ocHairColor'],['瞳色','ocEyeColor']].map(function(x){return '<input data-pf="'+x[1]+'" placeholder="'+x[0]+'" value="'+esc((existing&&existing[x[1]])||'')+'" style="flex:1;min-width:80px;padding:7px 10px;border:1px solid rgba(0,0,0,.1);border-radius:10px;font-size:12px;outline:none;background:rgba(255,255,255,.9);font-family:inherit;"/>';}).join('')
+          +'</div></div>'
+          +'<div style="margin-bottom:14px;">'
+          +'<div style="font-size:10.5px;color:rgba(20,24,28,.4);margin-bottom:5px;">生平简介（可选）</div>'
+          +'<textarea data-pf="pBio" rows="2" placeholder="背景、经历…" style="width:100%;box-sizing:border-box;padding:9px 12px;border:1px solid rgba(0,0,0,.1);border-radius:12px;font-size:13px;outline:none;resize:none;background:rgba(255,255,255,.9);font-family:inherit;line-height:1.55;">'+esc((existing&&existing.bio)||'')+'</textarea></div>'
           +'<div style="display:flex;gap:8px;">'
           +'<button data-el="pCancel" style="flex:1;padding:11px;border-radius:12px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.9);font-size:13px;color:rgba(20,24,28,.5);cursor:pointer;font-family:inherit;">取消</button>'
           +'<button data-el="pSave" style="flex:2;padding:11px;border-radius:12px;border:none;background:linear-gradient(135deg,var(--ph-accent,#07c160),#06a050);color:#fff;font-size:13px;font-weight:700;cursor:pointer;font-family:inherit;">保存</button>'
@@ -13134,11 +13188,17 @@ function _buildFallbackAIFriendCandidate(){
           const name = (ov.querySelector('[data-pf="pName"]')?.value||'').trim();
           const text = (ov.querySelector('[data-pf="pText"]')?.value||'').trim();
           if (!name || !text){ try{toast('名称和内容不能为空');}catch(e){} return; }
+          const _pocAge = (ov.querySelector('[data-pf="ocAge"]')?.value||'').trim();
+          const _pocH   = (ov.querySelector('[data-pf="ocHeight"]')?.value||'').trim();
+          const _pocHr  = (ov.querySelector('[data-pf="ocHairColor"]')?.value||'').trim();
+          const _pocEy  = (ov.querySelector('[data-pf="ocEyeColor"]')?.value||'').trim();
+          const _pbio   = (ov.querySelector('[data-pf="pBio"]')?.value||'').trim();
+          const _ocExtra = {ocAge:_pocAge,ocHeight:_pocH,ocHairColor:_pocHr,ocEyeColor:_pocEy,bio:_pbio};
           if (isEdit){
-            data.list[editIdx] = { ...existing, name, text, editTime: Date.now() };
+            data.list[editIdx] = { ...existing, ..._ocExtra, name, text, editTime: Date.now() };
           } else {
             const id = 'p_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2,6);
-            data.list.push({ id, name, text, time: Date.now() });
+            data.list.push({ id, ..._ocExtra, name, text, time: Date.now() });
           }
           _savePersonas(data);
           ov._close();
@@ -17435,39 +17495,9 @@ const npc = _wxGetChatTargetMeta(npcId);
           }
         }
 
-        var _ce4OC = _loadCharExtra(contactId);
-        function _ocRow(lbl, key, ph, val, svgPath){
-          return '<div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid rgba(0,0,0,.05);">'
-            +'<svg viewBox="0 0 24 24" fill="currentColor" style="width:15px;height:15px;flex-shrink:0;color:var(--ph-text-sub,rgba(20,24,28,.4));">'+svgPath+'</svg>'
-            +'<span style="font-size:12px;color:rgba(20,24,28,.5);min-width:36px;">'+lbl+'</span>'
-            +'<input data-oc="'+key+'" value="'+esc(val||'')+'" placeholder="'+ph+'"'
-            +' style="flex:1;border:none;outline:none;background:transparent;font-size:13px;color:var(--ph-text,rgba(20,24,28,.85));text-align:right;"/>'
-            +'</div>';
-        }
-        var _svgPerson='<path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>';
-        var _svgHeight='<path d="M12 2L4 9l1.4 1.4L11 4.8V21h2V4.8l5.6 5.6L20 9z"/>';
-        var _svgFigure='<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>';
-        var _svgHair='<path d="M12 2a9 9 0 0 0-9 9c0 4.17 2.84 7.67 6.69 8.69L12 21l2.31-1.31C18.16 18.67 21 15.17 21 11a9 9 0 0 0-9-9zm0 2c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z"/>';
-        var _svgEye='<path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>';
-        var _svgNote='<path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 7V3.5L18.5 9H13zm-2 8H7v-2h4v2zm4-4H7v-2h8v2zm0-4H7V7h8v2z"/>';
+        
 
         var html = `<div style="padding-bottom:20px;">
-
-          <!-- OC 外形档案 -->
-          <div style="margin:12px 14px 0;font-size:11px;color:rgba(20,24,28,.4);letter-spacing:.3px;padding:0 0 4px;">外形档案</div>
-          <div style="background:var(--ph-glass,rgba(255,255,255,.75));border-radius:14px;border:1px solid var(--ph-glass-border,rgba(0,0,0,.07));overflow:hidden;margin:0 14px;backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);">
-            ${_ocRow('年龄','ocAge','未知',_ce4OC.ocAge,_svgPerson)}
-            ${_ocRow('身高','ocHeight','未知',_ce4OC.ocHeight,_svgHeight)}
-            ${_ocRow('身材','ocFigure','未知',_ce4OC.ocFigure,_svgFigure)}
-            ${_ocRow('发色','ocHairColor','未知',_ce4OC.ocHairColor,_svgHair)}
-            ${_ocRow('瞳色','ocEyeColor','未知',_ce4OC.ocEyeColor,_svgEye)}
-            <div style="display:flex;align-items:flex-start;gap:10px;padding:10px 14px;">
-              <svg viewBox="0 0 24 24" fill="currentColor" style="width:15px;height:15px;flex-shrink:0;margin-top:3px;color:var(--ph-text-sub,rgba(20,24,28,.4));">${_svgNote}</svg>
-              <span style="font-size:12px;color:rgba(20,24,28,.5);min-width:36px;padding-top:2px;">特征</span>
-              <textarea data-oc="ocFeature" placeholder="外形特征、气质描述…" rows="2"
-                style="flex:1;border:none;outline:none;background:transparent;font-size:13px;color:var(--ph-text,rgba(20,24,28,.85));resize:none;line-height:1.5;">${esc(_ce4OC.ocFeature||'')}</textarea>
-            </div>
-          </div>
 
           <!-- 行为参数 -->
           <div style="margin:12px 14px 0;font-size:11px;color:rgba(20,24,28,.4);letter-spacing:.3px;padding:0 0 4px;">行为参数</div>
@@ -17916,17 +17946,59 @@ const npc = _wxGetChatTargetMeta(npcId);
         try{ const t = root.querySelector('[data-ph="appTitle"]'); if(t) t.textContent='角色设定'; }catch(e){}
         try{ const sp = root.querySelector('.phAppBarSpacer'); if(sp) sp.innerHTML=''; }catch(e){}
 
+        const _rs = 'display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid rgba(0,0,0,.05);';
+        const _ss = 'width:15px;height:15px;flex-shrink:0;color:var(--ph-text-sub,rgba(20,24,28,.4));';
+        function _ocR(lbl, key, svgPath){
+          return '<div style="'+_rs+'"><svg viewBox="0 0 24 24" fill="currentColor" style="'+_ss+'">'+svgPath+'</svg>'
+            +'<span style="font-size:12px;color:rgba(20,24,28,.5);min-width:36px;">'+lbl+'</span>'
+            +'<input data-oc="'+key+'" value="'+esc(charEx[key]||'')+'" placeholder="未知"'
+            +' style="flex:1;border:none;outline:none;background:transparent;font-size:13px;color:var(--ph-text);text-align:right;"/></div>';
+        }
+        const _svgSet = {
+          p: '<path d="M12 12c2.7 0 4.8-2.1 4.8-4.8S14.7 2.4 12 2.4 7.2 4.5 7.2 7.2 9.3 12 12 12zm0 2.4c-3.2 0-9.6 1.6-9.6 4.8v2.4h19.2v-2.4c0-3.2-6.4-4.8-9.6-4.8z"/>',
+          h: '<path d="M12 2L4 9l1.4 1.4L11 4.8V21h2V4.8l5.6 5.6L20 9z"/>',
+          f: '<path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/>',
+          hr: '<path d="M12 2a9 9 0 0 0-9 9c0 4.17 2.84 7.67 6.69 8.69L12 21l2.31-1.31C18.16 18.67 21 15.17 21 11a9 9 0 0 0-9-9zm0 2c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3z"/>',
+          e: '<path d="M12 4.5C7 4.5 2.73 7.61 1 12c1.73 4.39 6 7.5 11 7.5s9.27-3.11 11-7.5c-1.73-4.39-6-7.5-11-7.5zM12 17c-2.76 0-5-2.24-5-5s2.24-5 5-5 5 2.24 5 5-2.24 5-5 5zm0-8c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3z"/>',
+          n: '<path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm-1 7V3.5L18.5 9H13zm-2 8H7v-2h4v2zm4-4H7v-2h8v2zm0-4H7V7h8v2z"/>',
+        };
+
         let html = `<div style="padding:14px;">
           <div style="margin-top:10px;">
             <label style="font-size:12px;color:rgba(20,24,28,.5);margin-bottom:6px;display:block;">角色名</label>
             <input data-el="csName" value="${esc(npc.name)}" style="width:100%;padding:10px 12px;border:1px solid rgba(0,0,0,.1);border-radius:10px;font-size:14px;outline:none;box-sizing:border-box;" />
           </div>
+
+          <div style="margin-top:14px;">
+            <div style="font-size:11px;color:rgba(20,24,28,.4);letter-spacing:.3px;margin-bottom:6px;">外形档案</div>
+            <div style="background:var(--ph-glass,rgba(255,255,255,.75));border-radius:14px;border:1px solid var(--ph-glass-border,rgba(0,0,0,.07));overflow:hidden;">
+              ${_ocR('年龄','ocAge',_svgSet.p)}
+              ${_ocR('身高','ocHeight',_svgSet.h)}
+              ${_ocR('身材','ocFigure',_svgSet.f)}
+              ${_ocR('发色','ocHairColor',_svgSet.hr)}
+              ${_ocR('瞳色','ocEyeColor',_svgSet.e)}
+              <div style="${_rs}border-bottom:none;">
+                <svg viewBox="0 0 24 24" fill="currentColor" style="${_ss}">${_svgSet.n}</svg>
+                <span style="font-size:12px;color:rgba(20,24,28,.5);min-width:36px;">特征</span>
+                <textarea data-oc="ocFeature" placeholder="外形特征、气质描述…" rows="2"
+                  style="flex:1;border:none;outline:none;background:transparent;font-size:13px;color:var(--ph-text);resize:none;line-height:1.5;">${esc(charEx.ocFeature||'')}</textarea>
+              </div>
+            </div>
+          </div>
+
           <div style="margin-top:14px;">
             <label style="font-size:12px;color:rgba(20,24,28,.5);margin-bottom:6px;display:block;">角色简介 / 设定</label>
-            <textarea data-el="csProfile" rows="6" style="width:100%;padding:10px 12px;border:1px solid rgba(0,0,0,.1);border-radius:10px;font-size:13px;outline:none;resize:vertical;font-family:inherit;line-height:1.5;box-sizing:border-box;">${esc(mergedProfile)}</textarea>
+            <textarea data-el="csProfile" rows="5" style="width:100%;padding:10px 12px;border:1px solid rgba(0,0,0,.1);border-radius:10px;font-size:13px;outline:none;resize:vertical;font-family:inherit;line-height:1.5;box-sizing:border-box;">${esc(mergedProfile)}</textarea>
           </div>
+
+          <div style="margin-top:12px;">
+            <label style="font-size:12px;color:rgba(20,24,28,.5);margin-bottom:6px;display:block;">生平简介</label>
+            <textarea data-oc="bio" placeholder="角色背景、经历…" rows="3"
+              style="width:100%;padding:10px 12px;border:1px solid rgba(0,0,0,.1);border-radius:10px;font-size:13px;outline:none;resize:none;font-family:inherit;line-height:1.5;box-sizing:border-box;">${esc(charEx.bio||'')}</textarea>
+          </div>
+
           <div style="margin-top:14px;display:flex;gap:8px;">
-            <button data-act="wxCSSaveProfile" data-npcid="${esc(contactId)}" style="flex:1;padding:12px;border-radius:12px;border:0;background:var(--ph-accent, #07c160);color:#fff;font-size:14px;font-weight:600;cursor:pointer;">保存</button>
+            <button data-act="wxCSSaveProfile" data-npcid="${esc(contactId)}" style="flex:1;padding:12px;border-radius:12px;border:0;background:var(--ph-accent,#07c160);color:#fff;font-size:14px;font-weight:600;cursor:pointer;">保存</button>
             <button data-act="wxCSBack" data-npcid="${esc(contactId)}" style="flex:1;padding:12px;border-radius:12px;border:1px solid rgba(0,0,0,.1);background:#fff;color:rgba(20,24,28,.7);font-size:14px;cursor:pointer;">取消</button>
           </div>
         </div>`;
