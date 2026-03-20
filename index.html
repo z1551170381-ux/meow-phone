@@ -12946,7 +12946,7 @@ function _buildFallbackAIFriendCandidate(){
           if (_hasOC || _curP.personality || _curP.bio) {
             html += '<div style="margin:0 14px 6px;font-size:11px;color:rgba(20,24,28,.4);letter-spacing:.3px;">人设档案</div>';
             if (_hasOC) {
-              const _oF=[['年龄',_curP.ocAge],['身高',_curP.ocHeight],['发色',_curP.ocHairColor],['瞳色',_curP.ocEyeColor]].filter(function(x){return x[1];});
+              const _oF=[['性别',_curP.ocGender],['年龄',_curP.ocAge],['职业',_curP.ocOccupation],['住址',_curP.ocAddress],['身高',_curP.ocHeight],['身材',_curP.ocFigure],['发色',_curP.ocHairColor],['瞳色',_curP.ocEyeColor]].filter(function(x){return x[1];});
               html += '<div style="margin:0 14px 10px;background:var(--ph-glass-strong);border:1px solid var(--ph-glass-border);border-radius:12px;padding:12px 14px;">';
               html += _oF.map(function(f){return '<span style="display:inline-block;font-size:12px;color:rgba(20,24,28,.6);background:rgba(0,0,0,.04);border-radius:8px;padding:3px 8px;margin:2px;">'+esc(f[0])+'：'+esc(f[1])+'</span>';}).join('');
               if (_curP.ocFeature) html += '<div style="font-size:12px;color:rgba(20,24,28,.55);margin-top:8px;line-height:1.5;">'+esc(_curP.ocFeature)+'</div>';
