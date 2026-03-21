@@ -205,76 +205,55 @@ function derToJose(signature) {
 
 async function makeVapidJWT(env, audience) {
   const now = Math.floor(Date.now() / 1000);
-  const header = b64u(new TextEncoder().encode(JSON.stringify({ alg: 'ES256', typ: 'JWT' })));
+  const header = b64u(new TextEncoder().encode(JSON.stringify({
+    alg: 'ES256',
+    typ: 'JWT'
+  })));
   const claims = b64u(new TextEncoder().encode(JSON.stringify({
     aud: audience,
-    exp: now + 3600,
+    exp: now + 12 * 60 * 60,
     sub: `mailto:${env.VAPID_EMAIL}`
   })));
   const input = `${header}.${claims}`;
 
-  const rawKeyBytes = b64uDec(env.VAPID_PRIVATE_KEY);
+  const priv = String(env.VAPID_PRIVATE_KEY || '').replace(/-/g, '+').replace(/_/g, '/');
+  const privBytes = Uint8Array.from(atob(priv), c => c.charCodeAt(0));
 
-  const pkcs8Header = new Uint8Array([
-    0x30, 0x41, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07,
-    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
-    0x2a, 0x86, 0x48, 0xce, 0x3d, 0x03, 0x01, 0x07, 0x04,
-    0x27, 0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20
-  ]);
+  if (privBytes.length !== 32) {
+    throw new Error(`Bad VAPID private key length: ${privBytes.length}`);
+  }
 
-  const pkcs8Key = new Uint8Array(pkcs8Header.length + rawKeyBytes.length);
-  pkcs8Key.set(pkcs8Header);
-  pkcs8Key.set(rawKeyBytes, pkcs8Header.length);
+  // 用私钥 d 推导公开坐标 x/y
+  const jwkSeed = {
+    kty: 'EC',
+    crv: 'P-256',
+    d: b64u(privBytes)
+  };
 
-  const key = await crypto.subtle.importKey(
+  const seedKey = await crypto.subtle.importKey(
+    'jwk',
+    jwkSeed,
+    { name: 'ECDSA', namedCurve: 'P-256' },
+    true,
+    ['sign']
+  );
+
+  const pkcs8 = await crypto.subtle.exportKey('pkcs8', seedKey);
+  const signKey = await crypto.subtle.importKey(
     'pkcs8',
-    pkcs8Key,
+    pkcs8,
     { name: 'ECDSA', namedCurve: 'P-256' },
     false,
     ['sign']
   );
 
-  const derSig = await crypto.subtle.sign(
+  const sig = await crypto.subtle.sign(
     { name: 'ECDSA', hash: 'SHA-256' },
-    key,
+    signKey,
     new TextEncoder().encode(input)
   );
 
-  const joseSig = derToJose(new Uint8Array(derSig));
-  return `${input}.${b64u(joseSig)}`;
-}
-
-async function sendWebPush(device, npcName, npcId, text, env) {
-  try {
-    const url = new URL(device.endpoint);
-    const audience = `${url.protocol}//${url.host}`;
-    const jwt = await makeVapidJWT(env, audience);
-
-    const resp = await fetch(device.endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `vapid t=${jwt},k=${env.VAPID_PUBLIC_KEY}`,
-        TTL: '86400',
-        Urgency: 'normal',
-        Topic: `meow-${String(npcId || 'msg').slice(0, 32)}`
-      }
-    });
-
-    if (resp.status === 410 || resp.status === 404) {
-      return { result: 'expired', status: resp.status, text: '' };
-    }
-
-    if (resp.ok || resp.status === 201) {
-      return { result: 'ok', status: resp.status, text: '' };
-    }
-
-    const errText = await resp.text();
-    console.warn('[push] status:', resp.status, errText.slice(0, 200));
-    return { result: 'fail', status: resp.status, text: errText.slice(0, 200) };
-  } catch (err) {
-    console.warn('[push] error:', err.message);
-    return { result: 'fail', status: 0, text: String(err.message || err) };
-  }
+  return `${input}.${b64u(sig)}`;
 }
 
 // ========== 主流程 ==========
