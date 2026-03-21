@@ -26673,11 +26673,10 @@ const npc = _wxGetChatTargetMeta(npcId);
         // Toggle 开关绑定
         container.querySelectorAll('.sToggle').forEach(btn=>{
           btn.addEventListener('click',()=>{
-            // data-act 按钮有自己的处理器，不走通用逻辑
-            if (btn.getAttribute('data-act')) return;
-            btn.classList.toggle('on');
+            // data-act 按钮（通知/后台推送）由委托处理器负责，这里只处理普通 skey 开关
             const key = btn.getAttribute('data-skey');
-            if (key){
+            if (!btn.getAttribute('data-act') && key){
+              btn.classList.toggle('on');
               const cfg2 = phoneLoadSettings();
               cfg2[key] = btn.classList.contains('on');
               phoneSaveSettings(cfg2);
