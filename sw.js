@@ -1,5 +1,5 @@
-// 喵喵小手机 Service Worker v5
-// SW 收到推送后主动拉取消息内容，不依赖 payload
+// 喵喵小手机 Service Worker v6
+// iOS 要求：push handler 必须同步调用 showNotification，不能有任何 fetch 在前面
 
 self.addEventListener('install', function(e) { self.skipWaiting(); });
 self.addEventListener('activate', function(e) { e.waitUntil(self.clients.claim()); });
@@ -21,42 +21,21 @@ self.addEventListener('push', function(e) {
     }
   }
 
-  // 如果 payload 没有内容，主动拉取最新消息
-  var showNotification = function(name, body, id) {
-    return self.registration.showNotification(name, {
-      body:     body,
+
+  // 直接弹通知，不 fetch
+  // proactive.js 已在 payload 里带了 npcName/text/npcId
+  // 即使 payload 为空，也用默认文案立即弹，iOS 才不会丢掉这条通知
+  e.waitUntil(
+    self.registration.showNotification(npcName, {
+      body:     text,
       icon:     '/icon-192.png',
       badge:    '/icon-192.png',
-      tag:      'meow-' + (id || 'msg'),
+      tag:      'meow-' + (npcId || 'msg'),
       renotify: true,
-      data:     { npcId: id },
+      data:     { npcId: npcId },
       vibrate:  [200, 100, 200]
-    });
-  };
-
-  if (text === '有新消息，点击查看') {
-    // payload 没内容，主动拉取
-    e.waitUntil(
-      fetch('/api/pull?uid=standalone_main')
-        .then(function(r) { return r.json(); })
-        .then(function(data) {
-          if (data.ok && data.messages && data.messages.length > 0) {
-            var msg = data.messages[0];
-            return showNotification(
-              msg.npcName || '喵喵小手机',
-              msg.text    || '有新消息',
-              msg.npcId   || ''
-            );
-          }
-          return showNotification(npcName, text, npcId);
-        })
-        .catch(function() {
-          return showNotification(npcName, text, npcId);
-        })
-    );
-  } else {
-    e.waitUntil(showNotification(npcName, text, npcId));
-  }
+    })
+  );
 });
 
 self.addEventListener('notificationclick', function(e) {
