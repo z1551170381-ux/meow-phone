@@ -162,47 +162,6 @@ function b64uDec(s) {
   );
 }
 
-function derToJose(signature) {
-  const sig = signature instanceof Uint8Array ? signature : new Uint8Array(signature);
-
-  if (sig[0] !== 0x30) {
-    throw new Error('Invalid DER signature');
-  }
-
-  let offset = 2;
-  if (sig[1] & 0x80) {
-    offset = 2 + (sig[1] & 0x7f);
-  }
-
-  if (sig[offset] !== 0x02) {
-    throw new Error('Invalid DER signature (missing r)');
-  }
-
-  const rLen = sig[offset + 1];
-  let r = sig.slice(offset + 2, offset + 2 + rLen);
-  offset = offset + 2 + rLen;
-
-  if (sig[offset] !== 0x02) {
-    throw new Error('Invalid DER signature (missing s)');
-  }
-
-  const sLen = sig[offset + 1];
-  let s = sig.slice(offset + 2, offset + 2 + sLen);
-
-  while (r.length > 32 && r[0] === 0) r = r.slice(1);
-  while (s.length > 32 && s[0] === 0) s = s.slice(1);
-
-  const rOut = new Uint8Array(32);
-  const sOut = new Uint8Array(32);
-  rOut.set(r, 32 - r.length);
-  sOut.set(s, 32 - s.length);
-
-  const out = new Uint8Array(64);
-  out.set(rOut, 0);
-  out.set(sOut, 32);
-  return out;
-}
-
 async function makeVapidJWT(env, audience) {
   const now = Math.floor(Date.now() / 1000);
   const header = b64u(new TextEncoder().encode(JSON.stringify({
@@ -216,32 +175,31 @@ async function makeVapidJWT(env, audience) {
   })));
   const input = `${header}.${claims}`;
 
-  const priv = String(env.VAPID_PRIVATE_KEY || '').replace(/-/g, '+').replace(/_/g, '/');
-  const privBytes = Uint8Array.from(atob(priv), c => c.charCodeAt(0));
+  const d = b64uDec(env.VAPID_PRIVATE_KEY);
+  const pub = b64uDec(env.VAPID_PUBLIC_KEY);
 
-  if (privBytes.length !== 32) {
-    throw new Error(`Bad VAPID private key length: ${privBytes.length}`);
+  if (d.length !== 32) {
+    throw new Error(`Bad private key length: ${d.length}`);
+  }
+  if (pub.length !== 65 || pub[0] !== 0x04) {
+    throw new Error(`Bad public key format/length: ${pub.length}`);
   }
 
-  // 用私钥 d 推导公开坐标 x/y
-  const jwkSeed = {
+  const x = pub.slice(1, 33);
+  const y = pub.slice(33, 65);
+
+  const jwk = {
     kty: 'EC',
     crv: 'P-256',
-    d: b64u(privBytes)
+    d: b64u(d),
+    x: b64u(x),
+    y: b64u(y),
+    ext: true
   };
 
-  const seedKey = await crypto.subtle.importKey(
+  const key = await crypto.subtle.importKey(
     'jwk',
-    jwkSeed,
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    true,
-    ['sign']
-  );
-
-  const pkcs8 = await crypto.subtle.exportKey('pkcs8', seedKey);
-  const signKey = await crypto.subtle.importKey(
-    'pkcs8',
-    pkcs8,
+    jwk,
     { name: 'ECDSA', namedCurve: 'P-256' },
     false,
     ['sign']
@@ -249,11 +207,44 @@ async function makeVapidJWT(env, audience) {
 
   const sig = await crypto.subtle.sign(
     { name: 'ECDSA', hash: 'SHA-256' },
-    signKey,
+    key,
     new TextEncoder().encode(input)
   );
 
   return `${input}.${b64u(sig)}`;
+}
+
+async function sendWebPush(device, npcName, npcId, text, env) {
+  try {
+    const url = new URL(device.endpoint);
+    const audience = `${url.protocol}//${url.host}`;
+    const jwt = await makeVapidJWT(env, audience);
+
+    const resp = await fetch(device.endpoint, {
+      method: 'POST',
+      headers: {
+        Authorization: `vapid t=${jwt},k=${env.VAPID_PUBLIC_KEY}`,
+        TTL: '86400',
+        Urgency: 'normal',
+        Topic: `meow-${String(npcId || 'msg').slice(0, 32)}`
+      }
+    });
+
+    if (resp.status === 410 || resp.status === 404) {
+      return { result: 'expired', status: resp.status, text: '' };
+    }
+
+    if (resp.ok || resp.status === 201) {
+      return { result: 'ok', status: resp.status, text: '' };
+    }
+
+    const errText = await resp.text();
+    console.warn('[push] status:', resp.status, errText.slice(0, 200));
+    return { result: 'fail', status: resp.status, text: errText.slice(0, 200) };
+  } catch (err) {
+    console.warn('[push] error:', err.message);
+    return { result: 'fail', status: 0, text: String(err.message || err) };
+  }
 }
 
 // ========== 主流程 ==========
