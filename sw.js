@@ -1,11 +1,26 @@
 // 喵喵小手机 Service Worker v6
-// iOS 要求：push handler 必须同步调用 showNotification，不能有任何 fetch 在前面
+// 优先用 payload；没有 payload 时再主动拉取最新消息
 
-self.addEventListener('install', function(e) { self.skipWaiting(); });
+self.addEventListener('install', function() { self.skipWaiting(); });
 self.addEventListener('activate', function(e) { e.waitUntil(self.clients.claim()); });
 
+function _targetUrl(npcId) {
+  return new URL(npcId ? ('/?npc=' + encodeURIComponent(npcId)) : '/', self.registration.scope).href;
+}
+
+function _showNotification(name, body, id) {
+  return self.registration.showNotification(name || '喵喵小手机', {
+    body:     body || '有新消息，点击查看',
+    icon:     '/icon-192.png',
+    badge:    '/icon-192.png',
+    tag:      'meow-' + (id || 'msg'),
+    renotify: true,
+    data:     { npcId: id || '' },
+    vibrate:  [200, 100, 200]
+  });
+}
+
 self.addEventListener('push', function(e) {
-  // 先尝试从 payload 读内容
   var npcName = '喵喵小手机';
   var text    = '有新消息，点击查看';
   var npcId   = '';
@@ -17,41 +32,63 @@ self.addEventListener('push', function(e) {
       if (payload.text)    text    = payload.text;
       if (payload.npcId)   npcId   = payload.npcId;
     } catch(err) {
-      try { var t = e.data.text(); if (t) { var p = JSON.parse(t); if(p.npcName) npcName=p.npcName; if(p.text) text=p.text; if(p.npcId) npcId=p.npcId; } } catch(e2) {}
+      try {
+        var t = e.data.text();
+        if (t) {
+          var p = JSON.parse(t);
+          if (p.npcName) npcName = p.npcName;
+          if (p.text)    text    = p.text;
+          if (p.npcId)   npcId   = p.npcId;
+        }
+      } catch(e2) {}
     }
   }
 
+  if (npcId && text !== '有新消息，点击查看') {
+    e.waitUntil(_showNotification(npcName, text, npcId));
+    return;
+  }
 
-  // 直接弹通知，不 fetch
-  // proactive.js 已在 payload 里带了 npcName/text/npcId
-  // 即使 payload 为空，也用默认文案立即弹，iOS 才不会丢掉这条通知
   e.waitUntil(
-    self.registration.showNotification(npcName, {
-      body:     text,
-      icon:     '/icon-192.png',
-      badge:    '/icon-192.png',
-      tag:      'meow-' + (npcId || 'msg'),
-      renotify: true,
-      data:     { npcId: npcId },
-      vibrate:  [200, 100, 200]
-    })
+    fetch('/api/pull?uid=standalone_main', { cache: 'no-store', credentials: 'same-origin' })
+      .then(function(r) { return r.ok ? r.json() : null; })
+      .then(function(data) {
+        if (data && data.ok && data.messages && data.messages.length > 0) {
+          var msg = data.messages[data.messages.length - 1] || {};
+          return _showNotification(
+            msg.npcName || npcName,
+            msg.text    || text,
+            msg.npcId   || npcId
+          );
+        }
+        return _showNotification(npcName, text, npcId);
+      })
+      .catch(function() {
+        return _showNotification(npcName, text, npcId);
+      })
   );
 });
 
 self.addEventListener('notificationclick', function(e) {
   e.notification.close();
-  var npcId = e.notification.data && e.notification.data.npcId;
-  var url = npcId ? ('/?npc=' + encodeURIComponent(npcId)) : '/';
+  var npcId = e.notification.data && e.notification.data.npcId || '';
+  var targetUrl = _targetUrl(npcId);
+
   e.waitUntil(
     self.clients.matchAll({ type:'window', includeUncontrolled:true }).then(function(clients) {
-      for (var i = 0; i < clients.length; i++) {
-        if ('focus' in clients[i]) {
-          clients[i].focus();
-          if (clients[i].navigate) clients[i].navigate(url);
-          return;
-        }
+      if (clients && clients.length) {
+        var client = clients[0];
+        return Promise.resolve(client.focus && client.focus())
+          .then(function() {
+            try {
+              client.postMessage({ type: 'meow-open-chat', npcId: npcId });
+            } catch(err) {}
+            if (client.navigate && client.url !== targetUrl) {
+              return client.navigate(targetUrl);
+            }
+          });
       }
-      if (self.clients.openWindow) return self.clients.openWindow(url);
+      if (self.clients.openWindow) return self.clients.openWindow(targetUrl);
     })
   );
 });
