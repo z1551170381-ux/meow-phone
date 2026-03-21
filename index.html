@@ -35329,15 +35329,8 @@ function _meowGetActiveApiConfig() {
 // ========== 收集角色配置 ==========
 function _meowCollectNpcs() {
   try {
-    var uid = 'fallback';
-    var raw = null;
-    var allKeys = Object.keys(localStorage);
-    var contactsKeys = allKeys.filter(function(k){ return k.indexOf('meow_phone_c_') === 0 && k.indexOf('_contacts_v1') !== -1; });
-    for (var ki = 0; ki < contactsKeys.length; ki++) {
-      var candidate = localStorage.getItem(contactsKeys[ki]);
-      try { var parsed = JSON.parse(candidate); if (parsed && parsed.list && parsed.list.length > 0) { raw = candidate; uid = contactsKeys[ki].replace('meow_phone_c_', '').replace('_contacts_v1', ''); break; } } catch(e) {}
-    }
-    if (!raw && contactsKeys.length > 0) { raw = localStorage.getItem(contactsKeys[0]); uid = contactsKeys[0].replace('meow_phone_c_', '').replace('_contacts_v1', ''); }
+    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
+    var raw = localStorage.getItem('meow_phone_c_' + uid + '_contacts_v1');
     if (!raw) return [];
     var db = JSON.parse(raw);
     var list = (db && db.list) || [];
@@ -35458,37 +35451,48 @@ async function _meowRequestBgPush() {
 // ========== 拉取离线消息 ==========
 async function _meowPullOfflineMessages() {
   try {
-    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
-    if (!uid || uid === 'fallback') return;
+    // 自动找 uid：扫 contacts key
+    var uid = 'fallback';
+    var allKeys = Object.keys(localStorage);
+    var cKeys = allKeys.filter(function(k){ return k.indexOf('meow_phone_c_') === 0 && k.indexOf('_contacts_v1') !== -1; });
+    for (var ki = 0; ki < cKeys.length; ki++) {
+      try { var p = JSON.parse(localStorage.getItem(cKeys[ki])); if (p && p.list && p.list.length > 0) { uid = cKeys[ki].replace('meow_phone_c_', '').replace('_contacts_v1', ''); break; } } catch(e) {}
+    }
     var resp = await fetch('/api/pull?uid=' + encodeURIComponent(uid));
     if (!resp.ok) return;
     var data = await resp.json();
     if (!data.ok || !data.messages || !data.messages.length) return;
     console.log('[MeowPush] 拉到离线消息:', data.messages.length, '条');
-    data.messages.forEach(function(msg) { _meowInsertOfflineMessage(msg); });
+    // 找 logs key
+    var logsKey = 'meow_phone_c_' + uid + '_im_logs_v1';
+    var logs = {}; try { logs = JSON.parse(localStorage.getItem(logsKey) || '{}'); } catch(e) {}
+    logs.map = logs.map || {};
+    data.messages.forEach(function(msg) {
+      var npcId = String(msg.npcId || '');
+      var text  = String(msg.text  || '').trim();
+      var ts    = Number(msg.ts    || Date.now());
+      var kind  = String(msg.kind  || 'daily');
+      if (!npcId || !text) return;
+      logs.map[npcId] = logs.map[npcId] || [];
+      logs.map[npcId].push({ role:'them', text:text, t:ts, fromLife:true, mode:'online', branch:'main', insertedAt:Date.now(), proactiveKind:kind });
+      logs.map[npcId].sort(function(a,b){ return a.t - b.t; });
+      console.log('[MeowPush] 插入消息:', npcId, text.slice(0,20));
+    });
+    localStorage.setItem(logsKey, JSON.stringify(logs));
+    // 触发聊天列表刷新
+    try {
+      var event = new CustomEvent('meow_push_inserted');
+      document.dispatchEvent(event);
+    } catch(e) {}
+    // 如果当前在聊天页，尝试刷新
+    try {
+      if (typeof renderChatList === 'function') renderChatList();
+    } catch(e) {}
   } catch(err) { console.warn('[MeowPush] 拉取失败:', err); }
 }
 
 function _meowInsertOfflineMessage(msg) {
-  try {
-    var npcId = String(msg.npcId || '');
-    var text  = String(msg.text  || '').trim();
-    var ts    = Number(msg.ts    || Date.now());
-    var kind  = String(msg.kind  || 'daily');
-    if (!npcId || !text) return;
-    if (typeof _insertOnlineProactiveMessage === 'function') {
-      _insertOnlineProactiveMessage(npcId, text, { kind: kind, ts: ts, branch: 'main' });
-      return;
-    }
-    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
-    var logsKey = 'meow_phone_c_' + uid + '_im_logs_v1';
-    var logs = {}; try { logs = JSON.parse(localStorage.getItem(logsKey) || '{}'); } catch(e) {}
-    logs.map = logs.map || {};
-    logs.map[npcId] = logs.map[npcId] || [];
-    logs.map[npcId].push({ role:'them', text:text, t:ts, fromLife:true, mode:'online', branch:'main', insertedAt:Date.now(), proactiveKind:kind });
-    logs.map[npcId].sort(function(a,b){ return a.t - b.t; });
-    localStorage.setItem(logsKey, JSON.stringify(logs));
-  } catch(err) { console.warn('[MeowPush] 插入消息失败:', err); }
+  // 已合并到 _meowPullOfflineMessages，保留空函数兼容旧调用
 }
 
 // ========== 页面回前台时补拉 ==========
