@@ -85,7 +85,91 @@ function b64u(buf) {
 function b64uDec(s) {
   return Uint8Array.from(atob(s.replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0));
 }
+function derToJose(signature) {
+  const sig = signature instanceof Uint8Array ? signature : new Uint8Array(signature);
 
+  if (sig[0] !== 0x30) {
+    throw new Error('Invalid DER signature');
+  }
+
+  let offset = 2;
+  if (sig[1] & 0x80) {
+    offset = 2 + (sig[1] & 0x7f);
+  }
+
+  if (sig[offset] !== 0x02) {
+    throw new Error('Invalid DER signature (missing r)');
+  }
+
+  const rLen = sig[offset + 1];
+  let r = sig.slice(offset + 2, offset + 2 + rLen);
+  offset = offset + 2 + rLen;
+
+  if (sig[offset] !== 0x02) {
+    throw new Error('Invalid DER signature (missing s)');
+  }
+
+  const sLen = sig[offset + 1];
+  let s = sig.slice(offset + 2, offset + 2 + sLen);
+
+  // 去掉前导 0
+  while (r.length > 32 && r[0] === 0) r = r.slice(1);
+  while (s.length > 32 && s[0] === 0) s = s.slice(1);
+
+  // 左侧补 0 到 32 字节
+  const rOut = new Uint8Array(32);
+  const sOut = new Uint8Array(32);
+  rOut.set(r, 32 - r.length);
+  sOut.set(s, 32 - s.length);
+
+  const out = new Uint8Array(64);
+  out.set(rOut, 0);
+  out.set(sOut, 32);
+  return out;
+}
+
+function derToJose(signature) {
+  const sig = signature instanceof Uint8Array ? signature : new Uint8Array(signature);
+
+  if (sig[0] !== 0x30) {
+    throw new Error('Invalid DER signature');
+  }
+
+  let offset = 2;
+  if (sig[1] & 0x80) {
+    offset = 2 + (sig[1] & 0x7f);
+  }
+
+  if (sig[offset] !== 0x02) {
+    throw new Error('Invalid DER signature (missing r)');
+  }
+
+  const rLen = sig[offset + 1];
+  let r = sig.slice(offset + 2, offset + 2 + rLen);
+  offset = offset + 2 + rLen;
+
+  if (sig[offset] !== 0x02) {
+    throw new Error('Invalid DER signature (missing s)');
+  }
+
+  const sLen = sig[offset + 1];
+  let s = sig.slice(offset + 2, offset + 2 + sLen);
+
+  // 去掉前导 0
+  while (r.length > 32 && r[0] === 0) r = r.slice(1);
+  while (s.length > 32 && s[0] === 0) s = s.slice(1);
+
+  // 左侧补 0 到 32 字节
+  const rOut = new Uint8Array(32);
+  const sOut = new Uint8Array(32);
+  rOut.set(r, 32 - r.length);
+  sOut.set(s, 32 - s.length);
+
+  const out = new Uint8Array(64);
+  out.set(rOut, 0);
+  out.set(sOut, 32);
+  return out;
+}
 async function makeVapidJWT(env, audience) {
   const now = Math.floor(Date.now()/1000);
   const header = b64u(new TextEncoder().encode(JSON.stringify({ alg:'ES256', typ:'JWT' })));
@@ -104,8 +188,14 @@ async function makeVapidJWT(env, audience) {
   pkcs8Key.set(rawKeyBytes, pkcs8Header.length);
 
   const key = await crypto.subtle.importKey('pkcs8', pkcs8Key, { name:'ECDSA', namedCurve:'P-256' }, false, ['sign']);
-  const sig = await crypto.subtle.sign({ name:'ECDSA', hash:'SHA-256' }, key, new TextEncoder().encode(input));
-  return `${input}.${b64u(sig)}`;
+const derSig = await crypto.subtle.sign(
+  { name:'ECDSA', hash:'SHA-256' },
+  key,
+  new TextEncoder().encode(input)
+);
+
+const joseSig = derToJose(new Uint8Array(derSig));
+return `${input}.${b64u(joseSig)}`;
 }
 
 function concat(arrays) {
@@ -301,9 +391,10 @@ for (const dev of (devices || [])) {
   const r = await sendWebPush(dev, npc.npc_name, npc_id, text, env);
 
   pushDebug.push({
-    host,
-    result: r
-  });
+  host,
+  result: r,
+  endpoint: dev.endpoint.slice(0, 60)
+});
 
   if (r === 'expired') {
     await sbDelete(env, 'meow_devices', { endpoint: dev.endpoint });
