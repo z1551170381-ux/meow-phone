@@ -195,7 +195,7 @@ async function sendWebPush(device, npcName, npcId, text, env) {
       method: 'POST',
       headers: {
         'Authorization': `vapid t=${jwt},k=${env.VAPID_PUBLIC_KEY}`,
-        'Content-Type': 'application/json',
+        'Content-Type': 'text/plain;charset=UTF-8',
         'TTL': '86400',
         'Urgency': 'normal'
       },
