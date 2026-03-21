@@ -35321,26 +35321,51 @@ function _meowGetActiveApiConfig() {
 // ========== 收集角色配置 ==========
 function _meowCollectNpcs() {
   try {
-    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
+    // 自动扫描真实存在的联系人 key，不再写死 standalone_main
+    var uid = 'standalone_main';
     var raw = localStorage.getItem('meow_phone_c_' + uid + '_contacts_v1');
+
+    if (!raw) {
+      var keys = Object.keys(localStorage);
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (k.indexOf('meow_phone_c_') === 0 && k.indexOf('_contacts_v1') !== -1) {
+          try {
+            var testRaw = localStorage.getItem(k);
+            var testDb = JSON.parse(testRaw || '{}');
+            if (testDb && testDb.list && testDb.list.length > 0) {
+              raw = testRaw;
+              uid = k.replace('meow_phone_c_', '').replace('_contacts_v1', '');
+              break;
+            }
+          } catch(e) {}
+        }
+      }
+    }
+
     if (!raw) return [];
+
     var db = JSON.parse(raw);
     var list = (db && db.list) || [];
+
     return list.filter(function(c){ return c && c.id; }).map(function(c) {
-      var extraRaw = localStorage.getItem('meow_phone_c_' + uid + '_charextra_' + String(c.id));
-      var extra = {}; try { extra = JSON.parse(extraRaw || '{}'); } catch(e) {}
+      var extraRaw = localStorage.getItem('meow_phone_c_' + uid + '_char_extra_' + String(c.id));
+      var extra = {};
+      try { extra = JSON.parse(extraRaw || '{}'); } catch(e) {}
+
       var stateRaw = localStorage.getItem(uid + '_charstate_' + String(c.id));
-      var state = {}; try { state = JSON.parse(stateRaw || '{}'); } catch(e) {}
+      var state = {};
+      try { state = JSON.parse(stateRaw || '{}'); } catch(e) {}
+
       return {
-        id:               String(c.id),
-        name:             String(c.name || c.id),
-        profile:          String(c.profile || c.description || '').slice(0, 500),
-        enableLifePush:   extra.enableLifePush !== false,
-        bond:             String(state.bond || extra.bond || '普通'),
-        onlineChatPrompt: String(extra.onlineChatPrompt || '').slice(0, 500)
+        id: String(c.id),
+        name: String(c.name || c.id),
+        enableLifePush: extra.enableLifePush !== false
       };
     });
-  } catch(e) { return []; }
+  } catch(e) {
+    return [];
+  }
 }
 
 // ========== 核心：订阅 + 同步配置到后端 ==========
