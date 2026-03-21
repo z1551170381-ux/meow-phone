@@ -8303,15 +8303,28 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
           if (act === 'setTheme'){ applyTheme(t.getAttribute('data-theme')); return; }
           if (act === 'settingsNav'){ openSettingsSubPage(t.getAttribute('data-subpage')); return; }
               if (act === 'togglePushNotify'){
-    var togBtn = t; var isOn = togBtn.classList.contains('on');
-    if (!isOn) { _meowRequestPush().then(function(){ var granted = (typeof Notification!=='undefined')&&Notification.permission==='granted'; if(granted) togBtn.classList.add('on'); else togBtn.classList.remove('on'); }); }
-    else { try{ toast('如需彻底关闭，请在浏览器设置里撤销通知权限'); }catch(e){} }
+    var _pToggle = t;
+    if (!_pToggle.classList.contains('on')) {
+      _meowRequestPush().then(function(){
+        _pToggle.classList.toggle('on', (typeof Notification!=='undefined') && Notification.permission==='granted');
+      });
+    } else {
+      try{ toast('如需关闭，请在浏览器设置里撤销通知权限'); }catch(e){}
+    }
     return;
   }
   if (act === 'toggleBgPush'){
-    var bgTogBtn = t; var bgIsOn = bgTogBtn.classList.contains('on');
-    if (!bgIsOn) { _meowRequestBgPush().then(function(){ var enabled = localStorage.getItem('meow_bg_push_enabled')==='1'; if(enabled) bgTogBtn.classList.add('on'); else bgTogBtn.classList.remove('on'); }); }
-    else { localStorage.removeItem('meow_bg_push_enabled'); bgTogBtn.classList.remove('on'); try{ toast('后台推送已关闭'); }catch(e){} }
+    var _bToggle = t;
+    if (!_bToggle.classList.contains('on')) {
+      _meowRequestBgPush().then(function(){
+        _bToggle.classList.toggle('on', localStorage.getItem('meow_bg_push_enabled')==='1');
+      });
+    } else {
+      localStorage.removeItem('meow_bg_push_enabled');
+      _bToggle.classList.remove('on');
+      try{ toast('后台推送已关闭'); }catch(e){}
+      _meowSyncSubscription && _meowSyncSubscription();
+    }
     return;
   }
           if (act === 'settingsBack'){
@@ -26642,10 +26655,10 @@ const npc = _wxGetChatTargetMeta(npcId);
               <span class="sLabel">${r.label}</span>`;
               if(r.type==='pushtoggle' && r.key==='pushNotify'){
     const notifGranted = (typeof Notification !== 'undefined') && Notification.permission === 'granted';
-    html += `<button class="sToggle${notifGranted?' on':''}" id="meowPushNotifyToggle" data-act="togglePushNotify"></button>`;
+    html += `<button class="sToggle${notifGranted?' on':''}" data-act="togglePushNotify"></button>`;
   } else if(r.type==='pushtoggle' && r.key==='bgPush'){
     const bgOn = localStorage.getItem('meow_bg_push_enabled') === '1';
-    html += `<button class="sToggle${bgOn?' on':''}" id="meowBgPushToggle" data-act="toggleBgPush"></button>`;
+    html += `<button class="sToggle${bgOn?' on':''}" data-act="toggleBgPush"></button>`;
   } else if(r.type==='toggle'){
     html += `<button class="sToggle${r.val?' on':''}" data-skey="${r.key}"></button>`;
   } else if(r.type==='danger'){
