@@ -8312,7 +8312,9 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
   }
   if (act === 'toggleBgPush'){
     var _bToggle = t;
-    if (!_bToggle.classList.contains('on')) {
+    // 读 localStorage 真实状态，不依赖 classList（classList 可能被通用监听器提前翻转）
+    var _bgIsOn = localStorage.getItem('meow_bg_push_enabled') === '1';
+    if (!_bgIsOn) {
       _meowRequestBgPush().then(function(){ _bToggle.classList.toggle('on', localStorage.getItem('meow_bg_push_enabled')==='1'); });
     } else {
       localStorage.removeItem('meow_bg_push_enabled');
@@ -26671,6 +26673,8 @@ const npc = _wxGetChatTargetMeta(npcId);
         // Toggle 开关绑定
         container.querySelectorAll('.sToggle').forEach(btn=>{
           btn.addEventListener('click',()=>{
+            // data-act 按钮有自己的处理器，不走通用逻辑
+            if (btn.getAttribute('data-act')) return;
             btn.classList.toggle('on');
             const key = btn.getAttribute('data-skey');
             if (key){
