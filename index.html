@@ -8303,6 +8303,7 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
           if (act === 'setTheme'){ applyTheme(t.getAttribute('data-theme')); return; }
           if (act === 'settingsNav'){ openSettingsSubPage(t.getAttribute('data-subpage')); return; }
               if (act === 'requestPushPermission'){ _meowRequestPush(); return; }
+              if (act === 'requestBgPush'){ _meowRequestBgPush(); return; }
           if (act === 'settingsBack'){
             // ✅ 优先从内部栈弹出（层级返回），栈空则回主设置页
             if (state._innerStack && state._innerStack.length > 0){
@@ -26601,7 +26602,8 @@ const npc = _wxGetChatTargetMeta(npcId);
             {icon:'🔮',label:'内部图标色',value:cfg.iconInnerTint||'默认',type:'nav',subpage:'iconInner'},
           ]},
           { title:'功能', rows:[
-            {icon:'📢',label:'通知推送',type:'custom',key:'pushNotify'},
+             {icon:'📢',label:'通知推送',type:'custom',key:'pushNotify'},
+                 {icon:'🔒',label:'后台推送（上传API Key）',type:'custom',key:'bgPush'},
             {icon:'💬',label:'聊天同步到主线',type:'toggle',key:'syncToMain',val:!!cfg.syncToMain},
             {icon:'🤖',label:'自动回复',type:'toggle',key:'autoReply',val:cfg.autoReply!==false},
             {icon:'📝',label:'上下文条数',value:(cfg.chatContextN||10)+'条',type:'nav',subpage:'chatContextN'},
@@ -26635,7 +26637,14 @@ const npc = _wxGetChatTargetMeta(npcId);
       ? 'border:0;background:transparent;color:var(--ph-accent,#07c160);font-size:12px;font-weight:600;cursor:default;padding:0;'
       : 'border:0;background:transparent;color:var(--ph-accent,#07c160);font-size:12px;font-weight:600;cursor:pointer;padding:0;';
     html += `<button id="meowPushNotifyBtn" data-act="requestPushPermission" style="${btnStyle}">${btnLabel}</button>`;
-  } else if(r.type==='toggle'){
+   } else if(r.type==='custom' && r.key==='bgPush'){
+    var bgPushEnabled = localStorage.getItem('meow_bg_push_enabled') === '1';
+    var bgBtnLabel = bgPushEnabled ? '已开启 ✓' : '点击开启';
+    var bgBtnStyle = bgPushEnabled
+      ? 'border:0;background:transparent;color:var(--ph-accent,#07c160);font-size:12px;font-weight:600;cursor:default;padding:0;'
+      : 'border:0;background:transparent;color:rgba(20,24,28,.45);font-size:12px;cursor:pointer;padding:0;';
+    html += `<button id="meowBgPushBtn" data-act="requestBgPush" style="${bgBtnStyle}">${bgBtnLabel}</button>`;
+ } else if(r.type==='toggle'){
     html += `<button class="sToggle${r.val?' on':''}" data-skey="${r.key}"></button>`;
   } else if(r.type==='danger'){
 
@@ -35283,12 +35292,11 @@ function _buildMapPromptBlock(npcId){
 })();
 </script>
 <script>
-// ====== 喵喵推送系统 v2（用户自带 API Key 版）======
+// ====== 喵喵推送系统 v3（含后台推送开关）======
 
-// ★ 填入你的 VAPID 公钥（npx web-push generate-vapid-keys 生成的 Public Key）
-var MEOW_PUSH_PUBLIC_KEY = 'BLrK-QDuRnQLDL_dMKHO7n6ngatzB_1s-BmmnspO9O1qPX7Th-lPF1DH1baLqq8I7r7kAkorAo53Rufr95WmDww';
+var MEOW_PUSH_PUBLIC_KEY = '填入你的VAPID公钥';
 
-// ========== Service Worker 注册 ==========
+// ========== SW 注册 ==========
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', function() {
     navigator.serviceWorker.register('/sw.js').then(function(reg) {
@@ -35300,7 +35308,7 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// ========== 收集用户当前激活的 API 配置 ==========
+// ========== 收集用户 API 配置 ==========
 function _meowGetActiveApiConfig() {
   try {
     var raw = localStorage.getItem('meow_phone_api_presets_v1');
@@ -35343,7 +35351,7 @@ function _meowCollectNpcs() {
   } catch(e) { return []; }
 }
 
-// ========== 核心：订阅 + 同步配置到后端 ==========
+// ========== 同步订阅到后端 ==========
 async function _meowSyncSubscription() {
   try {
     if (typeof Notification === 'undefined') return;
@@ -35361,21 +35369,23 @@ async function _meowSyncSubscription() {
 
     var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
     var npcs = _meowCollectNpcs();
-    var apiConfig = _meowGetActiveApiConfig(); // 用户自己的 API 配置
+    var enableBgPush = localStorage.getItem('meow_bg_push_enabled') === '1';
+    // 只有用户主动开启后台推送时才上传 API Key
+    var apiConfig = enableBgPush ? _meowGetActiveApiConfig() : null;
 
-    await fetch('/.netlify/functions/subscribe', {
+    await fetch('/api/subscribe', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uid, subscription, npcs, apiConfig })
+      body: JSON.stringify({ uid, subscription, npcs, apiConfig, enableBackgroundPush: enableBgPush })
     });
 
-    console.log('[MeowPush] 同步成功，角色数:', npcs.length, '有API配置:', !!apiConfig);
+    console.log('[MeowPush] 同步成功，后台推送:', enableBgPush, '角色数:', npcs.length);
   } catch(err) {
     console.warn('[MeowPush] 同步失败:', err);
   }
 }
 
-// ========== 请求通知权限（设置页按钮）==========
+// ========== 请求通知权限 ==========
 async function _meowRequestPush() {
   if (typeof Notification === 'undefined') {
     try{ toast('你的浏览器不支持通知功能'); }catch(e){} return;
@@ -35393,9 +35403,8 @@ async function _meowRequestPush() {
   try {
     var perm = await Notification.requestPermission();
     if (perm !== 'granted') { try{ toast('已取消'); }catch(e){} return; }
-    try{ toast('通知已开启，正在同步...'); }catch(e){}
+    try{ toast('通知已开启 ✓'); }catch(e){}
     await _meowSyncSubscription();
-    try{ toast('同步成功 ✓'); }catch(e){}
     var btn2 = document.getElementById('meowPushNotifyBtn');
     if (btn2) { btn2.textContent = '已开启 ✓'; btn2.style.cursor = 'default'; }
   } catch(err) {
@@ -35403,12 +35412,48 @@ async function _meowRequestPush() {
   }
 }
 
+// ========== 后台推送开关 ==========
+async function _meowRequestBgPush() {
+  var already = localStorage.getItem('meow_bg_push_enabled') === '1';
+  if (already) {
+    try{ toast('后台推送已开启'); }catch(e){} return;
+  }
+
+  // 检查通知权限
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') {
+    try{ toast('请先开启通知推送'); }catch(e){} return;
+  }
+
+  // 检查是否有 API Key
+  var apiCfg = _meowGetActiveApiConfig();
+  if (!apiCfg) {
+    try{ toast('请先在 API 设置里配置好接口'); }catch(e){} return;
+  }
+
+  // 二次确认
+  var confirmed = window.confirm(
+    '开启后台推送需要将你的 API Key 上传到服务器，\n' +
+    '用于在你离线时自动生成消息。\n\n' +
+    '你的 Key 仅用于生成主动消息，不会用于其他用途。\n\n' +
+    '确认开启吗？'
+  );
+
+  if (!confirmed) { try{ toast('已取消'); }catch(e){} return; }
+
+  localStorage.setItem('meow_bg_push_enabled', '1');
+  await _meowSyncSubscription();
+
+  try{ toast('后台推送已开启 ✓'); }catch(e){}
+  var btn = document.getElementById('meowBgPushBtn');
+  if (btn) { btn.textContent = '已开启 ✓'; btn.style.cursor = 'default'; }
+}
+
 // ========== 拉取离线消息 ==========
 async function _meowPullOfflineMessages() {
   try {
     var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
     if (!uid || uid === 'fallback') return;
-    var resp = await fetch('/.netlify/functions/pull?uid=' + encodeURIComponent(uid));
+    var resp = await fetch('/api/pull?uid=' + encodeURIComponent(uid));
     if (!resp.ok) return;
     var data = await resp.json();
     if (!data.ok || !data.messages || !data.messages.length) return;
@@ -35428,7 +35473,6 @@ function _meowInsertOfflineMessage(msg) {
       _insertOnlineProactiveMessage(npcId, text, { kind: kind, ts: ts, branch: 'main' });
       return;
     }
-    // 降级写法
     var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
     var logsKey = 'meow_phone_c_' + uid + '_im_logs_v1';
     var logs = {}; try { logs = JSON.parse(localStorage.getItem(logsKey) || '{}'); } catch(e) {}
@@ -35440,7 +35484,7 @@ function _meowInsertOfflineMessage(msg) {
   } catch(err) { console.warn('[MeowPush] 插入消息失败:', err); }
 }
 
-// ========== 页面回前台时补拉 + 重新同步 ==========
+// ========== 页面回前台时补拉 ==========
 document.addEventListener('visibilitychange', function() {
   if (document.visibilityState === 'visible') {
     setTimeout(_meowPullOfflineMessages, 1500);
