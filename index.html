@@ -7638,6 +7638,8 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
             _saveCharExtra(nid, ce);
             t.classList.toggle('on', ce.enableLifePush); t.classList.toggle('off', !ce.enableLifePush);
             try{ toast(ce.enableLifePush ? '主动消息弹窗已开启' : '主动消息弹窗已关闭'); }catch(e){}
+            // 同步到后端，让后台推送跟着更新
+            try{ setTimeout(function(){ typeof _meowSyncSubscription === 'function' && _meowSyncSubscription(); }, 500); }catch(e){}
             return;
           }
           if (act === 'wxCSSumExpand'){
@@ -35329,29 +35331,13 @@ function _meowGetActiveApiConfig() {
 // ========== 收集角色配置 ==========
 function _meowCollectNpcs() {
   try {
-    // 扫描 localStorage 找 contacts key（不依赖 _phUID）
-    var uid = 'fallback';
-    var raw = null;
-    var keys = Object.keys(localStorage);
-    for (var i = 0; i < keys.length; i++) {
-      var k = keys[i];
-      if (k.indexOf('meow_phone_c_') === 0 && k.indexOf('_contacts_v1') !== -1) {
-        var candidate = localStorage.getItem(k);
-        try {
-          var parsed = JSON.parse(candidate);
-          if (parsed && parsed.list && parsed.list.length > 0) {
-            raw = candidate;
-            uid = k.replace('meow_phone_c_', '').replace('_contacts_v1', '');
-            break;
-          }
-        } catch(e) {}
-      }
-    }
+    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
+    var raw = localStorage.getItem('meow_phone_c_' + uid + '_contacts_v1');
     if (!raw) return [];
     var db = JSON.parse(raw);
     var list = (db && db.list) || [];
     return list.filter(function(c){ return c && c.id; }).map(function(c) {
-      var extraRaw = localStorage.getItem('meow_phone_c_' + uid + '_char_extra_' + String(c.id));
+      var extraRaw = localStorage.getItem('meow_phone_c_' + uid + '_charextra_' + String(c.id));
       var extra = {}; try { extra = JSON.parse(extraRaw || '{}'); } catch(e) {}
       var stateRaw = localStorage.getItem(uid + '_charstate_' + String(c.id));
       var state = {}; try { state = JSON.parse(stateRaw || '{}'); } catch(e) {}
@@ -35383,13 +35369,8 @@ async function _meowSyncSubscription() {
       });
     }
 
-    // uid 从 _meowCollectNpcs 内部自动获取，这里只需要传给后端
+    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
     var npcs = _meowCollectNpcs();
-    var uid = npcs.length > 0 ? (function(){
-      var keys = Object.keys(localStorage);
-      for (var i=0;i<keys.length;i++){var k=keys[i];if(k.indexOf('meow_phone_c_')===0&&k.indexOf('_contacts_v1')!==-1){try{var p=JSON.parse(localStorage.getItem(k));if(p&&p.list&&p.list.length>0)return k.replace('meow_phone_c_','').replace('_contacts_v1','');}catch(e){}}}
-      return 'fallback';
-    })() : 'fallback';
     var enableBgPush = localStorage.getItem('meow_bg_push_enabled') === '1';
     // 只有用户主动开启后台推送时才上传 API Key
     var apiConfig = enableBgPush ? _meowGetActiveApiConfig() : null;
