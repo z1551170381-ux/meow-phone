@@ -35485,7 +35485,9 @@ async function _meowPullOfflineMessages() {
     });
     localStorage.setItem(logsKey, JSON.stringify(logs));
     localStorage.setItem(threadsKey, JSON.stringify(threads));
-    console.log('[MeowPush] 写入完成');
+    console.log('[MeowPush] 写入完成，共', data.messages.length, '条');
+    // 通知 phone UI 刷新（聊天列表未读数 + 当前聊天气泡）
+    window.dispatchEvent(new CustomEvent('meow:messages-pulled', { detail: { count: data.messages.length } }));
   } catch(err) { console.warn('[MeowPush] 拉取失败:', err); }
 }
 
@@ -35503,15 +35505,23 @@ document.addEventListener('visibilitychange', function() {
 (function() {
   try {
     var npcId = new URLSearchParams(window.location.search).get('npc');
-    if (npcId) {
-      window.addEventListener('load', function() {
-        setTimeout(function() {
-          if (typeof openChat === 'function') openChat(npcId);
-          else if (typeof _phOpenChat === 'function') _phOpenChat(npcId);
-          history.replaceState({}, '', '/');
-        }, 1500);
-      });
-    }
+    window.addEventListener('load', function() {
+      if (npcId) {
+        // 通知点击进来：先拉离线消息写入 localStorage，再打开聊天
+        // 这样 openChat 读到的数据已经是最新的
+        setTimeout(async function() {
+          await _meowPullOfflineMessages();
+          setTimeout(function() {
+            if (typeof openChat === 'function') openChat(npcId);
+            else if (typeof _phOpenChat === 'function') _phOpenChat(npcId);
+            history.replaceState({}, '', '/');
+          }, 200);
+        }, 1200);
+      } else {
+        // 普通打开 / 刷新页面：也拉一次，补上后台或 SW 期间积压的消息
+        setTimeout(_meowPullOfflineMessages, 1500);
+      }
+    });
   } catch(e) {}
 })();
 
