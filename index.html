@@ -8,6 +8,8 @@
 <meta name="theme-color" content="#f7f4f0">
 <title>喵喵小手机</title>
 <style>*{margin:0;padding:0;box-sizing:border-box;}html{position:fixed;width:100%;height:100%;overflow:hidden;}body{width:100%;height:100%;overflow:hidden;background:var(--ph-bg-primary,#f5f2ee);-webkit-text-size-adjust:100%;touch-action:manipulation;}</style>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-192.png">
 </head>
 <body>
 <script>
@@ -8300,6 +8302,7 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
           if (act === 'photoDel'){ deletePhoto(t.getAttribute('data-cat'), t.getAttribute('data-idx')); return; }
           if (act === 'setTheme'){ applyTheme(t.getAttribute('data-theme')); return; }
           if (act === 'settingsNav'){ openSettingsSubPage(t.getAttribute('data-subpage')); return; }
+              if (act === 'requestPushPermission'){ _meowRequestPush(); return; }
           if (act === 'settingsBack'){
             // ✅ 优先从内部栈弹出（层级返回），栈空则回主设置页
             if (state._innerStack && state._innerStack.length > 0){
@@ -26598,6 +26601,7 @@ const npc = _wxGetChatTargetMeta(npcId);
             {icon:'🔮',label:'内部图标色',value:cfg.iconInnerTint||'默认',type:'nav',subpage:'iconInner'},
           ]},
           { title:'功能', rows:[
+            {icon:'📢',label:'通知推送',type:'custom',key:'pushNotify'},
             {icon:'💬',label:'聊天同步到主线',type:'toggle',key:'syncToMain',val:!!cfg.syncToMain},
             {icon:'🤖',label:'自动回复',type:'toggle',key:'autoReply',val:cfg.autoReply!==false},
             {icon:'📝',label:'上下文条数',value:(cfg.chatContextN||10)+'条',type:'nav',subpage:'chatContextN'},
@@ -26623,9 +26627,18 @@ const npc = _wxGetChatTargetMeta(npcId);
             html += `<div class="settingRow"${navAttr}${themeAttr} style="${r.type==='nav'?'cursor:pointer;':''}">
               <span class="sIcon">${_phSetIconHTML(r.icon||'')}</span>
               <span class="sLabel">${r.label}</span>`;
-            if(r.type==='toggle'){
-              html += `<button class="sToggle${r.val?' on':''}" data-skey="${r.key}"></button>`;
-            } else if(r.type==='danger'){
+              if(r.type==='custom' && r.key==='pushNotify'){
+    // 通知推送按钮：根据当前权限状态显示不同文字
+    const notifStatus = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported';
+    const btnLabel = notifStatus === 'granted' ? '已开启 ✓' : (notifStatus === 'denied' ? '已拒绝' : '点击开启');
+    const btnStyle = notifStatus === 'granted'
+      ? 'border:0;background:transparent;color:var(--ph-accent,#07c160);font-size:12px;font-weight:600;cursor:default;padding:0;'
+      : 'border:0;background:transparent;color:var(--ph-accent,#07c160);font-size:12px;font-weight:600;cursor:pointer;padding:0;';
+    html += `<button id="meowPushNotifyBtn" data-act="requestPushPermission" style="${btnStyle}">${btnLabel}</button>`;
+  } else if(r.type==='toggle'){
+    html += `<button class="sToggle${r.val?' on':''}" data-skey="${r.key}"></button>`;
+  } else if(r.type==='danger'){
+
               html += `<button data-act="${r.act}" data-appkey="${r.appkey}" style="border:0;background:transparent;color:var(--ph-confirm-danger,#c0392b);font-size:12px;font-weight:600;cursor:pointer;padding:0;">清空</button>`;
             } else {
               html += `<span class="sValue">${r.value||''} ${r.type==='nav'?'›':''}</span>`;
@@ -35267,6 +35280,118 @@ function _buildMapPromptBlock(npcId){
 
 
   console.log('[MEOW Phone] 小手机插件已加载 ✓');
+})();
+</script>
+<script>
+// ====== 喵喵推送系统 ======
+// VAPID 公钥（阶段2生成后填在这里，现在先留空）
+var MEOW_PUSH_PUBLIC_KEY = '';
+
+// 注册 Service Worker
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function() {
+    navigator.serviceWorker.register('/sw.js')
+      .then(function(reg) {
+        console.log('[MeowPush] SW 注册成功:', reg.scope);
+      })
+      .catch(function(err) {
+        console.warn('[MeowPush] SW 注册失败:', err);
+      });
+  });
+}
+
+// 请求通知权限 + 获取推送订阅
+async function _meowRequestPush() {
+  // 检查浏览器支持
+  if (typeof Notification === 'undefined') {
+    try{ toast('你的浏览器不支持通知功能'); }catch(e){}
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    try{ toast('通知权限已被拒绝，请在浏览器设置里手动开启'); }catch(e){}
+    return;
+  }
+  if (Notification.permission === 'granted') {
+    try{ toast('通知已经开启啦～'); }catch(e){}
+    return;
+  }
+
+  try {
+    // 请求权限
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      try{ toast('已取消，随时可以在设置里重新开启'); }catch(e){}
+      return;
+    }
+    try{ toast('通知权限已开启 ✓'); }catch(e){}
+
+    // 获取 SW 注册实例
+    const reg = await navigator.serviceWorker.ready;
+
+    // 如果还没填 VAPID 公钥（阶段1测试阶段），到这里就够了
+    if (!MEOW_PUSH_PUBLIC_KEY) {
+      console.log('[MeowPush] 通知权限已获取，VAPID 公钥待填写后继续订阅');
+      // 刷新设置页按钮状态
+      const btn = document.getElementById('meowPushNotifyBtn');
+      if (btn) { btn.textContent = '已开启 ✓'; btn.style.cursor = 'default'; }
+      return;
+    }
+
+    // 订阅推送（阶段2后才会走到这里）
+    const subscription = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: _meowUrlBase64ToUint8Array(MEOW_PUSH_PUBLIC_KEY)
+    });
+
+    // 把订阅信息发给后端（阶段2后填入正确 URL）
+    await fetch('/api/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(subscription)
+    });
+
+    try{ toast('推送订阅成功 ✓'); }catch(e){}
+    console.log('[MeowPush] 订阅成功:', subscription);
+
+  } catch(err) {
+    console.warn('[MeowPush] 请求推送失败:', err);
+    try{ toast('开启失败，请重试'); }catch(e){}
+  }
+}
+
+// VAPID 公钥格式转换工具函数
+function _meowUrlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - base64String.length % 4) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = window.atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (var i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+// 处理从通知点击进来的 URL 参数 (?npc=xxx → 自动打开对应聊天)
+(function() {
+  try {
+    var params = new URLSearchParams(window.location.search);
+    var npcId = params.get('npc');
+    if (npcId) {
+      // 等页面初始化完成后再跳转
+      window.addEventListener('load', function() {
+        setTimeout(function() {
+          // 尝试调用 index.html 里现有的打开聊天函数
+          if (typeof openChat === 'function') {
+            openChat(npcId);
+          } else if (typeof _phOpenChat === 'function') {
+            _phOpenChat(npcId);
+          }
+          // 清掉 URL 参数，避免刷新后重复打开
+          history.replaceState({}, '', '/');
+        }, 1500);
+      });
+    }
+  } catch(e) {}
 })();
 </script>
 </body>
