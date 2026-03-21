@@ -1,4 +1,4 @@
-// 喵喵小手机 Service Worker v6
+// 喵喵小手机 Service Worker v7
 // 优先用 payload；没有 payload 时再主动拉取最新消息
 
 self.addEventListener('install', function() { self.skipWaiting(); });
