@@ -1,28 +1,36 @@
-// api/pull.js
-// Vercel 版：返回消息但不全局消费，避免多设备互抢
-// 支持：/api/pull?uid=standalone_main&since=时间戳
+// functions/api/pull.js
+// Cloudflare Pages 版：返回消息但不全局消费，避免多设备互抢
+// 支持：/api/pull?uid=standalone_main&since=时间戳&limit=50
 
-export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
-  }
+export async function onRequestGet(context) {
+  const { request, env } = context;
+  const url = new URL(request.url);
 
-  const uid = String(req.query.uid || '').trim();
-  const since = Number(req.query.since || 0);
-  const limitRaw = Number(req.query.limit || 50);
+  const uid = String(url.searchParams.get('uid') || '').trim();
+  const since = Number(url.searchParams.get('since') || 0);
+  const limitRaw = Number(url.searchParams.get('limit') || 50);
   const limit = Math.min(Math.max(limitRaw || 50, 1), 200);
 
   if (!uid) {
-    return res.status(400).json({ ok: false, error: 'Missing uid' });
+    return new Response(JSON.stringify({
+      ok: false,
+      error: 'Missing uid'
+    }), {
+      status: 400,
+      headers: { 'Content-Type': 'application/json' }
+    });
   }
 
-  const base = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_KEY;
+  const base = env.SUPABASE_URL;
+  const key = env.SUPABASE_SERVICE_KEY;
 
   if (!base || !key) {
-    return res.status(500).json({
+    return new Response(JSON.stringify({
       ok: false,
       error: 'Missing SUPABASE_URL or SUPABASE_SERVICE_KEY'
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
     });
   }
 
@@ -32,7 +40,7 @@ export default async function handler(req, res) {
   };
 
   try {
-    // 没传 since 时，只拉最近 48 小时，避免无限灌历史
+    // 没传 since 时，只拉最近 48 小时，避免历史全量反复灌回来
     const fallbackSince = Date.now() - 48 * 60 * 60 * 1000;
     const minTs = since > 0 ? since : fallbackSince;
 
@@ -52,7 +60,7 @@ export default async function handler(req, res) {
 
     const msgs = await resp.json();
 
-    return res.status(200).json({
+    return new Response(JSON.stringify({
       ok: true,
       messages: (msgs || []).map(m => ({
         id: m.id,
@@ -62,12 +70,18 @@ export default async function handler(req, res) {
         kind: m.kind,
         ts: Number(m.ts || 0)
       }))
+    }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' }
     });
   } catch (err) {
     console.error('[pull] error:', err);
-    return res.status(500).json({
+    return new Response(JSON.stringify({
       ok: false,
       error: String(err.message || err)
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
     });
   }
 }
