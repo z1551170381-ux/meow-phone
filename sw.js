@@ -1,5 +1,4 @@
-// 喵喵小手机 Service Worker v2
-// 修复：即使 payload 为空也能弹通知
+// 喵喵小手机 Service Worker v4
 
 self.addEventListener('install', function(e) { self.skipWaiting(); });
 self.addEventListener('activate', function(e) { e.waitUntil(self.clients.claim()); });
@@ -12,11 +11,11 @@ self.addEventListener('push', function(e) {
   if (e.data) {
     try {
       var payload = e.data.json();
-      npcName = payload.npcName || npcName;
-      text    = payload.text    || text;
-      npcId   = payload.npcId   || '';
+      if (payload.npcName) npcName = payload.npcName;
+      if (payload.text)    text    = payload.text;
+      if (payload.npcId)   npcId   = payload.npcId;
     } catch(err) {
-      try { var raw = e.data.text(); if (raw) text = raw; } catch(e2) {}
+      try { text = e.data.text() || text; } catch(e2) {}
     }
   }
 
@@ -38,9 +37,13 @@ self.addEventListener('notificationclick', function(e) {
   var npcId = e.notification.data && e.notification.data.npcId;
   var url = npcId ? ('/?npc=' + encodeURIComponent(npcId)) : '/';
   e.waitUntil(
-    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(function(clients) {
+    self.clients.matchAll({ type:'window', includeUncontrolled:true }).then(function(clients) {
       for (var i = 0; i < clients.length; i++) {
-        if ('focus' in clients[i]) { clients[i].focus(); if (clients[i].navigate) clients[i].navigate(url); return; }
+        if ('focus' in clients[i]) {
+          clients[i].focus();
+          if (clients[i].navigate) clients[i].navigate(url);
+          return;
+        }
       }
       if (self.clients.openWindow) return self.clients.openWindow(url);
     })
