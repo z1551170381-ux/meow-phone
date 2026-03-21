@@ -7638,8 +7638,7 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
             _saveCharExtra(nid, ce);
             t.classList.toggle('on', ce.enableLifePush); t.classList.toggle('off', !ce.enableLifePush);
             try{ toast(ce.enableLifePush ? '主动消息弹窗已开启' : '主动消息弹窗已关闭'); }catch(e){}
-            // 同步到后端，让后台推送跟着更新
-            try{ setTimeout(function(){ typeof _meowSyncSubscription === 'function' && _meowSyncSubscription(); }, 500); }catch(e){}
+            try{ setTimeout(function(){ typeof _meowSyncSubscription==='function' && _meowSyncSubscription(); }, 500); }catch(e){}
             return;
           }
           if (act === 'wxCSSumExpand'){
@@ -8304,8 +8303,25 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
           if (act === 'photoDel'){ deletePhoto(t.getAttribute('data-cat'), t.getAttribute('data-idx')); return; }
           if (act === 'setTheme'){ applyTheme(t.getAttribute('data-theme')); return; }
           if (act === 'settingsNav'){ openSettingsSubPage(t.getAttribute('data-subpage')); return; }
-              if (act === 'requestPushPermission'){ _meowRequestPush(); return; }
-              if (act === 'requestBgPush'){ _meowRequestBgPush(); return; }
+              if (act === 'togglePushNotify'){
+    var _pToggle = t;
+    if (!_pToggle.classList.contains('on')) {
+      _meowRequestPush().then(function(){ _pToggle.classList.toggle('on', (typeof Notification!=='undefined') && Notification.permission==='granted'); });
+    } else { try{ toast('如需关闭，请在浏览器设置里撤销通知权限'); }catch(e){} }
+    return;
+  }
+  if (act === 'toggleBgPush'){
+    var _bToggle = t;
+    if (!_bToggle.classList.contains('on')) {
+      _meowRequestBgPush().then(function(){ _bToggle.classList.toggle('on', localStorage.getItem('meow_bg_push_enabled')==='1'); });
+    } else {
+      localStorage.removeItem('meow_bg_push_enabled');
+      _bToggle.classList.remove('on');
+      try{ toast('后台推送已关闭'); }catch(e){}
+      typeof _meowSyncSubscription === 'function' && _meowSyncSubscription();
+    }
+    return;
+  }
           if (act === 'settingsBack'){
             // ✅ 优先从内部栈弹出（层级返回），栈空则回主设置页
             if (state._innerStack && state._innerStack.length > 0){
@@ -26583,6 +26599,7 @@ const npc = _wxGetChatTargetMeta(npcId);
             case '📷': return svg('<path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/>');
             case '📢': return svg('<path d="M3 11v2c0 .55.45 1 1 1h1l3 6h2l-1.5-6H14l5 3V7l-5 3H4c-.55 0-1 .45-1 1zm14-1.5v5l3-1.8v-1.4L17 9.5z"/>');
             case '📝': return svg('<path d="M20 14.66V20a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h5.34"/><polygon points="18 2 22 6 12 16 8 16 8 12 18 2"/>');
+            case '🔒': return svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4" fill="none" stroke-linecap="round"/>');
             default: return (ico||'');
           }
         }
@@ -26604,8 +26621,8 @@ const npc = _wxGetChatTargetMeta(npcId);
             {icon:'🔮',label:'内部图标色',value:cfg.iconInnerTint||'默认',type:'nav',subpage:'iconInner'},
           ]},
           { title:'功能', rows:[
-             {icon:'📢',label:'通知推送',type:'custom',key:'pushNotify'},
-                 {icon:'🔒',label:'后台推送（上传API Key）',type:'custom',key:'bgPush'},
+            {icon:'📢',label:'通知推送',type:'pushtoggle',key:'pushNotify'},
+            {icon:'🔒',label:'后台推送（上传API Key）',type:'pushtoggle',key:'bgPush'},
             {icon:'💬',label:'聊天同步到主线',type:'toggle',key:'syncToMain',val:!!cfg.syncToMain},
             {icon:'🤖',label:'自动回复',type:'toggle',key:'autoReply',val:cfg.autoReply!==false},
             {icon:'📝',label:'上下文条数',value:(cfg.chatContextN||10)+'条',type:'nav',subpage:'chatContextN'},
@@ -26631,22 +26648,13 @@ const npc = _wxGetChatTargetMeta(npcId);
             html += `<div class="settingRow"${navAttr}${themeAttr} style="${r.type==='nav'?'cursor:pointer;':''}">
               <span class="sIcon">${_phSetIconHTML(r.icon||'')}</span>
               <span class="sLabel">${r.label}</span>`;
-              if(r.type==='custom' && r.key==='pushNotify'){
-    // 通知推送按钮：根据当前权限状态显示不同文字
-    const notifStatus = (typeof Notification !== 'undefined') ? Notification.permission : 'unsupported';
-    const btnLabel = notifStatus === 'granted' ? '已开启 ✓' : (notifStatus === 'denied' ? '已拒绝' : '点击开启');
-    const btnStyle = notifStatus === 'granted'
-      ? 'border:0;background:transparent;color:var(--ph-accent,#07c160);font-size:12px;font-weight:600;cursor:default;padding:0;'
-      : 'border:0;background:transparent;color:var(--ph-accent,#07c160);font-size:12px;font-weight:600;cursor:pointer;padding:0;';
-    html += `<button id="meowPushNotifyBtn" data-act="requestPushPermission" style="${btnStyle}">${btnLabel}</button>`;
-   } else if(r.type==='custom' && r.key==='bgPush'){
-    var bgPushEnabled = localStorage.getItem('meow_bg_push_enabled') === '1';
-    var bgBtnLabel = bgPushEnabled ? '已开启 ✓' : '点击开启';
-    var bgBtnStyle = bgPushEnabled
-      ? 'border:0;background:transparent;color:var(--ph-accent,#07c160);font-size:12px;font-weight:600;cursor:default;padding:0;'
-      : 'border:0;background:transparent;color:rgba(20,24,28,.45);font-size:12px;cursor:pointer;padding:0;';
-    html += `<button id="meowBgPushBtn" data-act="requestBgPush" style="${bgBtnStyle}">${bgBtnLabel}</button>`;
- } else if(r.type==='toggle'){
+              if(r.type==='pushtoggle' && r.key==='pushNotify'){
+    const notifGranted = (typeof Notification !== 'undefined') && Notification.permission === 'granted';
+    html += `<button class="sToggle${notifGranted?' on':''}" data-act="togglePushNotify"></button>`;
+  } else if(r.type==='pushtoggle' && r.key==='bgPush'){
+    const bgOn = localStorage.getItem('meow_bg_push_enabled') === '1';
+    html += `<button class="sToggle${bgOn?' on':''}" data-act="toggleBgPush"></button>`;
+  } else if(r.type==='toggle'){
     html += `<button class="sToggle${r.val?' on':''}" data-skey="${r.key}"></button>`;
   } else if(r.type==='danger'){
 
@@ -35331,13 +35339,20 @@ function _meowGetActiveApiConfig() {
 // ========== 收集角色配置 ==========
 function _meowCollectNpcs() {
   try {
-    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
-    var raw = localStorage.getItem('meow_phone_c_' + uid + '_contacts_v1');
+    // 扫描找 contacts key（不依赖模块内部的 _phUID）
+    var uid = 'fallback'; var raw = null;
+    var keys = Object.keys(localStorage);
+    for (var ki = 0; ki < keys.length; ki++) {
+      var k = keys[ki];
+      if (k.indexOf('meow_phone_c_') === 0 && k.indexOf('_contacts_v1') !== -1) {
+        try { var p = JSON.parse(localStorage.getItem(k)); if (p && p.list && p.list.length > 0) { raw = localStorage.getItem(k); uid = k.replace('meow_phone_c_', '').replace('_contacts_v1', ''); break; } } catch(e) {}
+      }
+    }
     if (!raw) return [];
     var db = JSON.parse(raw);
     var list = (db && db.list) || [];
     return list.filter(function(c){ return c && c.id; }).map(function(c) {
-      var extraRaw = localStorage.getItem('meow_phone_c_' + uid + '_charextra_' + String(c.id));
+      var extraRaw = localStorage.getItem('meow_phone_c_' + uid + '_char_extra_' + String(c.id));
       var extra = {}; try { extra = JSON.parse(extraRaw || '{}'); } catch(e) {}
       var stateRaw = localStorage.getItem(uid + '_charstate_' + String(c.id));
       var state = {}; try { state = JSON.parse(stateRaw || '{}'); } catch(e) {}
@@ -35369,8 +35384,8 @@ async function _meowSyncSubscription() {
       });
     }
 
-    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
     var npcs = _meowCollectNpcs();
+    var uid = (function(){ var keys=Object.keys(localStorage); for(var i=0;i<keys.length;i++){var k=keys[i];if(k.indexOf('meow_phone_c_')===0&&k.indexOf('_contacts_v1')!==-1){try{var p=JSON.parse(localStorage.getItem(k));if(p&&p.list&&p.list.length>0)return k.replace('meow_phone_c_','').replace('_contacts_v1','');}catch(e){}}} return 'fallback'; })();
     var enableBgPush = localStorage.getItem('meow_bg_push_enabled') === '1';
     // 只有用户主动开启后台推送时才上传 API Key
     var apiConfig = enableBgPush ? _meowGetActiveApiConfig() : null;
@@ -35453,38 +35468,37 @@ async function _meowRequestBgPush() {
 // ========== 拉取离线消息 ==========
 async function _meowPullOfflineMessages() {
   try {
-    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
-    if (!uid || uid === 'fallback') return;
+    var uid = 'fallback';
+    var keys = Object.keys(localStorage);
+    for (var ki=0;ki<keys.length;ki++){var k=keys[ki];if(k.indexOf('meow_phone_c_')===0&&k.indexOf('_contacts_v1')!==-1){try{var p=JSON.parse(localStorage.getItem(k));if(p&&p.list&&p.list.length>0){uid=k.replace('meow_phone_c_','').replace('_contacts_v1','');break;}}catch(e){}}}
+    var logsKey = 'meow_phone_c_' + uid + '_im_logs_v1';
+    var threadsKey = 'meow_phone_c_' + uid + '_im_threads_v1';
     var resp = await fetch('/api/pull?uid=' + encodeURIComponent(uid));
     if (!resp.ok) return;
     var data = await resp.json();
     if (!data.ok || !data.messages || !data.messages.length) return;
     console.log('[MeowPush] 拉到离线消息:', data.messages.length, '条');
-    data.messages.forEach(function(msg) { _meowInsertOfflineMessage(msg); });
+    var logs = {}; try { logs = JSON.parse(localStorage.getItem(logsKey) || '{}'); } catch(e) {}
+    logs.map = logs.map || {};
+    var threads = {}; try { threads = JSON.parse(localStorage.getItem(threadsKey) || '{}'); } catch(e) {}
+    threads.list = threads.list || [];
+    data.messages.forEach(function(msg) {
+      var npcId=String(msg.npcId||''); var text=String(msg.text||'').trim();
+      var ts=Number(msg.ts||Date.now()); var kind=String(msg.kind||'daily');
+      if (!npcId||!text) return;
+      logs.map[npcId]=logs.map[npcId]||[];
+      logs.map[npcId].push({role:'them',text:text,t:ts,fromLife:true,mode:'online',branch:'main',insertedAt:Date.now(),proactiveKind:kind});
+      logs.map[npcId].sort(function(a,b){return a.t-b.t;});
+      var thr=threads.list.find(function(x){return String(x.id)===npcId;});
+      if(thr){thr.unread=(thr.unread||0)+1;thr.lastMsg=text.slice(0,30)+(text.length>30?'…':'');thr.lastTime=Math.max(Number(thr.lastTime||0),ts);}
+    });
+    localStorage.setItem(logsKey, JSON.stringify(logs));
+    localStorage.setItem(threadsKey, JSON.stringify(threads));
+    console.log('[MeowPush] 写入完成');
   } catch(err) { console.warn('[MeowPush] 拉取失败:', err); }
 }
 
-function _meowInsertOfflineMessage(msg) {
-  try {
-    var npcId = String(msg.npcId || '');
-    var text  = String(msg.text  || '').trim();
-    var ts    = Number(msg.ts    || Date.now());
-    var kind  = String(msg.kind  || 'daily');
-    if (!npcId || !text) return;
-    if (typeof _insertOnlineProactiveMessage === 'function') {
-      _insertOnlineProactiveMessage(npcId, text, { kind: kind, ts: ts, branch: 'main' });
-      return;
-    }
-    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
-    var logsKey = 'meow_phone_c_' + uid + '_im_logs_v1';
-    var logs = {}; try { logs = JSON.parse(localStorage.getItem(logsKey) || '{}'); } catch(e) {}
-    logs.map = logs.map || {};
-    logs.map[npcId] = logs.map[npcId] || [];
-    logs.map[npcId].push({ role:'them', text:text, t:ts, fromLife:true, mode:'online', branch:'main', insertedAt:Date.now(), proactiveKind:kind });
-    logs.map[npcId].sort(function(a,b){ return a.t - b.t; });
-    localStorage.setItem(logsKey, JSON.stringify(logs));
-  } catch(err) { console.warn('[MeowPush] 插入消息失败:', err); }
-}
+function _meowInsertOfflineMessage(msg) {}
 
 // ========== 页面回前台时补拉 ==========
 document.addEventListener('visibilitychange', function() {
