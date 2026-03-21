@@ -92,9 +92,7 @@ async function makeVapidJWT(env, audience) {
   const claims = b64u(new TextEncoder().encode(JSON.stringify({ aud:audience, exp:now+3600, sub:`mailto:${env.VAPID_EMAIL}` })));
   const input = `${header}.${claims}`;
 
-  // 导入 VAPID 私钥（web-push 生成的是 raw 格式，需要包装成 pkcs8）
   const rawKeyBytes = b64uDec(env.VAPID_PRIVATE_KEY);
-  // PKCS8 包装头（P-256 曲线固定前缀）
   const pkcs8Header = new Uint8Array([
     0x30, 0x41, 0x02, 0x01, 0x00, 0x30, 0x13, 0x06, 0x07,
     0x2a, 0x86, 0x48, 0xce, 0x3d, 0x02, 0x01, 0x06, 0x08,
@@ -102,50 +100,50 @@ async function makeVapidJWT(env, audience) {
     0x27, 0x30, 0x25, 0x02, 0x01, 0x01, 0x04, 0x20
   ]);
   const pkcs8Key = new Uint8Array(pkcs8Header.length + rawKeyBytes.length);
-  pkcs8Key.set(pkcs8Header); pkcs8Key.set(rawKeyBytes, pkcs8Header.length);
+  pkcs8Key.set(pkcs8Header);
+  pkcs8Key.set(rawKeyBytes, pkcs8Header.length);
+
   const key = await crypto.subtle.importKey('pkcs8', pkcs8Key, { name:'ECDSA', namedCurve:'P-256' }, false, ['sign']);
   const sig = await crypto.subtle.sign({ name:'ECDSA', hash:'SHA-256' }, key, new TextEncoder().encode(input));
   return `${input}.${b64u(sig)}`;
 }
 
-// 完整的 Web Push 加密（RFC 8291 aesgcm + RFC 8188 aes128gcm）
+function concat(arrays) {
+  const total = arrays.reduce((n, a) => n + a.length, 0);
+  const out = new Uint8Array(total);
+  let offset = 0;
+  for (const a of arrays) {
+    out.set(a, offset);
+    offset += a.length;
+  }
+  return out;
+}
+
 async function encryptPayload(device, payloadStr) {
   const plaintext = new TextEncoder().encode(payloadStr);
 
-  // 接收方公钥
   const receiverPubKey = await crypto.subtle.importKey(
     'raw', b64uDec(device.p256dh),
     { name:'ECDH', namedCurve:'P-256' }, false, []
   );
 
-  // 生成发送方临时密钥对
   const senderKeyPair = await crypto.subtle.generateKey({ name:'ECDH', namedCurve:'P-256' }, true, ['deriveKey','deriveBits']);
   const senderPubKeyRaw = await crypto.subtle.exportKey('raw', senderKeyPair.publicKey);
 
-  // ECDH 共享密钥
   const sharedBits = await crypto.subtle.deriveBits({ name:'ECDH', public: receiverPubKey }, senderKeyPair.privateKey, 256);
-
-  // auth secret
   const authSecret = b64uDec(device.auth);
-
-  // HKDF - PRK
   const prk = await crypto.subtle.importKey('raw', sharedBits, 'HKDF', false, ['deriveBits']);
 
-  // HKDF expand - 生成 IKM
   const authInfo = new TextEncoder().encode('Content-Encoding: auth\0');
   const ikmBits = await crypto.subtle.deriveBits(
     { name:'HKDF', hash:'SHA-256', salt: authSecret, info: authInfo }, prk, 256
   );
 
-  // 盐值（16字节随机）
   const salt = crypto.getRandomValues(new Uint8Array(16));
-
-  // HKDF for content encryption key & nonce
   const ikmKey = await crypto.subtle.importKey('raw', ikmBits, 'HKDF', false, ['deriveBits']);
   const senderPubBytes = new Uint8Array(senderPubKeyRaw);
   const receiverPubBytes = b64uDec(device.p256dh);
 
-  // keyInfo & nonceInfo
   const keyInfo = concat([
     new TextEncoder().encode('Content-Encoding: aesgcm\0'),
     new Uint8Array([0, 65]), senderPubBytes,
@@ -160,9 +158,7 @@ async function encryptPayload(device, payloadStr) {
   const contentKey = await crypto.subtle.deriveBits({ name:'HKDF', hash:'SHA-256', salt, info: keyInfo }, ikmKey, 128);
   const nonceBits  = await crypto.subtle.deriveBits({ name:'HKDF', hash:'SHA-256', salt, info: nonceInfo }, ikmKey, 96);
 
-  // AES-GCM 加密
   const aesKey = await crypto.subtle.importKey('raw', contentKey, 'AES-GCM', false, ['encrypt']);
-  // 添加 2 字节 padding
   const padded = concat([new Uint8Array([0, 0]), plaintext]);
   const ciphertext = await crypto.subtle.encrypt({ name:'AES-GCM', iv: nonceBits }, aesKey, padded);
 
@@ -173,37 +169,25 @@ async function encryptPayload(device, payloadStr) {
   };
 }
 
-function concat(arrays) {
-  const total = arrays.reduce((n, a) => n + a.length, 0);
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const a of arrays) { out.set(a, offset); offset += a.length; }
-  return out;
-}
-
 async function sendWebPush(device, npcName, npcId, text, env) {
   try {
     const url = new URL(device.endpoint);
     const audience = `${url.protocol}//${url.host}`;
     const jwt = await makeVapidJWT(env, audience);
 
-    // 发送明文 JSON payload（Chrome 支持不加密的 payload）
-    const payloadStr = JSON.stringify({ npcId, npcName, text });
-    const body = new TextEncoder().encode(payloadStr);
-
     const resp = await fetch(device.endpoint, {
       method: 'POST',
       headers: {
         'Authorization': `vapid t=${jwt},k=${env.VAPID_PUBLIC_KEY}`,
-        'Content-Type': 'text/plain;charset=UTF-8',
         'TTL': '86400',
-        'Urgency': 'normal'
-      },
-      body
+        'Urgency': 'normal',
+        'Topic': `meow-${String(npcId || 'msg').slice(0, 32)}`
+      }
     });
 
     if (resp.status === 410 || resp.status === 404) return 'expired';
     if (resp.ok || resp.status === 201) return 'ok';
+
     const errText = await resp.text();
     console.warn('[push] status:', resp.status, errText.slice(0,100));
     return 'fail';
@@ -261,7 +245,10 @@ export async function onRequestGet(context) {
           const lastRandom = Number(cd.last_random_push_at || 0);
           if (now - lastRandom > 2*60*60*1000 && Math.random() < 0.3) kind = 'random';
         }
-        if (!kind) { results.push({ npc_id, skipped:true }); continue; }
+        if (!kind) {
+          results.push({ npc_id, skipped:true });
+          continue;
+        }
 
         await sbUpsert(env, 'meow_push_cooldown', {
           uid, npc_id,
@@ -272,12 +259,27 @@ export async function onRequestGet(context) {
         }, 'uid,npc_id');
 
         let text = '';
-        try { text = await generateMessage(npc, kind, apiCfg); }
-        catch(aiErr) { results.push({ npc_id, error:aiErr.message }); continue; }
-        if (!text) { results.push({ npc_id, error:'AI返回空' }); continue; }
+        try {
+          text = await generateMessage(npc, kind, apiCfg);
+        } catch(aiErr) {
+          results.push({ npc_id, error:aiErr.message });
+          continue;
+        }
+        if (!text) {
+          results.push({ npc_id, error:'AI返回空' });
+          continue;
+        }
 
         const msgTs = now - (kind==='daily' ? Math.floor(Math.random()*30)+5 : Math.floor(Math.random()*10)+2) * 60000;
-        await sbInsert(env, 'meow_pending_messages', { uid, npc_id, npc_name:npc.npc_name, text, kind, ts:msgTs, is_pulled:false });
+        await sbInsert(env, 'meow_pending_messages', {
+          uid,
+          npc_id,
+          npc_name:npc.npc_name,
+          text,
+          kind,
+          ts:msgTs,
+          is_pulled:false
+        });
 
         await sbUpsert(env, 'meow_push_cooldown', {
           uid, npc_id,
@@ -298,9 +300,14 @@ export async function onRequestGet(context) {
       }
     }
 
-    return new Response(JSON.stringify({ ok:true, total:results.length, results }), { headers:{'Content-Type':'application/json'} });
+    return new Response(JSON.stringify({ ok:true, total:results.length, results }), {
+      headers:{'Content-Type':'application/json'}
+    });
   } catch(err) {
     console.error('[proactive] fatal:', err);
-    return new Response(JSON.stringify({ ok:false, error:String(err.message||err) }), { status:500, headers:{'Content-Type':'application/json'} });
+    return new Response(JSON.stringify({ ok:false, error:String(err.message||err) }), {
+      status:500,
+      headers:{'Content-Type':'application/json'}
+    });
   }
 }
