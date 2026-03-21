@@ -35447,38 +35447,91 @@ async function _meowRequestPush() {
 // ========== 拉取离线消息 ==========
 async function _meowPullOfflineMessages() {
   try {
-    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
-    if (!uid || uid === 'fallback') return;
-    var resp = await fetch('/.netlify/functions/pull?uid=' + encodeURIComponent(uid));
-    if (!resp.ok) return;
-    var data = await resp.json();
-    if (!data.ok || !data.messages || !data.messages.length) return;
-    console.log('[MeowPush] 拉到离线消息:', data.messages.length, '条');
-    data.messages.forEach(function(msg) { _meowInsertOfflineMessage(msg); });
-  } catch(err) { console.warn('[MeowPush] 拉取失败:', err); }
-}
-
-function _meowInsertOfflineMessage(msg) {
-  try {
-    var npcId = String(msg.npcId || '');
-    var text  = String(msg.text  || '').trim();
-    var ts    = Number(msg.ts    || Date.now());
-    var kind  = String(msg.kind  || 'daily');
-    if (!npcId || !text) return;
-    if (typeof _insertOnlineProactiveMessage === 'function') {
-      _insertOnlineProactiveMessage(npcId, text, { kind: kind, ts: ts, branch: 'main' });
-      return;
-    }
-    // 降级写法
-    var uid = (typeof _phUID === 'function') ? _phUID() : 'fallback';
+    var uid = 'standalone_main';
     var logsKey = 'meow_phone_c_' + uid + '_im_logs_v1';
+    var threadsKey = 'meow_phone_c_' + uid + '_im_threads_v1';
+    var sinceKey = 'meow_phone_c_' + uid + '_pull_since_v1';
+
     var logs = {}; try { logs = JSON.parse(localStorage.getItem(logsKey) || '{}'); } catch(e) {}
     logs.map = logs.map || {};
-    logs.map[npcId] = logs.map[npcId] || [];
-    logs.map[npcId].push({ role:'them', text:text, t:ts, fromLife:true, mode:'online', branch:'main', insertedAt:Date.now(), proactiveKind:kind });
-    logs.map[npcId].sort(function(a,b){ return a.t - b.t; });
+    var threads = {}; try { threads = JSON.parse(localStorage.getItem(threadsKey) || '{}'); } catch(e) {}
+    threads.list = threads.list || [];
+
+    var localSince = Number(localStorage.getItem(sinceKey) || 0);
+
+    // 再从本地聊天记录里兜底算一次最大 ts，避免 since 丢失
+    Object.keys(logs.map).forEach(function(npcId) {
+      var arr = logs.map[npcId] || [];
+      arr.forEach(function(m) {
+        var t = Number(m && m.t || 0);
+        if (t > localSince) localSince = t;
+      });
+    });
+
+    var url = '/api/pull?uid=' + encodeURIComponent(uid);
+    if (localSince > 0) url += '&since=' + encodeURIComponent(localSince);
+
+    var resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) return;
+
+    var data = await resp.json();
+    if (!data.ok || !data.messages || !data.messages.length) return;
+
+    var inserted = 0;
+    var maxTs = localSince;
+
+    data.messages.forEach(function(msg) {
+      var npcId = String(msg.npcId || '');
+      var text = String(msg.text || '').trim();
+      var ts = Number(msg.ts || Date.now());
+      var kind = String(msg.kind || 'daily');
+      if (!npcId || !text) return;
+
+      logs.map[npcId] = logs.map[npcId] || [];
+
+      // 去重：同 npcId + 同 ts + 同 text 就不再插一次
+      var exists = logs.map[npcId].some(function(m) {
+        return Number(m.t || 0) === ts && String(m.text || '') === text;
+      });
+      if (exists) {
+        if (ts > maxTs) maxTs = ts;
+        return;
+      }
+
+      logs.map[npcId].push({
+        role: 'them',
+        text: text,
+        t: ts,
+        fromLife: true,
+        mode: 'online',
+        branch: 'main',
+        insertedAt: Date.now(),
+        proactiveKind: kind
+      });
+      logs.map[npcId].sort(function(a, b) { return a.t - b.t; });
+
+      var thr = threads.list.find(function(x) { return String(x.id) === npcId; });
+      if (thr) {
+        thr.unread = (thr.unread || 0) + 1;
+        thr.lastMsg = text.slice(0, 30) + (text.length > 30 ? '…' : '');
+        thr.lastTime = Math.max(Number(thr.lastTime || 0), ts);
+      }
+
+      inserted++;
+      if (ts > maxTs) maxTs = ts;
+    });
+
     localStorage.setItem(logsKey, JSON.stringify(logs));
-  } catch(err) { console.warn('[MeowPush] 插入消息失败:', err); }
+    localStorage.setItem(threadsKey, JSON.stringify(threads));
+    localStorage.setItem(sinceKey, String(maxTs));
+
+    console.log('[MeowPush] 拉到离线消息:', data.messages.length, '条，实际新增:', inserted, '条');
+    window.dispatchEvent(new CustomEvent('meow:messages-pulled', {
+      detail: { count: inserted }
+    }));
+  } catch (err) {
+    console.warn('[MeowPush] 拉取失败:', err);
+  }
 }
 
 // ========== 页面回前台时补拉 + 重新同步 ==========
