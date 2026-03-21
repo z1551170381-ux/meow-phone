@@ -128,13 +128,6 @@ function derToJose(signature) {
   return out;
 }
 
-function derToJose(signature) {
-  const sig = signature instanceof Uint8Array ? signature : new Uint8Array(signature);
-
-  if (sig[0] !== 0x30) {
-    throw new Error('Invalid DER signature');
-  }
-
   let offset = 2;
   if (sig[1] & 0x80) {
     offset = 2 + (sig[1] & 0x7f);
