@@ -270,7 +270,7 @@ export async function onRequestGet(context) {
           continue;
         }
 
-        const msgTs = now - (kind==='daily' ? Math.floor(Math.random()*30)+5 : Math.floor(Math.random()*10)+2) * 60000;
+        const msgTs = now;
         await sbInsert(env, 'meow_pending_messages', {
           uid,
           npc_id,
