@@ -189,9 +189,9 @@ async function sendWebPush(device, npcName, npcId, text, env) {
     if (resp.ok || resp.status === 201) return 'ok';
 
     const errText = await resp.text();
-    console.warn('[push] status:', resp.status, errText.slice(0,100));
+    console.warn('[push] status:', resp.status, errText.slice(0, 200));
     return 'fail';
-  } catch(err) {
+  } catch (err) {
     console.warn('[push] error:', err.message);
     return 'fail';
   }
@@ -290,13 +290,35 @@ export async function onRequestGet(context) {
         }, 'uid,npc_id');
 
         const devices = await sbSelect(env, 'meow_devices', { uid });
-        let pushed = 0;
-        for (const dev of (devices||[])) {
-          const r = await sendWebPush(dev, npc.npc_name, npc_id, text, env);
-          if (r === 'expired') await sbDelete(env, 'meow_devices', { endpoint:dev.endpoint });
-          else if (r === 'ok') pushed++;
-        }
-        results.push({ npc_id, kind, pushed, preview:text.slice(0,20) });
+let pushed = 0;
+const pushDebug = [];
+
+for (const dev of (devices || [])) {
+  const host = (() => {
+    try { return new URL(dev.endpoint).host; } catch(e) { return 'bad-endpoint'; }
+  })();
+
+  const r = await sendWebPush(dev, npc.npc_name, npc_id, text, env);
+
+  pushDebug.push({
+    host,
+    result: r
+  });
+
+  if (r === 'expired') {
+    await sbDelete(env, 'meow_devices', { endpoint: dev.endpoint });
+  } else if (r === 'ok') {
+    pushed++;
+  }
+}
+
+results.push({
+  npc_id,
+  kind,
+  pushed,
+  preview: text.slice(0, 20),
+  pushDebug
+});
       }
     }
 
