@@ -187,36 +187,25 @@ async function sendWebPush(device, npcName, npcId, text, env) {
     const audience = `${url.protocol}//${url.host}`;
     const jwt = await makeVapidJWT(env, audience);
 
+    // 发送明文 JSON payload（Chrome 支持不加密的 payload）
     const payloadStr = JSON.stringify({ npcId, npcName, text });
+    const body = new TextEncoder().encode(payloadStr);
 
-    let body, headers;
-    try {
-      // 尝试加密发送
-      const { ciphertext, salt, senderPubKey } = await encryptPayload(device, payloadStr);
-      body = ciphertext;
-      headers = {
+    const resp = await fetch(device.endpoint, {
+      method: 'POST',
+      headers: {
         'Authorization': `vapid t=${jwt},k=${env.VAPID_PUBLIC_KEY}`,
-        'Content-Type': 'application/octet-stream',
-        'Content-Encoding': 'aesgcm',
-        'Encryption': `salt=${b64u(salt)}`,
-        'Crypto-Key': `dh=${b64u(senderPubKey)};p256ecdsa=${env.VAPID_PUBLIC_KEY}`,
-        'TTL': '86400'
-      };
-    } catch(encErr) {
-      // 加密失败则发空 payload（SW 会显示默认通知）
-      console.warn('[push] encrypt failed, sending empty:', encErr.message);
-      body = undefined;
-      headers = {
-        'Authorization': `vapid t=${jwt},k=${env.VAPID_PUBLIC_KEY}`,
-        'Content-Type': 'application/octet-stream',
-        'TTL': '86400'
-      };
-    }
+        'Content-Type': 'application/json',
+        'TTL': '86400',
+        'Urgency': 'normal'
+      },
+      body
+    });
 
-    const resp = await fetch(device.endpoint, { method:'POST', headers, body });
     if (resp.status === 410 || resp.status === 404) return 'expired';
     if (resp.ok || resp.status === 201) return 'ok';
-    console.warn('[push] status:', resp.status);
+    const errText = await resp.text();
+    console.warn('[push] status:', resp.status, errText.slice(0,100));
     return 'fail';
   } catch(err) {
     console.warn('[push] error:', err.message);
