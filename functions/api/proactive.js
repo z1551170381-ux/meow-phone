@@ -220,15 +220,14 @@ async function sendWebPush(device, npcName, npcId, text, env) {
     const audience = `${url.protocol}//${url.host}`;
     const jwt = await makeVapidJWT(env, audience);
 
-    const resp = await fetch(device.endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `vapid t=${jwt},k=${env.VAPID_PUBLIC_KEY}`,
-        TTL: '86400',
-        Urgency: 'normal',
-        Topic: `meow-${String(npcId || 'msg').slice(0, 32)}`
-      }
-    });
+const resp = await fetch(device.endpoint, {
+  method: 'POST',
+  headers: {
+    Authorization: `vapid t=${jwt},k=${env.VAPID_PUBLIC_KEY}`,
+    TTL: '86400',
+    Urgency: 'normal'
+  }
+});
 
     if (resp.status === 410 || resp.status === 404) {
       return { result: 'expired', status: resp.status, text: '' };
