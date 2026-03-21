@@ -35521,9 +35521,30 @@ async function _meowPullOfflineMessages() {
       if (ts > maxTs) maxTs = ts;
     });
 
-    localStorage.setItem(logsKey, JSON.stringify(logs));
-    localStorage.setItem(threadsKey, JSON.stringify(threads));
-    localStorage.setItem(sinceKey, String(maxTs));
+    // 统一回算每个线程的最后一条消息，避免列表预览停在旧值
+threads.list.forEach(function(thr) {
+  var npcId = String(thr.id || '');
+  var arr = (logs.map && logs.map[npcId]) || [];
+  if (!arr.length) return;
+
+  arr.sort(function(a, b) { return Number(a.t || 0) - Number(b.t || 0); });
+  var last = arr[arr.length - 1];
+  if (!last) return;
+
+  var lastText = String(last.text || '').trim();
+  var lastTs = Number(last.t || 0);
+
+  thr.lastMsg = lastText.slice(0, 30) + (lastText.length > 30 ? '…' : '');
+  thr.lastTime = lastTs;
+});
+
+threads.list.sort(function(a, b) {
+  return Number(b.lastTime || 0) - Number(a.lastTime || 0);
+});
+
+localStorage.setItem(logsKey, JSON.stringify(logs));
+localStorage.setItem(threadsKey, JSON.stringify(threads));
+localStorage.setItem(sinceKey, String(maxTs));
 
     console.log('[MeowPush] 拉到离线消息:', data.messages.length, '条，实际新增:', inserted, '条');
     window.dispatchEvent(new CustomEvent('meow:messages-pulled', {
