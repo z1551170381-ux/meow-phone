@@ -1,54 +1,73 @@
-// functions/api/pull.js
-// 完全无依赖版 - 直接用 fetch 调 Supabase REST API
+// api/pull.js
+// Vercel 版：返回消息但不全局消费，避免多设备互抢
+// 支持：/api/pull?uid=standalone_main&since=时间戳
 
-export async function onRequestGet(context) {
-  const { request, env } = context;
-  const url = new URL(request.url);
-  const uid = url.searchParams.get('uid') || '';
+export default async function handler(req, res) {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ ok: false, error: 'Method Not Allowed' });
+  }
 
-  if (!uid) return new Response('Missing uid', { status: 400 });
+  const uid = String(req.query.uid || '').trim();
+  const since = Number(req.query.since || 0);
+  const limitRaw = Number(req.query.limit || 50);
+  const limit = Math.min(Math.max(limitRaw || 50, 1), 200);
 
-  const base = env.SUPABASE_URL;
-  const key  = env.SUPABASE_SERVICE_KEY;
-  const headers = { 'apikey': key, 'Authorization': `Bearer ${key}` };
+  if (!uid) {
+    return res.status(400).json({ ok: false, error: 'Missing uid' });
+  }
+
+  const base = process.env.SUPABASE_URL;
+  const key = process.env.SUPABASE_SERVICE_KEY;
+
+  if (!base || !key) {
+    return res.status(500).json({
+      ok: false,
+      error: 'Missing SUPABASE_URL or SUPABASE_SERVICE_KEY'
+    });
+  }
+
+  const headers = {
+    apikey: key,
+    Authorization: `Bearer ${key}`
+  };
 
   try {
-    // 查未读消息
-    const selectUrl = `${base}/rest/v1/meow_pending_messages?select=*&uid=eq.${encodeURIComponent(uid)}&is_pulled=eq.false&order=ts.asc`;
-    const resp = await fetch(selectUrl, { headers });
-    if (!resp.ok) throw new Error(`select error ${resp.status}`);
-    const msgs = await resp.json();
+    // 没传 since 时，只拉最近 48 小时，避免无限灌历史
+    const fallbackSince = Date.now() - 48 * 60 * 60 * 1000;
+    const minTs = since > 0 ? since : fallbackSince;
 
-    if (!msgs || msgs.length === 0) {
-      return new Response(JSON.stringify({ ok:true, messages:[] }), {
-        headers: { 'Content-Type':'application/json' }
-      });
+    const selectUrl =
+      `${base}/rest/v1/meow_pending_messages` +
+      `?select=id,uid,npc_id,npc_name,text,kind,ts` +
+      `&uid=eq.${encodeURIComponent(uid)}` +
+      `&ts=gt.${minTs}` +
+      `&order=ts.asc` +
+      `&limit=${limit}`;
+
+    const resp = await fetch(selectUrl, { headers });
+    if (!resp.ok) {
+      const errText = await resp.text();
+      throw new Error(`select error ${resp.status}: ${errText.slice(0, 200)}`);
     }
 
-    // 标记已读
-    const ids = msgs.map(m => m.id);
-    const updateUrl = `${base}/rest/v1/meow_pending_messages?id=in.(${ids.join(',')})`;
-    await fetch(updateUrl, {
-      method: 'PATCH',
-      headers: { ...headers, 'Content-Type':'application/json', 'Prefer':'return=minimal' },
-      body: JSON.stringify({ is_pulled: true })
-    });
+    const msgs = await resp.json();
 
-    return new Response(JSON.stringify({
+    return res.status(200).json({
       ok: true,
-      messages: msgs.map(m => ({
-        npcId:   m.npc_id,
+      messages: (msgs || []).map(m => ({
+        id: m.id,
+        npcId: m.npc_id,
         npcName: m.npc_name,
-        text:    m.text,
-        kind:    m.kind,
-        ts:      m.ts
+        text: m.text,
+        kind: m.kind,
+        ts: Number(m.ts || 0)
       }))
-    }), { headers: { 'Content-Type':'application/json' } });
-
-  } catch(err) {
+    });
+  } catch (err) {
     console.error('[pull] error:', err);
-    return new Response(JSON.stringify({ ok:false, error:String(err.message||err) }), {
-      status:500, headers:{'Content-Type':'application/json'}
+    return res.status(500).json({
+      ok: false,
+      error: String(err.message || err)
     });
   }
 }
