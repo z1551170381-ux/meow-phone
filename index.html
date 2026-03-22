@@ -722,6 +722,7 @@ function phoneLoadSettings(){
     typingEffect: 'none',
     syncToMain: false,
     autoReply: true,
+    showFloatingAvatar: false,   // 悬浮状态头像
   };
 
   try{
@@ -26602,11 +26603,13 @@ const npc = _wxGetChatTargetMeta(npcId);
           ]},
           { title:'功能', rows:[
             {icon:'📢',label:'通知推送',type:'custom',key:'pushNotify'},
+                 {icon:'⏳',label:'后台推送节奏',value:'保底 / 随机 / 时间窗',type:'nav',subpage:'pushSettings'},
             {icon:'💬',label:'聊天同步到主线',type:'toggle',key:'syncToMain',val:!!cfg.syncToMain},
             {icon:'🤖',label:'自动回复',type:'toggle',key:'autoReply',val:cfg.autoReply!==false},
             {icon:'📝',label:'上下文条数',value:(cfg.chatContextN||10)+'条',type:'nav',subpage:'chatContextN'},
             {icon:'⌨️',label:'打字效果',value:({none:'无',typewriter:'打字机',fadein:'淡入',glitch:'故障风'})[cfg.typingEffect||'none']||'无',type:'nav',subpage:'typingEffect'},
             {icon:'⏰',label:'时间模式',value:cfg.timeMode==='story'?'故事时间':'现实时间',type:'nav',subpage:'timeMode'},
+            {icon:'📐',label:'悬浮状态头像',type:'toggle',key:'showFloatingAvatar',val:!!cfg.showFloatingAvatar},
           ]},
                     { title:'关于', rows:[
             {icon:'ℹ️',label:'版本',value:'MEOW Phone v2.1',type:'info'},
@@ -26658,6 +26661,10 @@ const npc = _wxGetChatTargetMeta(npcId);
               const cfg2 = phoneLoadSettings();
               cfg2[key] = btn.classList.contains('on');
               phoneSaveSettings(cfg2);
+              // 悬浮头像开关联动
+              if (key === 'showFloatingAvatar'){
+                window.dispatchEvent(new CustomEvent('meow:floating-avatar-toggle', { detail: { show: cfg2[key] } }));
+              }
             }
           });
         });
@@ -26689,10 +26696,189 @@ const npc = _wxGetChatTargetMeta(npcId);
           case 'themes': openApp('themes'); break;
           case 'apiSettings': renderApiSettingsPage(body); break;
           case 'autoFeedSettings': renderAutoFeedSettingsPage(body); break;
+          case 'pushSettings': renderPushSettingsPage(body); break;
           case 'dataManager': renderDataManagerPage(body); break;
           default: renderSettings(body); break;
         }
       }
+function renderPushSettingsPage(container){
+  const uid = 'standalone_main';
+
+  const DEFAULTS = {
+    enable_push: true,
+    daily_guaranteed_count: 1,
+    random_max_count: 1,
+    random_cooldown_minutes: 240,
+    quiet_hours_start: '23:30',
+    quiet_hours_end: '08:00',
+    daily_windows: ['11:00-13:00'],
+    random_windows: ['19:30-22:30']
+  };
+
+  function getDraft(){
+    try{
+      return JSON.parse(localStorage.getItem('meow_push_settings_draft_v1') || 'null') || { ...DEFAULTS };
+    }catch(e){
+      return { ...DEFAULTS };
+    }
+  }
+
+  function saveDraft(v){
+    localStorage.setItem('meow_push_settings_draft_v1', JSON.stringify(v));
+  }
+
+  function buildSummary(cfg){
+    const dailyWin = (cfg.daily_windows && cfg.daily_windows[0]) || '11:00-13:00';
+    const randomWin = (cfg.random_windows && cfg.random_windows[0]) || '19:30-22:30';
+    return `当前策略：保底 ${cfg.daily_guaranteed_count} 条 / 随机最多 ${cfg.random_max_count} 条 / 冷却 ${cfg.random_cooldown_minutes} 分钟 / 静默 ${cfg.quiet_hours_start}-${cfg.quiet_hours_end} / 保底窗 ${dailyWin} / 随机窗 ${randomWin}`;
+  }
+
+  async function loadRemote(){
+    const resp = await fetch('/api/push-settings?uid=' + encodeURIComponent(uid), { cache:'no-store' });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || '读取失败');
+    return { ...DEFAULTS, ...(data.settings || {}) };
+  }
+
+  async function saveRemote(cfg){
+    const resp = await fetch('/api/push-settings', {
+      method: 'POST',
+      headers: { 'Content-Type':'application/json' },
+      body: JSON.stringify({ uid, ...cfg })
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.ok) throw new Error(data.error || '保存失败');
+    return { ...DEFAULTS, ...(data.settings || {}) };
+  }
+
+  function rowInput(label, el){
+    return `
+      <div class="settingRow" style="align-items:center;">
+        <span class="sIcon"></span>
+        <span class="sLabel">${label}</span>
+        <span class="sValue" style="display:flex;align-items:center;gap:8px;">${el}</span>
+      </div>
+    `;
+  }
+
+  function renderUI(cfg){
+    const dailyWindow = (cfg.daily_windows && cfg.daily_windows[0]) || DEFAULTS.daily_windows[0];
+    const randomWindow = (cfg.random_windows && cfg.random_windows[0]) || DEFAULTS.random_windows[0];
+    const dailyStart = dailyWindow.split('-')[0] || '11:00';
+    const dailyEnd = dailyWindow.split('-')[1] || '13:00';
+    const randomStart = randomWindow.split('-')[0] || '19:30';
+    const randomEnd = randomWindow.split('-')[1] || '22:30';
+
+    container.innerHTML = `
+      <div class="phTopBar">
+        <button data-act="settingsBack" class="phBackBtn">‹</button>
+        <div class="phTitle">后台推送节奏</div>
+        <div style="width:32px;"></div>
+      </div>
+
+      <div class="phScroll" style="padding:12px 14px 24px;">
+        <div class="phCard" style="margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:700;color:var(--ph-text);margin-bottom:6px;">当前策略</div>
+          <div style="font-size:12px;line-height:1.6;color:var(--ph-text-sub);">${esc(buildSummary(cfg))}</div>
+        </div>
+
+        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:6px 2px 4px;">总开关</div>
+        <div class="settingSection">
+          ${rowInput('启用后台推送', `<button class="sToggle${cfg.enable_push ? ' on' : ''}" data-el="ps_enable_push"></button>`)}
+        </div>
+
+        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:10px 2px 4px;">保底消息</div>
+        <div class="settingSection">
+          ${rowInput('每天保底条数', `<input data-el="ps_daily_count" type="number" min="0" max="10" value="${cfg.daily_guaranteed_count}" style="width:64px;padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('保底时间窗开始', `<input data-el="ps_daily_start" type="time" value="${dailyStart}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('保底时间窗结束', `<input data-el="ps_daily_end" type="time" value="${dailyEnd}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+        </div>
+
+        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:10px 2px 4px;">随机消息</div>
+        <div class="settingSection">
+          ${rowInput('每天随机上限', `<input data-el="ps_random_count" type="number" min="0" max="20" value="${cfg.random_max_count}" style="width:64px;padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('随机最小间隔(分钟)', `<input data-el="ps_random_cd" type="number" min="10" max="1440" value="${cfg.random_cooldown_minutes}" style="width:84px;padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('随机时间窗开始', `<input data-el="ps_random_start" type="time" value="${randomStart}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('随机时间窗结束', `<input data-el="ps_random_end" type="time" value="${randomEnd}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+        </div>
+
+        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:10px 2px 4px;">静默时段</div>
+        <div class="settingSection">
+          ${rowInput('静默开始', `<input data-el="ps_quiet_start" type="time" value="${cfg.quiet_hours_start}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('静默结束', `<input data-el="ps_quiet_end" type="time" value="${cfg.quiet_hours_end}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+        </div>
+
+        <div style="display:flex;gap:10px;margin-top:14px;">
+          <button data-el="ps_reset" style="flex:1;appearance:none;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.72);color:var(--ph-text);padding:10px 12px;border-radius:14px;font-size:13px;font-weight:700;">恢复默认</button>
+          <button data-el="ps_save" style="flex:1;appearance:none;border:none;background:var(--ph-accent,#07c160);color:#fff;padding:10px 12px;border-radius:14px;font-size:13px;font-weight:700;">保存设置</button>
+        </div>
+      </div>
+    `;
+
+    const elEnable = container.querySelector('[data-el="ps_enable_push"]');
+    const elDailyCount = container.querySelector('[data-el="ps_daily_count"]');
+    const elDailyStart = container.querySelector('[data-el="ps_daily_start"]');
+    const elDailyEnd = container.querySelector('[data-el="ps_daily_end"]');
+    const elRandomCount = container.querySelector('[data-el="ps_random_count"]');
+    const elRandomCd = container.querySelector('[data-el="ps_random_cd"]');
+    const elRandomStart = container.querySelector('[data-el="ps_random_start"]');
+    const elRandomEnd = container.querySelector('[data-el="ps_random_end"]');
+    const elQuietStart = container.querySelector('[data-el="ps_quiet_start"]');
+    const elQuietEnd = container.querySelector('[data-el="ps_quiet_end"]');
+    const elSave = container.querySelector('[data-el="ps_save"]');
+    const elReset = container.querySelector('[data-el="ps_reset"]');
+
+    elEnable.addEventListener('click', function(){
+      elEnable.classList.toggle('on');
+    });
+
+    elReset.addEventListener('click', function(){
+      saveDraft({ ...DEFAULTS });
+      renderUI({ ...DEFAULTS });
+      try{ toast('已恢复默认'); }catch(e){}
+    });
+
+    elSave.addEventListener('click', async function(){
+      const next = {
+        enable_push: elEnable.classList.contains('on'),
+        daily_guaranteed_count: Number(elDailyCount.value || 0),
+        random_max_count: Number(elRandomCount.value || 0),
+        random_cooldown_minutes: Number(elRandomCd.value || 240),
+        quiet_hours_start: elQuietStart.value || '23:30',
+        quiet_hours_end: elQuietEnd.value || '08:00',
+        daily_windows: [`${elDailyStart.value || '11:00'}-${elDailyEnd.value || '13:00'}`],
+        random_windows: [`${elRandomStart.value || '19:30'}-${elRandomEnd.value || '22:30'}`],
+      };
+
+      saveDraft(next);
+
+      try{
+        elSave.disabled = true;
+        elSave.textContent = '保存中...';
+        const saved = await saveRemote(next);
+        saveDraft(saved);
+        renderUI(saved);
+        try{ toast('后台推送节奏已保存'); }catch(e){}
+      }catch(err){
+        try{ toast('保存失败: ' + err.message); }catch(e){}
+      }finally{
+        elSave.disabled = false;
+        elSave.textContent = '保存设置';
+      }
+    });
+  }
+
+  renderUI(getDraft());
+
+  loadRemote()
+    .then(function(cfg){
+      saveDraft(cfg);
+      renderUI(cfg);
+    })
+    .catch(function(err){
+      console.warn('[pushSettings] load failed:', err);
+    });
+}
 // -------- 设置：壁纸（桌面/APP 分离 + 透明度可调） --------
 function renderSettingsWallpaper(container){
   const cfg = phoneLoadSettings();
@@ -35588,6 +35774,807 @@ function _meowUrlBase64ToUint8Array(base64String) {
   for (var i = 0; i < rawData.length; i++) output[i] = rawData.charCodeAt(i);
   return output;
 }
+</script>
+
+<script>
+/* ═══════════════════════════════════════════════════════════════
+   meow-world.js  ——  喵喵世界状态引擎  v1.0
+   ───────────────────────────────────────────────────────────────
+   职责：
+     1. 按真实时间流逝，自动衰减体力 / 心情 / 健康 / 饥饿
+     2. 提供 WorldAction.dispatch() 统一动作结算器
+     3. 结算完毕后广播 meow:world-changed 事件，
+        让地图、悬浮头像等模块自动刷新
+     4. 把状态同步写回 meow-phone.js 的 charstate，
+        手机 UI 里的状态栏会自动更新，无需改任何旧代码
+
+   其他模块调用示例：
+     WorldAction.dispatch({ type:'WORK',  cost:{energy:20,hunger:10}, gain:{money:150} });
+     WorldAction.dispatch({ type:'EAT',   cost:{money:30},  gain:{hunger:40,mood:5} });
+     WorldAction.dispatch({ type:'SLEEP', cost:{time:8},    gain:{energy:80,health:5} });
+     WorldAction.dispatch({ type:'MOVE',  location:'咖啡馆', cost:{energy:5} });
+═══════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  /* ──────────────────────────────────────────────────
+     § 0  常量与工具
+  ────────────────────────────────────────────────── */
+
+  var LS_WORLD  = 'meow.world.state';   // 世界状态 localStorage key
+
+  /** 每现实小时的自然衰减量（可调整） */
+  var DECAY_PER_HOUR = {
+    energy:  -4,   // 体力：每小时 -4
+    mood:    -2,   // 心情：每小时 -2
+    health:   0,   // 健康：挂机不掉，特定动作才影响
+    hunger:  -8,   // 饥饿：每小时 -8（最快，逼玩家吃饭）
+  };
+
+  var STAT_MAX = 100, STAT_MIN = 0;
+
+  function clamp(v) {
+    return Math.max(STAT_MIN, Math.min(STAT_MAX, Math.round(v)));
+  }
+
+  function lsGet(key, def) {
+    try {
+      var v = localStorage.getItem(key);
+      return v !== null ? JSON.parse(v) : (def !== undefined ? def : null);
+    } catch (e) { return def !== undefined ? def : null; }
+  }
+
+  function lsSet(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch (e) {}
+  }
+
+  function tsNow() { return Date.now(); }
+
+  /* ──────────────────────────────────────────────────
+     § 1  默认状态
+  ────────────────────────────────────────────────── */
+
+  function defaultState() {
+    return {
+      player: {
+        energy:   80,
+        mood:     70,
+        health:   90,
+        hunger:   70,
+        money:    500,
+        location: '家',
+      },
+      activeTask:  null,
+      lastTickAt:  tsNow(),
+      eventLog:    [],
+    };
+  }
+
+  /* ──────────────────────────────────────────────────
+     § 2  状态读写
+  ────────────────────────────────────────────────── */
+
+  var _state = null;
+
+  function loadState() {
+    var saved = lsGet(LS_WORLD, null);
+    if (!saved || !saved.player) {
+      _state = defaultState();
+    } else {
+      _state = saved;
+      var def = defaultState();
+      // 补全旧存档缺失的字段
+      Object.keys(def.player).forEach(function (k) {
+        if (_state.player[k] === undefined) _state.player[k] = def.player[k];
+      });
+      if (!_state.lastTickAt) _state.lastTickAt = tsNow();
+      if (!_state.eventLog)   _state.eventLog   = [];
+    }
+  }
+
+  function saveState() { lsSet(LS_WORLD, _state); }
+
+  /* ──────────────────────────────────────────────────
+     § 3  时间衰减
+     根据"距上次存档过了多少现实时间"，计算各属性该减多少
+  ────────────────────────────────────────────────── */
+
+  function applyDecay() {
+    var elapsed = (tsNow() - _state.lastTickAt) / 3600000; // 换算成小时
+    if (elapsed <= 0.001) return;
+    elapsed = Math.min(elapsed, 24); // 最多补算 24 小时，防止全归零
+
+    var p = _state.player;
+    Object.keys(DECAY_PER_HOUR).forEach(function (stat) {
+      if (p[stat] !== undefined) {
+        p[stat] = clamp(p[stat] + DECAY_PER_HOUR[stat] * elapsed);
+      }
+    });
+    _state.lastTickAt = tsNow();
+  }
+
+  /* ──────────────────────────────────────────────────
+     § 4  同步到 meow-phone.js 的多维状态栏
+     meow-phone.js 用 charstate 存角色属性，
+     我们把 worldstate 里的值写进去，手机 UI 自动刷新
+  ────────────────────────────────────────────────── */
+
+  function syncToPhone() {
+    try {
+      // 找到所有以 _charstate_ 结尾的 key，写入状态
+      // 格式形如：standalone_main_charstate_1 或 standalone_main_charstate_player
+      var uid = (typeof meowGetChatUID === 'function') ? meowGetChatUID() : 'standalone_main';
+      var p = _state.player;
+
+      // 先尝试读已有的 charstate keys，找到就更新
+      var updated = false;
+      for (var i = 0; i < localStorage.length; i++) {
+        var k = localStorage.key(i);
+        if (k && k.startsWith(uid + '_charstate_')) {
+          var cs = lsGet(k, {}) || {};
+          // 只覆盖世界引擎管理的字段，手机自己的字段保持不变
+          cs.energy   = p.energy;
+          cs.mood     = p.mood;
+          cs.health   = p.health;
+          cs.hunger   = p.hunger;
+          cs.money    = p.money;
+          cs.location = p.location;
+          lsSet(k, cs);
+          updated = true;
+        }
+      }
+
+      // 如果一个都没找到（首次运行），写一个默认 key
+      if (!updated) {
+        var defaultKey = uid + '_charstate_player';
+        lsSet(defaultKey, {
+          energy: p.energy, mood: p.mood, health: p.health,
+          hunger: p.hunger, money: p.money, location: p.location,
+        });
+      }
+
+      // 尝试通知手机 UI 刷新状态栏（如果手机模块提供了刷新方法）
+      if (window.MEOW && window.MEOW.phone && typeof window.MEOW.phone.refreshStats === 'function') {
+        window.MEOW.phone.refreshStats();
+      }
+    } catch (e) {
+      console.warn('[MeowWorld] syncToPhone 失败:', e);
+    }
+  }
+
+  /* ──────────────────────────────────────────────────
+     § 5  广播事件
+     其他模块监听 meow:world-changed 来刷新自己的 UI
+     示例：window.addEventListener('meow:world-changed', e => { ... })
+  ────────────────────────────────────────────────── */
+
+  function broadcast(detail) {
+    window.dispatchEvent(new CustomEvent('meow:world-changed', {
+      detail: Object.assign({ state: JSON.parse(JSON.stringify(_state.player)) }, detail || {})
+    }));
+  }
+
+  /* ──────────────────────────────────────────────────
+     § 6  事件日志
+  ────────────────────────────────────────────────── */
+
+  function pushLog(text, type) {
+    _state.eventLog.push({ text: text, type: type || 'misc', at: tsNow() });
+    if (_state.eventLog.length > 50) _state.eventLog = _state.eventLog.slice(-50);
+  }
+
+  /* ──────────────────────────────────────────────────
+     § 7  动作结算器  WorldAction.dispatch(action)
+     ─────────────────────────────────────────────────
+     action 参数格式：
+     {
+       type:      'WORK' | 'EAT' | 'SLEEP' | 'MOVE' | 'SHOP' | 'REST' | 自定义字符串,
+       cost:      { energy, mood, health, hunger, money },   // 消耗（填正数）
+       gain:      { energy, mood, health, hunger, money },   // 获得（填正数）
+       location:  '地点名',      // MOVE 时必填
+       task:      { id, title }, // 设置当前任务
+       clearTask: true,          // 清除当前任务
+       label:     '描述文字',    // 写入事件日志的文字
+     }
+     ─────────────────────────────────────────────────
+     返回值：
+     {
+       ok:     true / false,
+       reason: '失败原因（ok=false 时有值）',
+       before: { ...动作前状态 },
+       after:  { ...动作后状态 },
+       delta:  { ...各属性变化量 },
+     }
+  ────────────────────────────────────────────────── */
+
+  function dispatch(action) {
+    if (!action || !action.type) {
+      console.warn('[MeowWorld] dispatch：action 必须有 type 字段');
+      return { ok: false, reason: '缺少 type 字段' };
+    }
+
+    var p    = _state.player;
+    var cost = action.cost || {};
+    var gain = action.gain || {};
+
+    // 前置检查：资源够不够
+    if (cost.money  && p.money  < cost.money)  return { ok: false, reason: '金钱不足（需要 ' + cost.money  + '，当前 ' + p.money  + '）' };
+    if (cost.energy && p.energy < cost.energy) return { ok: false, reason: '体力不足（需要 ' + cost.energy + '，当前 ' + p.energy + '）' };
+
+    // 动作前快照
+    var before = JSON.parse(JSON.stringify(p));
+
+    // 扣除消耗
+    ['energy', 'mood', 'health', 'hunger'].forEach(function (s) {
+      if (cost[s]) p[s] = clamp(p[s] - cost[s]);
+    });
+    if (cost.money) p.money = Math.max(0, p.money - cost.money);
+
+    // 添加收益
+    ['energy', 'mood', 'health', 'hunger'].forEach(function (s) {
+      if (gain[s]) p[s] = clamp(p[s] + gain[s]);
+    });
+    if (gain.money) p.money = p.money + gain.money;
+
+    // 位置变更
+    if (action.type === 'MOVE' && action.location) p.location = action.location;
+
+    // 任务管理
+    if (action.task)      _state.activeTask = action.task;
+    if (action.clearTask) _state.activeTask = null;
+
+    // 写日志
+    var label = action.label || _defaultLabel(action);
+    pushLog(label, action.type);
+
+    // 保存 + 同步 + 广播
+    _state.lastTickAt = tsNow();
+    saveState();
+    syncToPhone();
+
+    var after = JSON.parse(JSON.stringify(p));
+    var delta = {};
+    Object.keys(after).forEach(function (k) {
+      if (after[k] !== before[k]) delta[k] = after[k] - before[k];
+    });
+
+    broadcast({ action: action.type, delta: delta, label: label });
+    console.log('[MeowWorld] ✓', action.type, '| 变化:', delta);
+
+    return { ok: true, before: before, after: after, delta: delta };
+  }
+
+  function _defaultLabel(action) {
+    var m = { WORK:'完成了一次工作', EAT:'吃了东西', SLEEP:'睡了一觉',
+              MOVE:'前往了' + (action.location||'某处'), SHOP:'购买了物品',
+              CHAT:'和角色聊了天', REST:'稍作休息' };
+    return m[action.type] || ('执行了：' + action.type);
+  }
+
+  /* ──────────────────────────────────────────────────
+     § 8  对外暴露的 API
+  ────────────────────────────────────────────────── */
+
+  window.WorldState = {
+    /** 获取当前玩家状态的只读副本 */
+    get player()     { return JSON.parse(JSON.stringify(_state.player)); },
+    /** 获取当前激活任务 */
+    get activeTask() { return _state.activeTask; },
+    /** 获取事件日志（最近 50 条） */
+    get log()        { return _state.eventLog.slice(); },
+    /**
+     * 直接设置某项属性（一般走 dispatch，这个用于调试或特殊情境）
+     * 示例：WorldState.set('money', 999)
+     */
+    set: function (stat, value) {
+      if (_state.player[stat] !== undefined) {
+        _state.player[stat] = (stat === 'money' || stat === 'location') ? value : clamp(value);
+        saveState();
+        syncToPhone();
+        broadcast({ action: 'SET', stat: stat, value: value });
+      }
+    },
+  };
+
+  window.WorldAction = {
+    dispatch: dispatch,
+  };
+
+  /* ──────────────────────────────────────────────────
+     § 9  初始化
+  ────────────────────────────────────────────────── */
+
+  (function init() {
+    loadState();
+    applyDecay();   // 补算挂机期间的衰减
+    saveState();
+    syncToPhone();
+
+    // 每 60 秒 tick 一次（持续更新挂机衰减 + 广播给 UI）
+    setInterval(function () {
+      applyDecay();
+      saveState();
+      syncToPhone();
+      broadcast({ action: 'TICK' });
+    }, 60 * 1000);
+
+    console.log('[MeowWorld] 世界引擎启动 ✓', JSON.parse(JSON.stringify(_state.player)));
+  })();
+
+})();
+/* ── meow-world.js end ── */
+</script>
+
+<script>
+/* ══════════════════════════════════════════════════════════════
+   meow-floating-avatar.js  ——  悬浮状态头像  v1.0
+   ──────────────────────────────────────────────────────────────
+   功能：
+     · 圆形悬浮头像，始终显示在手机 UI 上方
+     · 外圈弧线实时反映体力/心情/健康/饥饿综合状态
+     · 低状态自动亮红点警告
+     · 点击展开五维状态卡片（带进度条）
+     · 可拖拽，位置自动记忆
+     · 在设置页「悬浮状态头像」开关控制显示/隐藏
+══════════════════════════════════════════════════════════════ */
+(function () {
+  'use strict';
+
+  var LS_POS = 'meow.floatavatar.pos';
+  var LS_SET = 'meow.floatavatar.visible';
+
+  /* ── 读手机设置（复用主体的 phoneGetG 找不到时降级 localStorage） ── */
+  function _loadPhoneSettings() {
+    try {
+      if (typeof phoneLoadSettings === 'function') return phoneLoadSettings();
+    } catch (e) {}
+    try {
+      var raw = localStorage.getItem('meow_phone_global_settings_data_v1');
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) { return {}; }
+  }
+
+  /* ── 是否显示 ── */
+  function _shouldShow() {
+    var s = _loadPhoneSettings();
+    return !!s.showFloatingAvatar;
+  }
+
+  /* ── 从 WorldState 读状态（引擎未加载时返回默认） ── */
+  function _getStats() {
+    try {
+      if (window.WorldState) return window.WorldState.player;
+    } catch (e) {}
+    return { energy: 80, mood: 70, health: 90, hunger: 70, money: 500, location: '家' };
+  }
+
+  /* ─────────────────────────── DOM 构建 ─────────────────────────── */
+  var _root = null;   // 外层容器
+  var _card = null;   // 展开的状态卡片
+
+  var STATS_DEF = [
+    { key: 'energy', label: '体力', color: '#ff7b7b', icon: '⚡' },
+    { key: 'mood',   label: '心情', color: '#ffd86e', icon: '☀️' },
+    { key: 'health', label: '健康', color: '#63e6a0', icon: '💚' },
+    { key: 'hunger', label: '饥饿', color: '#ffb347', icon: '🍚' },
+  ];
+
+  function _buildCSS() {
+    var s = document.createElement('style');
+    s.id = 'meow-float-avatar-style';
+    s.textContent = `
+      /* ── 悬浮头像容器：挂在 phone-root 内，absolute 不被裁剪 ── */
+      #meow-float-avatar {
+        position: absolute;
+        z-index: 99998;
+        width: 56px;
+        height: 56px;
+        touch-action: none;
+        user-select: none;
+        -webkit-user-select: none;
+        transition: opacity .2s;
+      }
+      #meow-float-avatar.hidden { opacity: 0; pointer-events: none; }
+
+      /* ── SVG 环 + 头像按钮 ── */
+      #meow-float-avatar .mfa-btn {
+        position: relative;
+        width: 56px;
+        height: 56px;
+        cursor: pointer;
+        border: none;
+        background: none;
+        padding: 0;
+        -webkit-tap-highlight-color: transparent;
+      }
+      #meow-float-avatar .mfa-ring {
+        position: absolute;
+        inset: 0;
+        width: 56px;
+        height: 56px;
+        pointer-events: none;
+      }
+      #meow-float-avatar .mfa-face {
+        position: absolute;
+        inset: 6px;
+        border-radius: 50%;
+        background: var(--ph-bg-primary, #f5f2ee);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 22px;
+        box-shadow: 0 2px 10px rgba(0,0,0,.15);
+        overflow: hidden;
+        transition: transform .12s;
+      }
+      #meow-float-avatar .mfa-btn:active .mfa-face { transform: scale(.92); }
+
+      /* ── 警告红点 ── */
+      #meow-float-avatar .mfa-badge {
+        position: absolute;
+        top: 4px;
+        right: 4px;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #ff4444;
+        border: 1.5px solid #fff;
+        display: none;
+      }
+      #meow-float-avatar .mfa-badge.show { display: block; }
+
+      /* ── 展开卡片 ── */
+      #meow-float-card {
+        position: absolute;
+        z-index: 99999;
+        width: 180px;
+        background: var(--ph-bg-primary, #f5f2ee);
+        border-radius: 16px;
+        box-shadow: 0 8px 32px rgba(0,0,0,.18);
+        padding: 14px 14px 10px;
+        display: none;
+        animation: mfcIn .18s cubic-bezier(.34,1.56,.64,1);
+        border: 1px solid rgba(0,0,0,.06);
+      }
+      #meow-float-card.show { display: block; }
+      @keyframes mfcIn {
+        from { opacity:0; transform: scale(.88) translateY(6px); }
+        to   { opacity:1; transform: scale(1)  translateY(0);   }
+      }
+
+      /* ── 卡片内：位置行 ── */
+      #meow-float-card .mfc-loc {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        font-size: 11px;
+        color: var(--ph-text-dim, #aaa);
+        margin-bottom: 10px;
+        padding-bottom: 8px;
+        border-bottom: 1px solid rgba(0,0,0,.06);
+      }
+
+      /* ── 卡片内：每行状态 ── */
+      #meow-float-card .mfc-row {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        margin-bottom: 7px;
+      }
+      #meow-float-card .mfc-icon {
+        font-size: 13px;
+        width: 18px;
+        text-align: center;
+        flex-shrink: 0;
+      }
+      #meow-float-card .mfc-bar-wrap {
+        flex: 1;
+        height: 5px;
+        background: rgba(0,0,0,.08);
+        border-radius: 3px;
+        overflow: hidden;
+      }
+      #meow-float-card .mfc-bar {
+        height: 100%;
+        border-radius: 3px;
+        transition: width .4s cubic-bezier(.4,0,.2,1);
+      }
+      #meow-float-card .mfc-val {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--ph-text, #333);
+        width: 24px;
+        text-align: right;
+        flex-shrink: 0;
+      }
+
+      /* ── 卡片内：金钱行 ── */
+      #meow-float-card .mfc-money {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        margin-top: 8px;
+        padding-top: 8px;
+        border-top: 1px solid rgba(0,0,0,.06);
+        font-size: 12px;
+        color: var(--ph-text, #333);
+      }
+      #meow-float-card .mfc-money-val {
+        font-weight: 700;
+        color: var(--ph-accent, #07c160);
+      }
+    `;
+    document.head.appendChild(s);
+  }
+
+  function _getPhoneRoot() {
+    return document.getElementById('meow-phone-root') || document.body;
+  }
+
+  function _buildDOM() {
+    /* ── 等待 phone-root 存在再挂载（最多等 5 秒） ── */
+    var attempts = 0;
+    function tryMount() {
+      var phoneRoot = document.getElementById('meow-phone-root');
+      if (!phoneRoot) {
+        if (++attempts < 50) { setTimeout(tryMount, 100); return; }
+        phoneRoot = document.body; // 超时降级
+      }
+
+      var pos = _loadPos(phoneRoot);
+      var wrap = document.createElement('div');
+      wrap.id = 'meow-float-avatar';
+      wrap.className = 'hidden';
+      wrap.style.left = pos.x + 'px';
+      wrap.style.top  = pos.y + 'px';
+
+      wrap.innerHTML = `
+        <button class="mfa-btn" id="mfa-btn-inner" aria-label="状态面板">
+          <svg class="mfa-ring" viewBox="0 0 56 56" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="28" cy="28" r="24" stroke="rgba(0,0,0,.08)" stroke-width="3.5"/>
+            <circle id="mfa-arc" cx="28" cy="28" r="24"
+              stroke="#63e6a0" stroke-width="3.5"
+              stroke-linecap="round"
+              stroke-dasharray="150.8"
+              stroke-dashoffset="37.7"
+              transform="rotate(-90 28 28)"
+              style="transition: stroke-dashoffset .5s, stroke .4s;"/>
+          </svg>
+          <div class="mfa-face" id="mfa-face">🐱</div>
+          <div class="mfa-badge" id="mfa-badge"></div>
+        </button>
+      `;
+      phoneRoot.appendChild(wrap);
+      _root = wrap;
+
+      /* ── 展开卡片 ── */
+      var card = document.createElement('div');
+      card.id = 'meow-float-card';
+      card.innerHTML = `
+        <div class="mfc-loc">
+          <span>📍</span><span id="mfc-loc-text">家</span>
+        </div>
+        ${STATS_DEF.map(function(s){ return `
+          <div class="mfc-row">
+            <span class="mfc-icon">${s.icon}</span>
+            <div class="mfc-bar-wrap">
+              <div class="mfc-bar" id="mfc-bar-${s.key}" style="width:75%;background:${s.color}"></div>
+            </div>
+            <span class="mfc-val" id="mfc-val-${s.key}">75</span>
+          </div>
+        `; }).join('')}
+        <div class="mfc-money">
+          <span>💰</span>
+          <span class="mfc-money-val" id="mfc-money-val">500</span>
+          <span style="color:var(--ph-text-dim,#aaa)">元</span>
+        </div>
+      `;
+      phoneRoot.appendChild(card);
+      _card = card;
+
+      _initDrag();
+      _applyVisibility();
+      console.log('[MeowFloatAvatar] 挂载到', phoneRoot.id || 'body', '✓');
+    }
+    tryMount();
+  }
+
+  /* ─────────────────────── 渲染逻辑 ─────────────────────── */
+
+  /**
+   * 根据综合状态值（0-100）生成弧线参数
+   * 圆周 = 2π×24 ≈ 150.8
+   * 满格（100%）时 dashoffset = 0
+   * 空格（0%）  时 dashoffset = 150.8
+   */
+  function _pct2offset(pct) {
+    return (150.8 * (1 - Math.max(0, Math.min(1, pct / 100)))).toFixed(1);
+  }
+
+  /** 根据数值返回颜色 */
+  function _statColor(v) {
+    if (v >= 60) return '#63e6a0'; // 绿
+    if (v >= 30) return '#ffd86e'; // 黄
+    return '#ff7b7b';              // 红
+  }
+
+  function _refresh() {
+    if (!_root) return;
+    var p = _getStats();
+
+    /* 综合状态 = 四项均值 */
+    var avg = Math.round((p.energy + p.mood + p.health + p.hunger) / 4);
+    var arc  = document.getElementById('mfa-arc');
+    var badge = document.getElementById('mfa-badge');
+    if (arc) {
+      arc.setAttribute('stroke-dashoffset', _pct2offset(avg));
+      arc.style.stroke = _statColor(avg);
+    }
+
+    /* 红点：任一项低于 25 就亮 */
+    var warn = p.energy < 25 || p.mood < 25 || p.health < 25 || p.hunger < 25;
+    if (badge) badge.classList.toggle('show', warn);
+
+    /* 更新卡片内容 */
+    STATS_DEF.forEach(function(s) {
+      var bar = document.getElementById('mfc-bar-' + s.key);
+      var val = document.getElementById('mfc-val-' + s.key);
+      var v = Math.round(p[s.key] || 0);
+      if (bar) { bar.style.width = v + '%'; bar.style.background = _statColor(v); }
+      if (val) val.textContent = v;
+    });
+
+    var loc  = document.getElementById('mfc-loc-text');
+    var mon  = document.getElementById('mfc-money-val');
+    if (loc) loc.textContent = p.location || '家';
+    if (mon) mon.textContent = (p.money || 0);
+  }
+
+  /* ─────────────────────── 卡片开合 ─────────────────────── */
+
+  var _cardOpen = false;
+
+  function _openCard() {
+    if (!_card || !_root) return;
+    _refresh();
+    /* 卡片位置：头像 offsetLeft/Top，不超出容器 */
+    var ox = _root.offsetLeft;
+    var oy = _root.offsetTop;
+    var cw = 180, ch = 220;
+    var pr = _getPhoneRoot();
+    var vw = pr.offsetWidth  || window.innerWidth;
+    var vh = pr.offsetHeight || window.innerHeight;
+    var left = ox + 64;
+    var top  = oy;
+    if (left + cw > vw) left = ox - cw - 8;
+    if (top  + ch > vh) top  = vh - ch - 8;
+    if (left < 8) left = 8;
+    if (top  < 8) top  = 8;
+    _card.style.left = left + 'px';
+    _card.style.top  = top  + 'px';
+    _card.classList.add('show');
+    _cardOpen = true;
+  }
+
+  function _closeCard() {
+    if (_card) _card.classList.remove('show');
+    _cardOpen = false;
+  }
+
+  function _toggleCard() {
+    _cardOpen ? _closeCard() : _openCard();
+  }
+
+  /* ─────────────────────── 拖拽 ─────────────────────── */
+
+  function _loadPos(container) {
+    try {
+      var p = JSON.parse(localStorage.getItem(LS_POS) || 'null');
+      if (p && p.x != null) return p;
+    } catch (e) {}
+    var c = container || _getPhoneRoot();
+    return { x: (c.offsetWidth || window.innerWidth) - 72, y: (c.offsetHeight || window.innerHeight) * 0.55 };
+  }
+
+  function _savePos(x, y) {
+    try { localStorage.setItem(LS_POS, JSON.stringify({ x: x, y: y })); } catch (e) {}
+  }
+
+  function _initDrag() {
+    if (!_root) return;
+    var dragging = false, startX, startY, origX, origY, moved;
+
+    function onStart(ex, ey) {
+      dragging = true; moved = false;
+      startX = ex; startY = ey;
+      origX = _root.offsetLeft;
+      origY = _root.offsetTop;
+      _closeCard();
+    }
+    function onMove(ex, ey) {
+      if (!dragging) return;
+      var dx = ex - startX, dy = ey - startY;
+      if (Math.abs(dx) + Math.abs(dy) > 4) moved = true;
+      var pr = _getPhoneRoot();
+      var maxX = (pr.offsetWidth  || window.innerWidth)  - 56;
+      var maxY = (pr.offsetHeight || window.innerHeight) - 56;
+      var nx = Math.max(0, Math.min(maxX, origX + dx));
+      var ny = Math.max(0, Math.min(maxY, origY + dy));
+      _root.style.left = nx + 'px';
+      _root.style.top  = ny + 'px';
+    }
+    function onEnd() {
+      if (!dragging) return;
+      dragging = false;
+      _savePos(_root.offsetLeft, _root.offsetTop);
+      if (!moved) _toggleCard();
+    }
+
+    _root.addEventListener('mousedown', function(e){ onStart(e.clientX, e.clientY); e.preventDefault(); });
+    document.addEventListener('mousemove', function(e){ onMove(e.clientX, e.clientY); });
+    document.addEventListener('mouseup',   function(){ onEnd(); });
+
+    _root.addEventListener('touchstart', function(e){ var t=e.touches[0]; onStart(t.clientX, t.clientY); }, {passive:true});
+    document.addEventListener('touchmove', function(e){ if(!dragging)return; var t=e.touches[0]; onMove(t.clientX, t.clientY); e.preventDefault(); }, {passive:false});
+    document.addEventListener('touchend',  function(){ onEnd(); });
+  }
+
+  /* ── 点击卡片外部关闭 ── */
+  document.addEventListener('click', function(e) {
+    if (!_cardOpen) return;
+    if (_card && _card.contains(e.target)) return;
+    if (_root && _root.contains(e.target)) return;
+    _closeCard();
+  });
+
+  /* ─────────────────────── 显示/隐藏控制 ─────────────────────── */
+
+  function _show() {
+    if (_root) { _root.classList.remove('hidden'); _refresh(); }
+  }
+  function _hide() {
+    if (_root) _root.classList.add('hidden');
+    _closeCard();
+  }
+  function _applyVisibility() {
+    _shouldShow() ? _show() : _hide();
+  }
+
+  /* ─────────────────────── 初始化 ─────────────────────── */
+
+  (function init() {
+    _buildCSS();
+    _buildDOM();  // _initDrag 和 _applyVisibility 在 tryMount 内执行
+
+    /* 世界状态变化 → 刷新 */
+    window.addEventListener('meow:world-changed', function() {
+      if (_cardOpen) _refresh();
+      else {
+        /* 只刷新弧线和红点，不打开卡片 */
+        var p = _getStats();
+        var avg = Math.round((p.energy + p.mood + p.health + p.hunger) / 4);
+        var arc   = document.getElementById('mfa-arc');
+        var badge = document.getElementById('mfa-badge');
+        if (arc) { arc.setAttribute('stroke-dashoffset', _pct2offset(avg)); arc.style.stroke = _statColor(avg); }
+        if (badge) badge.classList.toggle('show', p.energy < 25 || p.mood < 25 || p.health < 25 || p.hunger < 25);
+      }
+    });
+
+    /* 设置开关 → 联动显示/隐藏 */
+    window.addEventListener('meow:floating-avatar-toggle', function(e) {
+      e.detail && e.detail.show ? _show() : _hide();
+    });
+
+    /* 每 60s 被动刷新一次（对齐 world 引擎的 tick） */
+    setInterval(function() {
+      if (_shouldShow() && _cardOpen) _refresh();
+    }, 60000);
+
+    console.log('[MeowFloatAvatar] 悬浮头像就绪 ✓ 当前状态:', _shouldShow() ? '显示' : '隐藏（去设置开启）');
+  })();
+
+})();
+/* ── meow-floating-avatar.js end ── */
 </script>
 </body>
 </html>
