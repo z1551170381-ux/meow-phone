@@ -1988,28 +1988,118 @@ function ensureTuneStyle(){
     lpSt.id = 'meow-lifepush-style-v1';
     lpSt.textContent = `
 .meowLifePushToast{
-  position:fixed; bottom:80px; left:50%; transform:translateX(-50%) translateY(20px);
-  min-width:240px; max-width:320px;
-  background:rgba(20,20,28,.92); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
-  border:1px solid rgba(255,255,255,.12); border-radius:16px;
-  padding:12px 14px; display:flex; align-items:flex-start; gap:10px;
-  box-shadow:0 8px 32px rgba(0,0,0,.45);
-  opacity:0; transition:opacity .3s,transform .3s; pointer-events:none; z-index:99999;
+  position:absolute;
+  left:50%;
+  top:calc(env(safe-area-inset-top, 0px) + 10px);
+  transform:translateX(-50%) translateY(-18px) scale(.985);
+  width:min(92%, 360px);
+  min-height:64px;
+  padding:12px 14px;
+  display:flex;
+  align-items:flex-start;
+  gap:10px;
+
+  background:linear-gradient(180deg, rgba(255,255,255,.72), rgba(255,255,255,.58));
+  backdrop-filter:blur(24px) saturate(1.08);
+  -webkit-backdrop-filter:blur(24px) saturate(1.08);
+
+  border:1px solid rgba(255,255,255,.52);
+  border-radius:20px;
+  box-shadow:
+    0 12px 34px rgba(86,78,68,.14),
+    inset 0 1px 0 rgba(255,255,255,.34);
+
+  opacity:0;
+  transition:opacity .26s ease, transform .28s cubic-bezier(.22,1,.36,1);
+  pointer-events:none;
+  z-index:2147483000;
   cursor:pointer;
 }
-.meowLifePushToast.show{ opacity:1; transform:translateX(-50%) translateY(0); pointer-events:auto; }
-.meowLifePushToast .lpAvatar{
-  width:36px; height:36px; border-radius:50%; background:rgba(255,255,255,.15);
-  display:flex; align-items:center; justify-content:center; font-size:15px; font-weight:700;
-  color:#fff; flex-shrink:0; overflow:hidden;
+
+.meowLifePushToast.show{
+  opacity:1;
+  transform:translateX(-50%) translateY(0) scale(1);
+  pointer-events:auto;
 }
-.meowLifePushToast .lpAvatar img{ width:100%; height:100%; object-fit:cover; border-radius:50%; }
-.meowLifePushToast .lpBody{ flex:1; min-width:0; }
-.meowLifePushToast .lpName{ font-size:12px; font-weight:600; color:rgba(255,255,255,.7); margin-bottom:2px; }
-.meowLifePushToast .lpText{ font-size:13px; color:#fff; line-height:1.4; word-break:break-all; }
+
+.meowLifePushToast .lpAvatar{
+  width:40px;
+  height:40px;
+  border-radius:50%;
+  background:rgba(255,255,255,.42);
+  border:1px solid rgba(255,255,255,.48);
+  box-shadow:0 4px 14px rgba(120,108,92,.10);
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  font-size:15px;
+  font-weight:700;
+  color:rgba(42,34,28,.86);
+  flex-shrink:0;
+  overflow:hidden;
+}
+
+.meowLifePushToast .lpAvatar img{
+  width:100%;
+  height:100%;
+  object-fit:cover;
+  border-radius:50%;
+}
+
+.meowLifePushToast .lpBody{
+  flex:1;
+  min-width:0;
+}
+
+.meowLifePushToast .lpMeta{
+  display:flex;
+  align-items:center;
+  gap:6px;
+  margin-bottom:2px;
+}
+
+.meowLifePushToast .lpDot{
+  width:5px;
+  height:5px;
+  border-radius:50%;
+  background:rgba(255,190,120,.86);
+  flex-shrink:0;
+}
+
+.meowLifePushToast .lpName{
+  font-size:13px;
+  font-weight:700;
+  color:rgba(34,28,22,.88);
+  line-height:1.2;
+}
+
+.meowLifePushToast .lpText{
+  font-size:13px;
+  color:rgba(42,34,28,.76);
+  line-height:1.42;
+  word-break:break-word;
+  display:-webkit-box;
+  -webkit-line-clamp:2;
+  -webkit-box-orient:vertical;
+  overflow:hidden;
+}
+
 .meowLifePushToast .lpClose{
-  font-size:14px; color:rgba(255,255,255,.4); background:transparent; border:0; cursor:pointer;
-  padding:0; flex-shrink:0; line-height:1; align-self:flex-start;
+  width:22px;
+  height:22px;
+  border-radius:50%;
+  border:0;
+  background:rgba(255,255,255,.32);
+  color:rgba(60,52,44,.55);
+  font-size:12px;
+  cursor:pointer;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  padding:0;
+  flex-shrink:0;
+  line-height:1;
+  align-self:flex-start;
 }
 .meowIncomingCall{
   position:fixed; top:0; left:0; right:0; width:100%;
@@ -29678,37 +29768,100 @@ function bindPageScroll(){
         try{
 
           function _showLifePushToast(npcId, npcName, avatarHint, text, onTap){
-            try{
-              var existing = doc.querySelector('.meowLifePushToast');
-              if (existing) existing.remove();
-              var el = doc.createElement('div');
-              el.className = 'meowLifePushToast';
-              var avatarImg = phoneGetAvatar ? phoneGetAvatar(npcId) : null;
-              var avatarHtml = avatarImg
-                ? '<img src="' + avatarImg + '" />'
-                : (avatarHint || (npcName||'?').charAt(0));
-              el.innerHTML =
-                '<div class="lpAvatar">' + avatarHtml + '</div>' +
-                '<div class="lpBody">' +
-                  '<div class="lpName">' + (npcName||npcId) + '</div>' +
-                  '<div class="lpText">' + String(text||'').slice(0,80) + '</div>' +
-                '</div>' +
-                '<button class="lpClose">✕</button>';
-              doc.body.appendChild(el);
-              requestAnimationFrame(function(){ el.classList.add('show'); });
-              el.querySelector('.lpClose').addEventListener('click', function(e){
-                e.stopPropagation(); el.classList.remove('show');
-                setTimeout(function(){ el.remove(); }, 350);
-              });
-              el.addEventListener('click', function(){
-                el.classList.remove('show');
-                setTimeout(function(){ el.remove(); }, 350);
-                try{ if (onTap) onTap(); }catch(e2){}
-              });
-              // 8秒后自动消失
-              setTimeout(function(){ if(el.isConnected){ el.classList.remove('show'); setTimeout(function(){ el.remove(); },350); } }, 8000);
-            }catch(e){ console.warn('[LifePush] toast error:', e); }
-          }
+  try{
+    // 当前就在这个角色的聊天详情页：不弹通知
+    var inSameChatDetail = false;
+    try{
+      inSameChatDetail =
+        !!state &&
+        String(state.app || '') === 'chatDetail' &&
+        String(state.chatTarget || '') === String(npcId || '');
+    }catch(_e){}
+
+    if (inSameChatDetail) {
+      var oldInChat = doc.querySelector('.meowLifePushToast');
+      if (oldInChat) {
+        try{ oldInChat.remove(); }catch(_e2){}
+      }
+      return;
+    }
+
+    var _esc = (typeof esc === 'function')
+      ? esc
+      : function(s){
+          var d = document.createElement('div');
+          d.textContent = String(s || '');
+          return d.innerHTML;
+        };
+
+    var parent = (root && root.isConnected) ? root : doc.body;
+
+    var existing = parent.querySelector('.meowLifePushToast');
+    if (existing) existing.remove();
+
+    var el = doc.createElement('div');
+    el.className = 'meowLifePushToast';
+
+    // 如果挂到 body，就改成 fixed；挂到 root 则保持 absolute
+    if (parent === doc.body){
+      el.style.position = 'fixed';
+    }
+
+    var avatarImg = phoneGetAvatar ? phoneGetAvatar(npcId) : null;
+    var avatarHtml = avatarImg
+      ? '<img src="' + _esc(avatarImg) + '" />'
+      : _esc(avatarHint || (npcName || '?').charAt(0));
+
+    el.innerHTML =
+      '<div class="lpAvatar">' + avatarHtml + '</div>' +
+      '<div class="lpBody">' +
+        '<div class="lpMeta">' +
+          '<span class="lpDot"></span>' +
+          '<div class="lpName">' + _esc(npcName || npcId || '新消息') + '</div>' +
+        '</div>' +
+        '<div class="lpText">' + _esc(String(text || '').slice(0, 88)) + '</div>' +
+      '</div>' +
+      '<button class="lpClose" aria-label="关闭">✕</button>';
+
+    parent.appendChild(el);
+
+    requestAnimationFrame(function(){
+      el.classList.add('show');
+    });
+
+    function closeToast(){
+      try{
+        el.classList.remove('show');
+        setTimeout(function(){
+          try{ el.remove(); }catch(e){}
+        }, 260);
+      }catch(e){}
+    }
+
+    var closeBtn = el.querySelector('.lpClose');
+    if (closeBtn){
+      closeBtn.addEventListener('click', function(e){
+        e.stopPropagation();
+        closeToast();
+      });
+    }
+
+    el.addEventListener('click', function(){
+      closeToast();
+      try{
+        if (onTap) onTap();
+      }catch(e2){}
+    });
+
+    // 4.5 秒自动消失
+    setTimeout(function(){
+      if (el && el.isConnected) closeToast();
+    }, 4500);
+
+  }catch(e){
+    console.warn('[LifePush] toast error:', e);
+  }
+}
 
           // ★ 暴露给悬浮头像模块使用
           window._meowShowLifePushToast = _showLifePushToast;
