@@ -8821,13 +8821,11 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
               if (appName === 'news') {
                 root.querySelectorAll('.afSettingsModal').forEach(function(m){m.remove();});
                 try{ toast('📡 正在刷新资讯…'); }catch(e){}
-                // 清缓存
                 try{ for(var _nk=0;_nk<localStorage.length;_nk++){var _nkey=localStorage.key(_nk);if(_nkey&&_nkey.indexOf('meow.news.cache')===0)localStorage.removeItem(_nkey);} }catch(e){}
-                // 调用 AI 生成并写入缓存
                 if(typeof window._meowGenerateNews === 'function'){
                   window._meowGenerateNews('all').then(function(items){
                     if(items && items.length){
-                      try{ localStorage.setItem('meow.news.cache.v1_all', JSON.stringify({items:items,at:Date.now()})); }catch(e){}
+                      try{ window._meowSaveNewsCacheBundle(items); }catch(e){}
                       try{ toast('✅ 资讯已刷新（'+items.length+'条）'); }catch(e){}
                     } else {
                       try{ toast('⚠️ 资讯生成为空，使用默认数据'); }catch(e){}
@@ -8842,16 +8840,11 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
               if (appName === 'shop') {
                 root.querySelectorAll('.afSettingsModal').forEach(function(m){m.remove();});
                 try{ toast('🛒 正在刷新商品…'); }catch(e){}
-                // 清除商品缓存并调用 AI 生成
-                try{ localStorage.removeItem('meow.shop.products.v1'); }catch(e){}
-                if(typeof window._meowGenerateShopProducts === 'function'){
-                  window._meowGenerateShopProducts('food').then(function(products){
-                    if(products && products.length){
-                      try{ localStorage.setItem('meow.shop.products.v1', JSON.stringify({food:products,at:Date.now()})); }catch(e){}
-                      try{ toast('✅ 商品已刷新（'+products.length+'件）'); }catch(e){}
-                    } else {
-                      try{ toast('⚠️ 商品生成为空，使用默认数据'); }catch(e){}
-                    }
+                try{ if(typeof _clearShopProductCache==='function') _clearShopProductCache(); }catch(e){}
+                if(typeof window._meowRefreshShopAllCategories === 'function'){
+                  window._meowRefreshShopAllCategories(null, { force:true, batchHint:true }).then(function(result){
+                    var total = 0; try{ Object.keys(result||{}).forEach(function(k){ total += ((result[k]||[]).length||0); }); }catch(e){}
+                    try{ toast('✅ 商品已刷新（'+ total +'件）'); }catch(e){}
                     if(state.app==='shop') renderApp('shop');
                   }).catch(function(e){ try{ toast('❌ 商品生成失败: '+e.message); }catch(e2){} });
                 } else {
@@ -8862,11 +8855,10 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
               if (appName === 'work') {
                 root.querySelectorAll('.afSettingsModal').forEach(function(m){m.remove();});
                 try{ toast('💼 正在刷新工作…'); }catch(e){}
-                // 优先用页面内的刷新（会渲染），否则用全局生成器
                 if(typeof window._workRefreshAI === 'function'){
                   window._workRefreshAI();
                 } else if(typeof window._meowGenerateAIWork === 'function'){
-                  window._meowGenerateAIWork().then(function(items){
+                  window._meowGenerateAIWork({ force:true }).then(function(items){
                     if(items && items.length){
                       try{ toast('✅ 工作已刷新（'+items.length+'项）'); }catch(e){}
                     } else {
@@ -12352,7 +12344,7 @@ function _buildFallbackAIFriendCandidate(){
               _constraintLines.length ? '【必须满足以下约束条件】\n' + _constraintLines.join('\n') : '',
               '请生成 1 个最适合现在加入\"新的朋友\"的候选。',
               '只返回 JSON。'
-            ].filter(Boolean).join('\n');
+            ] .filter(Boolean).join('\n');
 
             const ret = await PhoneAI.chat({
               system: systemPrompt,
@@ -12653,7 +12645,7 @@ function _buildFallbackAIFriendCandidate(){
             var ch = result.characters[idx];
             if (!ch) return;
             // 将角色卡的完整描述作为 profile 和 identity 传入
-            var fullProfile = [ch.description, ch.personality, ch.scenario].filter(Boolean).join('\n');
+            var fullProfile = [ch.description, ch.personality, ch.scenario] .filter(Boolean).join('\n');
             addCandidate(ch.name, 'stcard', {
               profile: fullProfile.slice(0, 3000),
               identity: (ch.description || '').slice(0, 1000)
@@ -16106,6 +16098,7 @@ function _buildFallbackAIFriendCandidate(){
         var resetBtn = mask.querySelector('#work-reset-data');
         if(resetBtn) resetBtn.addEventListener('click',function(){
           try{ localStorage.removeItem('meow.quests.v1'); }catch(e){}
+          try{ localStorage.removeItem('meow.work.ai.v1'); }catch(e){}
           mask.remove(); try{toast('已清空工作数据');}catch(e){}
         });
       }
@@ -16115,41 +16108,94 @@ function _buildFallbackAIFriendCandidate(){
       window._openShopFeedSettingsGlobal = _openShopFeedSettings;
       window._openWorkFeedSettingsGlobal = _openWorkFeedSettings;
 
+      function _buildWorldBundleContextLite(){
+        var parts = [];
+        try{ if(window.WorldState && window.WorldState.player){ var p=window.WorldState.player; parts.push('玩家位置：'+(p.location||'家')); parts.push('玩家状态：体力'+Math.round(p.energy||0)+' 心情'+Math.round(p.mood||0)+' 饥饿'+Math.round(p.hunger||0)+' 健康'+Math.round(p.health||0)+' 余额$'+Math.round(p.money||0)); } }catch(e){}
+        try{ for(var i=0;i<localStorage.length;i++){ var k=localStorage.key(i); if(k && (k.indexOf('meow_map')!==-1 || k.indexOf('meow_island')!==-1)){ var md=JSON.parse(localStorage.getItem(k)||'null'); if(md && md.name){ parts.push('世界：'+md.name); if(md.landmarks && md.landmarks.length) parts.push('地标：'+md.landmarks.slice(0,12).map(function(l){ return l.customName||l.name; }).filter(Boolean).join('、')); break; } } } }catch(e){}
+        try{ var sr=localStorage.getItem('meow_phone_chat_summary_v1'); if(sr){ var ss=JSON.parse(sr); var byChat=ss.byChat||{}; var snippets=[]; Object.keys(byChat).slice(0,6).forEach(function(id){ try{ var entry=byChat[id]; var modes=entry.modes||{}; var mode=modes.online||modes.offline||Object.values(modes)[0]; var txt=(mode && (mode.lastSummary||mode.summary))||''; if(txt) snippets.push(String(txt).slice(0,90)); }catch(e2){} }); if(snippets.length) parts.push('近期剧情：'+snippets.join(' | ')); } }catch(e){}
+        try{ var cr=localStorage.getItem('meow_phone_c_standalone_main_contacts_v1'); if(cr){ var cdb=JSON.parse(cr); var names=(cdb.list||[]).slice(0,8).map(function(c){ return c.name + (c.identity ? '('+String(c.identity).slice(0,12)+')' : ''); }).join('、'); if(names) parts.push('角色：'+names); } }catch(e){}
+        try{ if(window.MEOW_WB_API && typeof window.MEOW_WB_API.getEntries==='function'){ var entries=window.MEOW_WB_API.getEntries()||[]; if(entries.length){ parts.push('世界书：'+entries.slice(0,5).map(function(e){ return (e.comment||e.key||'')+':'+String(e.content||'').slice(0,40); }).join(' / ')); } } }catch(e){}
+        return parts.join('；') || '现代都市虚拟世界';
+      }
+      async function _meowGenerateWorldBundle(targets){
+        targets = Array.isArray(targets) ? targets.filter(Boolean) : ['news','shop','work'];
+        if (!targets.length) return { news:null, shop:null, work:null };
+        var hasPhoneAI = (typeof window.PhoneAI !== 'undefined' && window.PhoneAI && typeof window.PhoneAI.chat === 'function');
+        var apiCfg = hasPhoneAI ? (PhoneAI._getConfig ? PhoneAI._getConfig('background') : null) : null;
+        if (!hasPhoneAI || !apiCfg || !apiCfg.endpoint || !apiCfg.key) throw new Error('no_api');
+        var _shopGetter = window._meowShopGetEnabledCategories;
+        var _shopCountGetter = window._meowShopGetCategoryCount;
+        var shopCats = (typeof _shopGetter === 'function' ? _shopGetter() : []).map(function(c){ return { id:c.id, name:c.name, count:(typeof _shopCountGetter==='function' ? _shopCountGetter(c.id) : 6) }; });
+        var sys = '你是虚拟世界数据生成AI。只返回一个JSON对象，不要任何解释、不要代码块。';
+        var prompt = [
+          '背景：' + _buildWorldBundleContextLite(),
+          '请一次性生成以下目标：' + targets.join('、'),
+          targets.indexOf('news') >= 0 ? 'news：生成5-6条资讯，字段为[{id,type,title,summary,detail,urgent,reward,landmark,action}]，type只能是chance/trade/event/intel/world。' : '',
+          targets.indexOf('shop') >= 0 ? 'shop：按分类返回商品对象，格式为{'+ shopCats.map(function(c){ return '"'+c.id+'":'+c.count+'件'; }).join('，') + '}；每件字段[{id,name,emoji,price,desc,story,vendor,place,reason,tags,effect}]。' : '',
+          targets.indexOf('work') >= 0 ? 'work：生成6-8个工作，字段为[{templateId,title,desc,cost,reward,minEnergy,tags}]。' : '',
+          '总格式：{"news":[],"shop":{},"work":[]}。未请求的键也保留空数组/空对象。'
+        ].filter(Boolean).join('\n');
+        var result = await window.PhoneAI.chat({ system: sys, messages:[{ role:'user', content: prompt }], temperature:0.8, maxTokens:2200, channel:'background', timeout:90 });
+        if (!result || !result.ok || !result.data) throw new Error(result ? result.error : 'bundle_failed');
+        var text = String(result.data).replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+        var objMatch = text.match(/\{[\s\S]*\}/);
+        if (objMatch) text = objMatch[0];
+        text = text.replace(/,\s*([\]}])/g, '$1');
+        var parsed = JSON.parse(text);
+        return {
+          news: Array.isArray(parsed.news) ? parsed.news : [],
+          shop: (parsed.shop && typeof parsed.shop === 'object') ? parsed.shop : {},
+          work: Array.isArray(parsed.work) ? parsed.work : []
+        };
+      }
+      function _meowApplyWorldBundle(bundle){
+        bundle = bundle || {};
+        if (Array.isArray(bundle.news) && bundle.news.length) {
+          try{ window._meowSaveNewsCacheBundle(bundle.news); }catch(e){}
+        }
+        if (bundle.shop && typeof bundle.shop === 'object') {
+          try{
+            var shopKey = 'meow.shop.products.v2';
+            var oldKey = 'meow.shop.products.v1';
+            var raw = null; try{ raw = JSON.parse(localStorage.getItem(shopKey) || 'null'); }catch(e){}
+            if (!raw || typeof raw !== 'object' || !raw.categories) raw = { v:2, categories:{}, at:0 };
+            Object.keys(bundle.shop).forEach(function(catId){
+              if (Array.isArray(bundle.shop[catId]) && bundle.shop[catId].length) raw.categories[catId] = { items: bundle.shop[catId], at: Date.now() };
+            });
+            raw.at = Date.now();
+            try{ localStorage.setItem(shopKey, JSON.stringify(raw)); }catch(e){}
+            try{ var legacy = { at: raw.at }; Object.keys(raw.categories||{}).forEach(function(k){ legacy[k] = (raw.categories[k] && raw.categories[k].items) ? raw.categories[k].items : []; }); localStorage.setItem(oldKey, JSON.stringify(legacy)); }catch(e){}
+          }catch(e){}
+        }
+        if (Array.isArray(bundle.work) && bundle.work.length) {
+          try{ if (typeof window._meowSaveWorkAICache === 'function') window._meowSaveWorkAICache(bundle.work); else localStorage.setItem('meow.work.ai.v1', JSON.stringify({ items:bundle.work, at:Date.now() })); }catch(e){}
+        }
+      }
+      window._meowGenerateWorldBundle = _meowGenerateWorldBundle;
+      window._meowApplyWorldBundle = _meowApplyWorldBundle;
+
       // ★ 一键刷新全部世界数据
       function _refreshAllWorldData(){
         try{ toast('🔄 正在刷新全部世界数据…'); }catch(e){}
         var tasks = [];
-        // 1. 清除资讯缓存并调用 AI 生成
-        try{
-          var keysToRemove = [];
-          for(var i=0;i<localStorage.length;i++){
-            var k=localStorage.key(i);
-            if(k && k.indexOf('meow.news.cache')===0) keysToRemove.push(k);
+        tasks.push((async function(){
+          try{
+            var bundle = await _meowGenerateWorldBundle(['news','shop','work']);
+            _meowApplyWorldBundle(bundle);
+            return true;
+          }catch(e){
+            console.warn('[RefreshAll] bundle failed:', e);
+            // 兜底：分别刷新
+            try{ if(typeof window._meowGenerateNews==='function'){ var newsItems = await window._meowGenerateNews('all'); if(newsItems && newsItems.length) window._meowSaveNewsCacheBundle(newsItems); } }catch(e2){ console.warn('[RefreshAll] news fallback failed:', e2); }
+            try{ if(typeof window._meowRefreshShopAllCategories==='function'){ await window._meowRefreshShopAllCategories(null, { force:true, batchHint:true }); } }catch(e2){ console.warn('[RefreshAll] shop fallback failed:', e2); }
+            try{ if(typeof window._meowGenerateAIWork==='function'){ await window._meowGenerateAIWork({ force:true }); } }catch(e2){ console.warn('[RefreshAll] work fallback failed:', e2); }
+            return false;
           }
-          keysToRemove.forEach(function(k){ localStorage.removeItem(k); });
-        }catch(e){}
-        if(typeof window._meowGenerateNews==='function'){
-          tasks.push(window._meowGenerateNews('all').then(function(items){
-            if(items && items.length){ try{ localStorage.setItem('meow.news.cache.v1_all', JSON.stringify({items:items,at:Date.now()})); }catch(e){} }
-          }).catch(function(e){ console.warn('[RefreshAll] news failed:', e); }));
-        }
-        // 2. AI 生成购物商品
-        try{ localStorage.removeItem('meow.shop.products.v1'); }catch(e){}
-        if(typeof window._meowGenerateShopProducts==='function'){
-          tasks.push(window._meowGenerateShopProducts('food').then(function(products){
-            if(products && products.length){ try{ localStorage.setItem('meow.shop.products.v1', JSON.stringify({food:products,at:Date.now()})); }catch(e){} }
-          }).catch(function(e){ console.warn('[RefreshAll] shop failed:', e); }));
-        }
-        // 3. AI 生成工作
-        if(typeof window._meowGenerateAIWork==='function'){
-          tasks.push(window._meowGenerateAIWork().catch(function(e){ console.warn('[RefreshAll] work failed:', e); }));
-        }
-        // 4. 如果当前在对应页面，刷新 UI
-        try{ if(state.app==='news') renderApp('news'); }catch(e){}
-        try{ if(state.app==='shop') renderApp('shop'); }catch(e){}
-        try{ if(state.app==='work' && typeof window._workRefreshAI==='function') window._workRefreshAI(); }catch(e){}
-        // 等待所有异步任务
+        })());
         Promise.allSettled(tasks).then(function(){
+          try{ if(state.app==='news') renderApp('news'); }catch(e){}
+          try{ if(state.app==='shop') renderApp('shop'); }catch(e){}
+          try{ if(state.app==='work' && typeof window._workRefreshAI==='function') window._workRefreshAI(); }catch(e){}
           try{ toast('✅ 世界数据已刷新！打开各App查看'); }catch(e){}
         });
       }
@@ -24075,30 +24121,25 @@ const npc = _wxGetChatTargetMeta(npcId);
               try{ await _mapGenerateNpcLogs({isManual:false}); }catch(e){ console.warn('[AutoFeed] 地图日志生成失败:', e); }
             }
 
-            // 分发资讯/购物/工作（各自有独立 AI 生成器）
-            if(targets.indexOf('news')>=0 && typeof window._meowGenerateNews==='function'){
+            // 分发资讯/购物/工作（合并为一次后台请求，减少同通道打断）
+            var bundleTargets = ['news','shop','work'].filter(function(t){ return targets.indexOf(t) >= 0; });
+            if (bundleTargets.length) {
               try{
-                var newsItems = await window._meowGenerateNews('all');
-                if(newsItems && newsItems.length){
-                  try{ localStorage.setItem('meow.news.cache.v1_all', JSON.stringify({items:newsItems,at:Date.now()})); }catch(e){}
-                  void(0)&&console.log('[AutoFeed] ✅ 资讯写入', newsItems.length, '条');
+                var bundle = await _meowGenerateWorldBundle(bundleTargets);
+                _meowApplyWorldBundle(bundle);
+                void(0)&&console.log('[AutoFeed] ✅ bundle写入', bundleTargets.join(','));
+              }catch(e){
+                console.warn('[AutoFeed] bundle生成失败，回退逐项:', e);
+                if(targets.indexOf('news')>=0 && typeof window._meowGenerateNews==='function'){
+                  try{ var newsItems = await window._meowGenerateNews('all'); if(newsItems && newsItems.length) window._meowSaveNewsCacheBundle(newsItems); }catch(e2){ console.warn('[AutoFeed] 资讯生成失败:', e2); }
                 }
-              }catch(e){ console.warn('[AutoFeed] 资讯生成失败:', e); }
-            }
-            if(targets.indexOf('shop')>=0 && typeof window._meowGenerateShopProducts==='function'){
-              try{
-                var shopItems = await window._meowGenerateShopProducts('food');
-                if(shopItems && shopItems.length){
-                  try{ localStorage.setItem('meow.shop.products.v1', JSON.stringify({food:shopItems,at:Date.now()})); }catch(e){}
-                  void(0)&&console.log('[AutoFeed] ✅ 购物写入', shopItems.length, '件');
+                if(targets.indexOf('shop')>=0 && typeof window._meowRefreshShopAllCategories==='function'){
+                  try{ await window._meowRefreshShopAllCategories(null, { force:true, batchHint:true }); }catch(e2){ console.warn('[AutoFeed] 购物生成失败:', e2); }
                 }
-              }catch(e){ console.warn('[AutoFeed] 购物生成失败:', e); }
-            }
-            if(targets.indexOf('work')>=0 && typeof window._meowGenerateAIWork==='function'){
-              try{
-                var workItems = await window._meowGenerateAIWork();
-                void(0)&&console.log('[AutoFeed] ✅ 工作生成', (workItems||[]).length, '项');
-              }catch(e){ console.warn('[AutoFeed] 工作生成失败:', e); }
+                if(targets.indexOf('work')>=0 && typeof window._meowGenerateAIWork==='function'){
+                  try{ await window._meowGenerateAIWork({ force:true }); }catch(e2){ console.warn('[AutoFeed] 工作生成失败:', e2); }
+                }
+              }
             }
 
             cfg=getAutofeedCfg(); cfg.lastRunAt=Date.now(); cfg.lastRunKey=this._dayKey(); cfg.lastError=''; saveAutofeedCfg(cfg);
@@ -29971,43 +30012,55 @@ function bindPageScroll(){
               var cfg = getAutofeedCfg();
               if (!cfg.enabled) return;
               var targets = cfg.autoTargets || {};
-              // 资讯：过期后主动 AI 生成并写入缓存
+              var stale = [];
               if (targets.news) {
                 try{
-                  var newsKey = 'meow.news.cache.v1_all';
-                  var cached = localStorage.getItem(newsKey);
-                  var needRefresh = !cached;
-                  if (cached) {
-                    var c = JSON.parse(cached);
-                    if (Date.now() - (c.at||0) > 30*60*1000) { localStorage.removeItem(newsKey); needRefresh = true; }
+                  var nraw = localStorage.getItem('meow.news.cache.v1_all');
+                  var needNews = !nraw;
+                  if (nraw) {
+                    var nc = JSON.parse(nraw);
+                    if (Date.now() - (nc.at||0) > 30*60*1000) needNews = true;
                   }
-                  if (needRefresh && typeof window._meowGenerateNews === 'function') {
-                    window._meowGenerateNews('all').then(function(items){
-                      if(items && items.length){ try{ localStorage.setItem(newsKey, JSON.stringify({items:items,at:Date.now()})); }catch(e){} }
-                    }).catch(function(){});
-                  }
-                }catch(e){}
+                  if (needNews) stale.push('news');
+                }catch(e){ stale.push('news'); }
               }
-              // 工作：AI 生成（后台，不阻塞 UI）
-              if (targets.work && typeof window._meowGenerateAIWork === 'function') {
-                window._meowGenerateAIWork().catch(function(){});
-              }
-              // 购物：过期后主动 AI 生成并写入缓存
-              if (targets.shop && typeof window._meowGenerateShopProducts === 'function') {
+              if (targets.shop) {
                 try{
-                  var shopKey = 'meow.shop.products.v1';
-                  var shopCached = localStorage.getItem(shopKey);
-                  var shopNeedRefresh = !shopCached;
-                  if (shopCached) {
-                    var sc = JSON.parse(shopCached);
-                    if (Date.now() - (sc.at||0) > 30*60*1000) { localStorage.removeItem(shopKey); shopNeedRefresh = true; }
+                  var shopCache = null; try{ shopCache = JSON.parse(localStorage.getItem('meow.shop.products.v2') || 'null'); }catch(e){}
+                  if (!shopCache || !shopCache.categories) shopCache = { categories:{} };
+                  var enabledCats = [];
+                  if (typeof window._meowShopGetEnabledCategories === 'function') enabledCats = window._meowShopGetEnabledCategories();
+                  var needShop = !enabledCats.length;
+                  enabledCats.forEach(function(cat){
+                    var node = shopCache.categories && shopCache.categories[cat.id];
+                    if (!node || !node.items || !node.items.length || Date.now() - (node.at||0) > 30*60*1000) needShop = true;
+                  });
+                  if (needShop) stale.push('shop');
+                }catch(e){ stale.push('shop'); }
+              }
+              if (targets.work) {
+                try{
+                  var wraw = lsGet('meow.work.ai.v1', null);
+                  var needWork = !wraw || !Array.isArray(wraw.items) || !wraw.items.length || Date.now() - (wraw.at||0) > 30*60*1000;
+                  if (needWork) stale.push('work');
+                }catch(e){ stale.push('work'); }
+              }
+              if (!stale.length) return;
+              if (typeof window._meowGenerateWorldBundle === 'function') {
+                window._meowGenerateWorldBundle(stale).then(function(bundle){
+                  try{ window._meowApplyWorldBundle(bundle); }catch(e){}
+                }).catch(function(err){
+                  console.warn('[WorldDataTick] bundle failed:', err);
+                  if (stale.indexOf('news')>=0 && typeof window._meowGenerateNews==='function') {
+                    window._meowGenerateNews('all').then(function(items){ if(items && items.length) window._meowSaveNewsCacheBundle(items); }).catch(function(){});
                   }
-                  if (shopNeedRefresh) {
-                    window._meowGenerateShopProducts('food').then(function(products){
-                      if(products && products.length){ try{ localStorage.setItem(shopKey, JSON.stringify({food:products,at:Date.now()})); }catch(e){} }
-                    }).catch(function(){});
+                  if (stale.indexOf('shop')>=0 && typeof window._meowRefreshShopAllCategories==='function') {
+                    window._meowRefreshShopAllCategories(null, { force:true, batchHint:true }).catch(function(){});
                   }
-                }catch(e){}
+                  if (stale.indexOf('work')>=0 && typeof window._meowGenerateAIWork==='function') {
+                    window._meowGenerateAIWork({ force:true }).catch(function(){});
+                  }
+                });
               }
             }catch(e){ console.warn('[WorldDataTick] error:', e); }
           };
@@ -38739,7 +38792,7 @@ async function _meowRequestPush() {
   }
 }
 
-拉取离线消息 ======
+// 拉取离线消息 ======
 
 // ========== 拉取离线消息 ==========
 async function _meowPullOfflineMessages() {
@@ -40615,6 +40668,105 @@ function _meowUrlBase64ToUint8Array(base64String) {
     { id:'gift',    name:'礼物好物', emoji:'🎁' },
     { id:'fashion', name:'服饰配件', emoji:'👗' },
   ];
+  var K_PRODUCTS = 'meow.shop.products.v2';
+
+  function _getShopSettings(){
+    try{ return lsGet('meow.shop.settings', {}) || {}; }catch(e){ return {}; }
+  }
+  function _getShopAllCategories(){
+    var ss = _getShopSettings();
+    var cc = Array.isArray(ss.customCategories) ? ss.customCategories : [];
+    return _CATEGORIES.concat(cc.filter(function(c){ return c && c.id && c.name; }).map(function(c){
+      return { id:String(c.id), name:String(c.name), emoji:String(c.emoji || '🛍️') };
+    }));
+  }
+  function _getEnabledShopCategories(){
+    var ss = _getShopSettings();
+    var settings = ss.categorySettings || {};
+    return _getShopAllCategories().filter(function(cat){
+      var cs = settings[cat.id] || {};
+      return cs.enabled !== false;
+    });
+  }
+  function _getShopCategoryCount(catId){
+    var ss = _getShopSettings();
+    var settings = ss.categorySettings || {};
+    var cs = settings[catId] || {};
+    var n = parseInt(cs.count, 10);
+    return (isFinite(n) && n > 0) ? Math.max(3, Math.min(12, n)) : 6;
+  }
+  function _normalizeShopCache(raw){
+    var out = { v:2, categories:{}, at:0 };
+    if (!raw || typeof raw !== 'object') return out;
+    if (raw.v === 2 && raw.categories && typeof raw.categories === 'object') return raw;
+    Object.keys(raw).forEach(function(k){
+      if (k === 'at' || k === 'v') return;
+      if (Array.isArray(raw[k])) out.categories[k] = { items: raw[k], at: raw.at || 0 };
+      else if (raw[k] && typeof raw[k] === 'object' && Array.isArray(raw[k].items)) out.categories[k] = { items: raw[k].items, at: raw[k].at || raw.at || 0 };
+    });
+    out.at = raw.at || 0;
+    return out;
+  }
+  function _loadShopCache(){
+    try{
+      var raw = lsGet(K_PRODUCTS, null);
+      if (!raw) raw = lsGet('meow.shop.products.v1', null);
+      return _normalizeShopCache(raw);
+    }catch(e){ return { v:2, categories:{}, at:0 }; }
+  }
+  function _saveShopCache(cache){
+    var norm = _normalizeShopCache(cache);
+    try{ lsSet(K_PRODUCTS, norm); }catch(e){}
+    try{
+      var legacy = { at: norm.at || Date.now() };
+      Object.keys(norm.categories || {}).forEach(function(k){ legacy[k] = (norm.categories[k] && norm.categories[k].items) ? norm.categories[k].items : []; });
+      lsSet('meow.shop.products.v1', legacy);
+    }catch(e){}
+    return norm;
+  }
+  function _readShopProductsFromCache(catId){
+    var cache = _loadShopCache();
+    var node = cache.categories && cache.categories[catId];
+    if (!node || !Array.isArray(node.items) || !node.items.length) return null;
+    if (Date.now() - (node.at || 0) > _PRODUCT_CACHE_TTL) return null;
+    return node.items;
+  }
+  function _cacheShopProducts(catId, items){
+    var cache = _loadShopCache();
+    cache.categories[catId] = { items: Array.isArray(items) ? items : [], at: Date.now() };
+    cache.at = Date.now();
+    _saveShopCache(cache);
+  }
+  function _clearShopProductCache(){
+    try{ localStorage.removeItem(K_PRODUCTS); }catch(e){}
+    try{ localStorage.removeItem('meow.shop.products.v1'); }catch(e){}
+  }
+  function _saveNewsCacheBundle(items){
+    try{
+      var list = Array.isArray(items) ? items : [];
+      var pack = { items:list, at:Date.now() };
+      localStorage.setItem('meow.news.cache.v1_all', JSON.stringify(pack));
+      ['chance','trade','event','intel','world'].forEach(function(tp){
+        localStorage.setItem('meow.news.cache.v1_' + tp, JSON.stringify({ items:list.filter(function(it){ return String(it && it.type || '') === tp; }), at:pack.at }));
+      });
+    }catch(e){}
+  }
+  window._meowSaveNewsCacheBundle = _saveNewsCacheBundle;
+  async function _refreshShopCategoriesAI(catIds, opts){
+    var ids = (Array.isArray(catIds) ? catIds : []).filter(Boolean);
+    if (!ids.length) ids = _getEnabledShopCategories().map(function(c){ return c.id; });
+    var out = {};
+    for (var i = 0; i < ids.length; i++){
+      var catId = ids[i];
+      var items = await generateProducts(catId, { force: !!(opts && opts.force), batchHint: !!(opts && opts.batchHint) });
+      out[catId] = items || [];
+      _cacheShopProducts(catId, out[catId]);
+    }
+    return out;
+  }
+  window._meowRefreshShopAllCategories = _refreshShopCategoriesAI;
+  window._meowShopGetEnabledCategories = _getEnabledShopCategories;
+  window._meowShopGetCategoryCount = _getShopCategoryCount;
 
   /* ─── 收集世界观上下文（世界书 + 地图 + 聊天总结 + 角色状态 + 玩家状态） ─── */
   function _buildShopContext() {
@@ -40711,53 +40863,92 @@ function _meowUrlBase64ToUint8Array(base64String) {
     return ctx;
   }
 
-  async function generateProducts(category) {
+  async function generateProducts(category, opts) {
+    opts = opts || {};
     try {
+      if (!opts.force) {
+        var cachedItems = _readShopProductsFromCache(category);
+        if (cachedItems && cachedItems.length) return cachedItems;
+      }
       var hasPhoneAI = (typeof window.PhoneAI !== 'undefined' && window.PhoneAI && typeof window.PhoneAI.chat === 'function');
       var cfg = (typeof _meowGetActiveApiConfig === 'function') ? _meowGetActiveApiConfig() : null;
       if (!hasPhoneAI && !cfg) return _fallbackProducts(category);
 
-      var catName = (_CATEGORIES.find(function(c){ return c.id === category; }) || {}).name || category;
+      var catObj = (_getShopAllCategories().find(function(c){ return c.id === category; }) || _CATEGORIES.find(function(c){ return c.id === category; }) || { name:category, emoji:'🛍️' });
+      var catName = catObj.name || category;
+      var itemCount = _getShopCategoryCount(category);
       var ctx = _buildShopContext();
       var worldCtxLines = [];
       if (ctx.worldName) worldCtxLines.push('世界：' + ctx.worldName);
       if (ctx.landmarks) worldCtxLines.push('地标：' + ctx.landmarks);
       if (ctx.characters) worldCtxLines.push('角色：' + ctx.characters);
-      if (ctx.worldBookSnippet) worldCtxLines.push('设定：' + ctx.worldBookSnippet.slice(0, 150));
-      if (ctx.playerNeeds && ctx.playerNeeds !== '状态正常') worldCtxLines.push('需求：' + ctx.playerNeeds);
-      if (ctx.playerState) worldCtxLines.push('状态：体力' + ctx.playerState.energy + ' 心情' + ctx.playerState.mood + ' 饥饿' + ctx.playerState.hunger);
+      if (ctx.worldBookSnippet) worldCtxLines.push('设定：' + ctx.worldBookSnippet.slice(0, 180));
+      if (ctx.recentChatSummary) worldCtxLines.push('近期聊天：' + ctx.recentChatSummary.slice(0, 160));
+      if (ctx.playerState) {
+        worldCtxLines.push('玩家位置：' + (ctx.playerState.location || '家'));
+        worldCtxLines.push('玩家状态：体力' + Math.round(ctx.playerState.energy || 0) + ' / 心情' + Math.round(ctx.playerState.mood || 0) + ' / 饥饿' + Math.round(ctx.playerState.hunger || 0) + ' / 健康' + Math.round(ctx.playerState.health || 0) + ' / 余额$' + Math.round(ctx.playerState.money || 0));
+      }
+      if (ctx.playerNeeds && ctx.playerNeeds !== '状态正常') worldCtxLines.push('当前需求：' + ctx.playerNeeds);
       var worldCtx = worldCtxLines.join('；');
 
-      var sysPrompt = '你是虚拟商城选品AI。只返回JSON数组，不加任何其他文字或代码块。';
-      var userPrompt = '背景：' + (worldCtx || '现代都市虚拟世界') + '\n为「' + catName + '」生成5件商品。'
-        + (ctx.playerNeeds && ctx.playerNeeds !== '状态正常' ? '至少2件针对玩家需求。' : '')
-        + (lsGet('meow.shop.settings',{}).customPrompt ? '额外：' + lsGet('meow.shop.settings',{}).customPrompt : '')
-        + '\n格式：[{"id":"p_xx","name":"名称6字内","emoji":"emoji","price":10-300,"desc":"卖点20字内","tags":["标签"],"effect":{"mood":N,"energy":N,"hunger":N,"health":N}}]\neffect只写有效字段(5-25)。';
+      var sysPrompt = '你是虚拟世界购物App的选品与文案AI。只返回JSON数组，不要解释，不要代码块。';
+      var userPrompt = [
+        '世界背景：' + (worldCtx || '现代都市虚拟世界'),
+        '请为购物分类「' + catName + '」生成' + itemCount + '件商品。',
+        '要求：商品必须像这个世界里真实会出现的东西，而不是空泛电商词。',
+        '要求：尽量绑定世界地标、人物、近期状态、生活需求。',
+        (ctx.playerNeeds && ctx.playerNeeds !== '状态正常') ? '要求：至少2件明显回应玩家当前需求。' : '',
+        (opts.batchHint ? '要求：这是自动运行批量补货，减少重复，风格稳定。' : ''),
+        (_getShopSettings().customPrompt ? '额外要求：' + _getShopSettings().customPrompt : ''),
+        '字段必须完整：',
+        '[{"id":"p_xx","name":"名称","emoji":"可空","price":数字,"desc":"一句短卖点","story":"更真实的世界内说明/来历","vendor":"售卖者或店名","place":"购买地点/关联地标","reason":"为什么现在会出现/适合谁","tags":["标签1","标签2"],"effect":{"mood":数字,"energy":数字,"hunger":数字,"health":数字}}]',
+        '限制：name 8字内；desc 22字内；story 36字内；vendor/place/reason 16字内；price 合理；emoji 可留空；effect 只写有效字段。'
+      ] .filter(Boolean).join('\n');
 
       for (var attempt = 0; attempt < 2; attempt++) {
         try {
           var text;
           if (hasPhoneAI) {
-            var result = await window.PhoneAI.chat({ system: sysPrompt, messages: [{ role:'user', content: userPrompt }], temperature: 0.85, maxTokens: 800, channel: 'background', timeout: 45 });
+            var result = await window.PhoneAI.chat({ system: sysPrompt, messages: [{ role:'user', content: userPrompt }], temperature: 0.8, maxTokens: 1400, channel: 'background', timeout: 60 });
             if (!result || !result.ok || !result.data) throw new Error(result ? result.error : 'PhoneAI failed');
             text = String(result.data);
           } else {
-            var res = await fetch((cfg.baseUrl.replace(/\/$/, '')) + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey }, body: JSON.stringify({ model: cfg.model || 'gpt-3.5-turbo', max_tokens: 800, temperature: 0.85, messages: [{ role:'system', content:sysPrompt },{ role:'user', content:userPrompt }] }) });
+            var res = await fetch((cfg.baseUrl.replace(/\/$/, '')) + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey }, body: JSON.stringify({ model: cfg.model || 'gpt-3.5-turbo', max_tokens: 1400, temperature: 0.8, messages: [{ role:'system', content:sysPrompt },{ role:'user', content:userPrompt }] }) });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             var data = await res.json();
-            text = (data.choices[0].message.content || '');
+            text = (data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '') || '';
           }
           text = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-          var arrMatch = text.match(/\[[\s\S]*\]/); if (arrMatch) text = arrMatch[0];
+          var arrMatch = text.match(/\[[\s\S]*\]/);
+          if (arrMatch) text = arrMatch[0];
           text = text.replace(/,\s*([\]}])/g, '$1');
           var products = JSON.parse(text);
           if (!Array.isArray(products) || !products.length) throw new Error('empty');
-          products = products.filter(function(p){ return p && p.name && p.price; });
-          products.forEach(function(p, idx){ if (!p.id) p.id = 'p_' + Date.now().toString(36) + '_' + idx; });
-          if (products.length > 0) { console.log('[Shop] AI 商品生成成功'); return products; }
+          products = products.filter(function(p){ return p && p.name && p.price; }).map(function(p, idx){
+            var fx = (p.effect && typeof p.effect === 'object') ? p.effect : {};
+            var emoji = p.emoji || catObj.emoji || '🛍️';
+            return {
+              id: p.id || ('p_' + Date.now().toString(36) + '_' + idx),
+              name: String(p.name || '').slice(0, 16),
+              emoji: String(emoji || '🛍️'),
+              price: Math.max(1, Math.round(Number(p.price) || 0)),
+              desc: String(p.desc || '').slice(0, 30),
+              story: String(p.story || '').slice(0, 60),
+              vendor: String(p.vendor || '').slice(0, 24),
+              place: String(p.place || '').slice(0, 24),
+              reason: String(p.reason || '').slice(0, 24),
+              tags: Array.isArray(p.tags) ? p.tags.slice(0, 4).map(function(t){ return String(t).slice(0, 8); }) : [],
+              effect: Object.keys(fx).reduce(function(acc, k){ var v = Math.round(Number(fx[k]) || 0); if (v > 0) acc[k] = v; return acc; }, {})
+            };
+          });
+          if (products.length > 0) {
+            _cacheShopProducts(category, products);
+            console.log('[Shop] AI 商品生成成功:', category, products.length);
+            return products;
+          }
         } catch(e) {
           console.warn('[Shop] 第' + (attempt+1) + '次生成失败:', e.message);
-          if (attempt === 0) await new Promise(function(r){ setTimeout(r, 1500); });
+          if (attempt === 0) await new Promise(function(r){ setTimeout(r, 1200); });
         }
       }
       return _fallbackProducts(category);
@@ -40820,7 +41011,8 @@ function _meowUrlBase64ToUint8Array(base64String) {
 
   /* ─────────────────────────────── 购物 App 渲染 ─────────────────────────────── */
   window.renderShopApp = function(container) {
-    var _curCat = 'food';
+    var _shopCats = _getShopAllCategories();
+    var _curCat = (_shopCats[0] || { id:'food' }).id;
     var _products = [];
     var _loading = false;
 
@@ -40832,14 +41024,16 @@ function _meowUrlBase64ToUint8Array(base64String) {
     }
 
     function _catTabs() {
-      return _CATEGORIES.map(function(c) {
+      _shopCats = _getShopAllCategories();
+      if (!_shopCats.find(function(c){ return c.id === _curCat; })) _curCat = (_shopCats[0] || { id:'food' }).id;
+      return _shopCats.map(function(c) {
         var active = _curCat === c.id;
         return '<button onclick="window._shopSetCat(\'' + c.id + '\')" style="'
           + 'white-space:nowrap;padding:5px 12px;border-radius:20px;border:none;cursor:pointer;font-size:12px;font-weight:500;'
           + 'background:' + (active ? 'var(--ph-accent,#07c160)' : 'var(--ph-glass,rgba(255,255,255,.7))') + ';'
           + 'color:' + (active ? '#fff' : 'var(--ph-text,#333)') + ';'
           + 'box-shadow:0 1px 4px rgba(0,0,0,.08);'
-          + '">' + c.emoji + ' ' + c.name + '</button>';
+          + '">' + (c.emoji || '🛍️') + ' ' + c.name + '</button>';
       }).join('');
     }
 
@@ -40851,24 +41045,32 @@ function _meowUrlBase64ToUint8Array(base64String) {
         var inCart = _cart.filter(function(c){ return c.id === p.id; }).length;
         var cartBtnLabel = inCart > 0 ? ('+1(' + inCart + ')') : '加入';
         var fx = _fxStr(p.effect);
+        var meta = [];
+        if (p.vendor) meta.push('商家｜' + p.vendor);
+        if (p.place) meta.push('地点｜' + p.place);
+        if (p.reason) meta.push('缘由｜' + p.reason);
         var tagsHtml = (p.tags && p.tags.length)
-          ? '<div style="display:flex;flex-wrap:wrap;gap:3px;justify-content:center;">'
-            + p.tags.slice(0,3).map(function(t){
+          ? '<div style="display:flex;flex-wrap:wrap;gap:3px;justify-content:flex-start;">'
+            + p.tags.slice(0,4).map(function(t){
                 return '<span style="font-size:9px;padding:1px 5px;border-radius:6px;background:rgba(0,0,0,.05);color:var(--ph-text-sub,#999);">' + t + '</span>';
               }).join('') + '</div>'
           : '';
-        html += '<div class="phCard" style="margin:0;padding:12px;display:flex;flex-direction:column;gap:5px;">'
-          + '<div style="font-size:28px;text-align:center;">' + p.emoji + '</div>'
-          + '<div style="font-size:13px;font-weight:600;color:var(--ph-text,#333);text-align:center;line-height:1.3;">' + p.name + '</div>'
-          + (p.desc ? '<div style="font-size:10px;color:var(--ph-text-sub,#888);text-align:center;line-height:1.4;">' + p.desc + '</div>' : '')
-          + (p.story ? '<div style="font-size:9px;color:rgba(20,24,28,.32);text-align:center;line-height:1.4;font-style:italic;">' + p.story + '</div>' : '')
+        html += '<div class="phCard" style="margin:0;padding:12px;display:flex;flex-direction:column;gap:6px;align-items:stretch;">'
+          + '<div style="display:flex;align-items:flex-start;gap:8px;">'
+          + '<div style="font-size:26px;line-height:1;flex-shrink:0;">' + (p.emoji || '🛍️') + '</div>'
+          + '<div style="flex:1;min-width:0;">'
+          + '<div style="font-size:13px;font-weight:600;color:var(--ph-text,#333);line-height:1.35;">' + p.name + '</div>'
+          + (p.desc ? '<div style="font-size:10px;color:var(--ph-text-sub,#888);line-height:1.45;margin-top:2px;">' + p.desc + '</div>' : '')
+          + '</div></div>'
+          + (p.story ? '<div style="font-size:9px;color:rgba(20,24,28,.42);line-height:1.45;">' + p.story + '</div>' : '')
+          + (meta.length ? '<div style="font-size:9px;color:rgba(20,24,28,.5);line-height:1.5;display:flex;flex-direction:column;gap:2px;">' + meta.map(function(m){ return '<div>' + m + '</div>'; }).join('') + '</div>' : '')
           + tagsHtml
-          + (fx ? '<div style="font-size:10px;color:var(--ph-accent,#07c160);text-align:center;">' + fx + '</div>' : '')
-          + '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px;">'
+          + (fx ? '<div style="font-size:10px;color:var(--ph-accent,#07c160);">' + fx + '</div>' : '')
+          + '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto;gap:8px;">'
           + '<span style="font-weight:700;color:var(--ph-accent,#07c160);font-size:14px;">$' + p.price + '</span>'
-          + '<button onclick="window._shopAddCart(\'' + encodeURIComponent(JSON.stringify(p)) + '\')" style="'
+          + '<button onclick="window._shopAddCart('' + encodeURIComponent(JSON.stringify(p)) + '')" style="'
           + 'background:var(--ph-accent,#07c160);color:#fff;border:none;border-radius:8px;'
-          + 'padding:4px 10px;font-size:12px;cursor:pointer;">' + cartBtnLabel + '</button>'
+          + 'padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap;">' + cartBtnLabel + '</button>'
           + '</div></div>';
       });
       html += '</div>';
@@ -40918,11 +41120,18 @@ function _meowUrlBase64ToUint8Array(base64String) {
 
     window._shopSetCat = function(cat) {
       _curCat = cat;
+      var cached = _readShopProductsFromCache(cat);
+      if (cached && cached.length) {
+        _products = cached;
+        _loading = false;
+        render();
+        return;
+      }
       _products = [];
       _loading = true;
       render();
-      generateProducts(cat).then(function(ps) {
-        _products = ps;
+      generateProducts(cat, { force:false }).then(function(ps) {
+        _products = ps || [];
         _loading = false;
         var grid = container.querySelector('#shop-product-grid');
         if (grid) grid.innerHTML = _productGrid();
@@ -41006,7 +41215,7 @@ function _meowUrlBase64ToUint8Array(base64String) {
           + '<div style="padding:13px 16px;display:flex;align-items:center;justify-content:space-between;">'
           + '<div>'
           + '<div style="font-size:14px;color:var(--ph-text,#333);">自动刷新商品</div>'
-          + '<div style="font-size:11px;color:var(--ph-text-sub,#aaa);margin-top:2px;">切换分类时自动调用 AI 生成符合世界观的商品</div>'
+          + '<div style="font-size:11px;color:var(--ph-text-sub,#aaa);margin-top:2px;">切换分类时优先读取缓存，仅在缺货或过期时再调用 AI 补货</div>'
           + '</div>'
           + '<button id="shop-auto-toggle" onclick="window._shopToggleAuto()" style="'
           + 'width:44px;height:26px;border-radius:13px;border:none;cursor:pointer;position:relative;flex-shrink:0;transition:background .2s;'
@@ -41079,11 +41288,12 @@ function _meowUrlBase64ToUint8Array(base64String) {
         panel.remove();
         var grid = container.querySelector('#shop-product-grid');
         if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--ph-text-sub,#aaa);">AI 正在生成…</div>';
-        generateProducts(_curCat).then(function(ps) {
-          _products = ps;
+        generateProducts(_curCat, { force:true }).then(function(ps) {
+          _products = ps || [];
+          _cacheShopProducts(_curCat, _products);
           _genLoading = false;
           if (grid) grid.innerHTML = _productGrid();
-          try{ toast('✅ 商品已刷新'); }catch(e){}
+          try{ toast('✅ 当前分类商品已刷新'); }catch(e){}
         }).catch(function() {
           _genLoading = false;
           if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--ph-text-sub,#aaa);">生成失败，请重试</div>';
@@ -41123,28 +41333,36 @@ function _meowUrlBase64ToUint8Array(base64String) {
         }
       };
       window._shopClearData = function() {
-        if (!confirm('确定清空所有购物车和订单数据吗？')) return;
+        if (!confirm('确定清空所有购物车、订单和商品缓存吗？')) return;
         lsSet(K_ORDERS, {orders:[]});
+        _clearShopProductCache();
         _cart = [];
         panel.remove();
         render();
-        try{ toast('已清空'); }catch(e){}
+        try{ toast('已清空购物数据与缓存'); }catch(e){}
       };
     };
 
     // 初始加载
-    _loading = true;
-    render();
-    generateProducts(_curCat).then(function(ps) {
-      _products = ps;
+    var _bootCached = _readShopProductsFromCache(_curCat);
+    if (_bootCached && _bootCached.length) {
+      _products = _bootCached;
       _loading = false;
-      var grid = container.querySelector('#shop-product-grid');
-      if (grid) grid.innerHTML = _productGrid();
-    }).catch(function() {
-      _loading = false;
-      var grid = container.querySelector('#shop-product-grid');
-      if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--ph-text-sub,#aaa);">加载失败，请重试</div>';
-    });
+      render();
+    } else {
+      _loading = true;
+      render();
+      generateProducts(_curCat, { force:false }).then(function(ps) {
+        _products = ps || [];
+        _loading = false;
+        var grid = container.querySelector('#shop-product-grid');
+        if (grid) grid.innerHTML = _productGrid();
+      }).catch(function() {
+        _loading = false;
+        var grid = container.querySelector('#shop-product-grid');
+        if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--ph-text-sub,#aaa);">加载失败，请重试</div>';
+      });
+    }
   }; // end renderShopApp
 
   /* ─── 购物车弹窗 ─── */
@@ -41635,11 +41853,30 @@ function _meowUrlBase64ToUint8Array(base64String) {
   }
 
   /** AI 生成工作（世界观一致），fallback 到静态模板 */
+  var K_WORK_AI_CACHE = 'meow.work.ai.v1';
   var _aiWorkCache = { items:null, at:0 };
   var AI_WORK_CACHE_TTL = 30 * 60 * 1000; // 30分钟
-  async function generateAIWork() {
-    // 缓存未过期直接用
-    if (_aiWorkCache.items && (Date.now() - _aiWorkCache.at < AI_WORK_CACHE_TTL)) return _aiWorkCache.items;
+  function _loadWorkAICache(){
+    try{
+      var raw = lsGet(K_WORK_AI_CACHE, null);
+      if (raw && Array.isArray(raw.items)) return raw;
+    }catch(e){}
+    return { items:null, at:0 };
+  }
+  function _saveWorkAICache(items){
+    var pack = { items:Array.isArray(items)?items:[], at:Date.now() };
+    _aiWorkCache = pack;
+    try{ lsSet(K_WORK_AI_CACHE, pack); }catch(e){}
+    return pack;
+  }
+  window._meowSaveWorkAICache = _saveWorkAICache;
+  async function generateAIWork(opts) {
+    opts = opts || {};
+    if (!opts.force) {
+      if (_aiWorkCache.items && (Date.now() - _aiWorkCache.at < AI_WORK_CACHE_TTL)) return _aiWorkCache.items;
+      var persisted = _loadWorkAICache();
+      if (persisted.items && (Date.now() - persisted.at < AI_WORK_CACHE_TTL)) { _aiWorkCache = persisted; return persisted.items; }
+    }
 
     var hasPhoneAI = (typeof window.PhoneAI !== 'undefined' && window.PhoneAI && typeof window.PhoneAI.chat === 'function');
     if (!hasPhoneAI) return null; // 返回 null → 调用方用 fallback
@@ -41694,7 +41931,7 @@ function _meowUrlBase64ToUint8Array(base64String) {
       var text = String(result.data).replace(/```json|```/g, '').trim();
       var items = JSON.parse(text);
       if (!Array.isArray(items) || !items.length) throw new Error('empty');
-      _aiWorkCache = { items: items, at: Date.now() };
+      _saveWorkAICache(items);
       console.log('[MeowQuest] AI 工作生成成功:', items.length, '条');
       return items;
     } catch(e) {
@@ -41950,7 +42187,8 @@ function _meowUrlBase64ToUint8Array(base64String) {
       render();
       try {
         _aiWorkCache = { items:null, at:0 }; // 清缓存强制重新生成
-        var ai = await generateAIWork();
+        try{ localStorage.removeItem(K_WORK_AI_CACHE); }catch(e){}
+        var ai = await generateAIWork({ force:true });
         if (ai && ai.length) {
           var p = { energy:80 }; try { if (window.WorldState) p = window.WorldState.player; } catch(e){}
           var quests = loadQuests(); var activeIds = {};
@@ -42411,6 +42649,20 @@ function _meowUrlBase64ToUint8Array(base64String) {
         + '</div>';
     }
 
+    function _saveCache(tabId, items) {
+      try {
+        localStorage.setItem(LS_NEWS_CACHE + '_' + tabId, JSON.stringify({ items: Array.isArray(items) ? items : [], at: Date.now() }));
+      } catch(e) {}
+    }
+    function _fanoutAllCache(items) {
+      try {
+        _saveCache('all', items);
+        ['chance','trade','event','intel','world'].forEach(function(tp){
+          _saveCache(tp, (Array.isArray(items) ? items : []).filter(function(it){ return String(it && it.type || '') === tp; }));
+        });
+      } catch(e) {}
+    }
+
     // 尝试从缓存加载
     function _loadFromCache(tabId) {
       try {
@@ -42427,8 +42679,12 @@ function _meowUrlBase64ToUint8Array(base64String) {
       if (cached) { _items = cached; _render(); return; }
       _loading = true; _render();
       _generateNews(tabId).then(function(items) {
-        _items = items; _loading = false; _render();
-      });
+        _items = items || [];
+        _loading = false;
+        if (tabId === 'all') _fanoutAllCache(_items);
+        else _saveCache(tabId, _items);
+        _render();
+      }).catch(function(){ _items = []; _loading = false; _render(); });
     }
 
     window._newsSetTab = function(tabId) {
