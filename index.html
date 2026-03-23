@@ -9744,6 +9744,11 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
 
       // ★ 暴露给外部 script 块（meow-news / meow-quest / floating-avatar 等）
       window.openApp = openApp;
+      // ★ 暴露聊天核心函数给悬浮头像迷你聊天使用
+      window._meowGetLog = getLog;
+      window._meowPushLog = pushLog;
+      window._meowBumpThread = bumpThread;
+      window._meowState = state; // ★ 暴露 state 给迷你聊天设置 chatTarget
 
       // ★ 来电弹窗共享引用（已移至外层，此行保留作兼容占位）
       var _triggerIncomingCall = null;
@@ -10636,6 +10641,13 @@ function getNPCCandidatesFromRecentMainChat(){
         }
         return it;
       }
+      function _dispatchChatUpdate(npcId, extra){
+        try{
+          window.dispatchEvent(new CustomEvent('meow:chat-updated', {
+            detail: Object.assign({ npcId:String(npcId || '') }, extra || {})
+          }));
+        }catch(e){}
+      }
       function bumpThread(npcId, patch){
         const th = loadThreads();
         const i = th.list.findIndex(x => String(x.id) === String(npcId));
@@ -10655,6 +10667,7 @@ function getNPCCandidatesFromRecentMainChat(){
         th.list.splice(i,1);
         if (it.pinned) th.list.unshift(it); else th.list.unshift(it);
         saveThreads(th);
+        _dispatchChatUpdate(npcId, { source:'bumpThread' });
       }
 
       function loadLogs(){
@@ -10687,6 +10700,7 @@ function getNPCCandidatesFromRecentMainChat(){
         // 控制长度（安全上限，保留全部对话）
         if (logs.map[id].length > 10000) logs.map[id] = logs.map[id].slice(-10000);
         saveLogs(logs);
+        _dispatchChatUpdate(npcId, { source:'pushLog', role:String(role || ''), textPreview:String(text || '').slice(0, 60) });
       }
       function getLog(npcId){
         const logs = loadLogs();
@@ -24547,18 +24561,38 @@ const npc = _wxGetChatTargetMeta(npcId);
       async function _wxSendChatText(npcId, text){
         // 清空输入框（如果还能访问到）
         try{ const _inp = root.querySelector('[data-ph="chatInput"]'); if(_inp){ _inp.value=''; _inp._lastVal=''; } }catch(e){}
-        // 构造假 input 注入到 _wxSendChat 流程
-        const _fakeInput = { value: text, _lastVal: text };
-        const _origQuery = root.querySelector.bind(root);
-        // 临时 patch querySelector 让 _wxSendChat 读到 fakeInput
+        // 构造假 input（需要模拟 DOM 方法，因为 _wxSendChat 会调 getAttribute 等）
+        const _fakeInput = {
+          value: text, _lastVal: text, textContent: text, innerText: text, innerHTML: text,
+          getAttribute: function(){ return null; },
+          setAttribute: function(){},
+          focus: function(){},
+          blur: function(){},
+          classList: { add:function(){}, remove:function(){}, contains:function(){return false;} },
+          style: {},
+          querySelectorAll: function(){ return []; },
+          querySelector: function(){ return null; },
+        };
         root._phFakeInput = _fakeInput;
-        await _wxSendChat(npcId);
-        root._phFakeInput = null;
+        root._phDetachedReply = true;
+        root._phDetachedReplyNpcId = String(npcId);
+        try{
+          await _wxSendChat(npcId);
+        } finally {
+          if (String(root._phDetachedReplyNpcId || '') === String(npcId)) {
+            root._phDetachedReply = false;
+            root._phDetachedReplyNpcId = null;
+          }
+          root._phFakeInput = null;
+        }
       }
+      window._meowSendChatText = _wxSendChatText; // ★ 暴露给迷你聊天
 
 
       async function _wxSendChat(npcId){
-        const input = root.querySelector('[data-ph="chatInput"]');
+        var input = root.querySelector('[data-ph="chatInput"]');
+        // ★ 如果没有真实输入框，使用 fakeInput（从迷你聊天注入）
+        if (!input && root._phFakeInput) input = root._phFakeInput;
         if (!input && !state._chatInputMirror) return;
 
         // ★ 读取富文本输入（文字 + 图片）
@@ -24703,10 +24737,19 @@ const npc = _wxGetChatTargetMeta(npcId);
             });
           }catch(_e){}
 
-          // 记录本次序列 ID（用于检测切换会话/关闭）
+          // 记录本次序列 ID
+          // 这里不再要求 state.chatTarget 必须始终停留在当前会话：
+          // 只要没有被“更新的一次发送”顶掉，这轮回复就继续完整落库。
+          // 这样用户切回主界面/其他 app/关掉迷你聊天时，当前回复仍会继续写完。
           PhoneAI._replySeqId++;
           const mySeqId = PhoneAI._replySeqId;
           const myChatId = String(npcId);
+          const _wasSupersededByNewerSend = function(){
+            return mySeqId !== PhoneAI._replySeqId;
+          };
+          const _canContinueReply = function(){
+            return !_wasSupersededByNewerSend();
+          };
 
           // 1. 显示 typing
           _showTypingIndicator(npc.name);
@@ -24727,10 +24770,10 @@ const npc = _wxGetChatTargetMeta(npcId);
             timeout: _isOffline ? 180 : 60
           });
 
-          // 检查序列是否仍有效（未切换会话/关闭）
-          if (mySeqId !== PhoneAI._replySeqId || state.chatTarget !== myChatId){
+          // 只在“被更晚的一次发送顶掉”时停止当前回复。
+          // 单纯切界面/回主页/关掉迷你聊天，不再把这轮回复挂成 pending。
+          if (!_canContinueReply()){
             _hideTypingIndicator();
-            try{ _markPendingChatReply(npcId, { status:'pending', lastError:'聊天中途离开页面，等待回到前台后自动补发', lastTryAt:Date.now(), source:'chat_switched_away' }); }catch(_e){}
             return;
           }
 
@@ -24751,7 +24794,7 @@ const npc = _wxGetChatTargetMeta(npcId);
 
           // 5. 逐条写入 —— 每条消息独立节奏：typing → 气泡 → 停顿 → typing → ...
           for (var ri=0; ri<replies.length; ri++){
-            if (mySeqId !== PhoneAI._replySeqId || state.chatTarget !== myChatId){
+            if (!_canContinueReply()){
               _hideTypingIndicator(); return;
             }
 
@@ -24769,13 +24812,13 @@ const npc = _wxGetChatTargetMeta(npcId);
               // 首条：API 回来后有一个极短的"刚打完"停顿再出 bubble
               _hideTypingIndicator();
               await sleep(_randomBetween(80, 220));
-              if (mySeqId !== PhoneAI._replySeqId || state.chatTarget !== myChatId) return;
+              if (!_canContinueReply()) return;
               _showTypingIndicator(npc.name, npc);
             } else {
               // 后续条：上条发完 → 短暂停顿（像在想下句）→ 重新出现 typing
               var readPauseMs = _randomBetween(300, 900);
               await sleep(readPauseMs);
-              if (mySeqId !== PhoneAI._replySeqId || state.chatTarget !== myChatId){ _hideTypingIndicator(); return; }
+              if (!_canContinueReply()){ _hideTypingIndicator(); return; }
               _showTypingIndicator(npc.name, npc);
             }
 
@@ -24785,7 +24828,7 @@ const npc = _wxGetChatTargetMeta(npcId);
             await sleep(typeMs);
             if (_rc) try{ _rc(); }catch(e){}
 
-            if (mySeqId !== PhoneAI._replySeqId || state.chatTarget !== myChatId){
+            if (!_canContinueReply()){
               _hideTypingIndicator(); return;
             }
             _hideTypingIndicator();
@@ -30864,40 +30907,65 @@ function _vnOpenEntryEditor(meta){
   });
 }
 
-function _getOfflineRenderMode(npc, fallbackNpcId){
+function _renderOfflineParagraph(container, npc, role, text, ts, meta){
+  // ★ 游戏模式：路由到 VN 引擎，不渲染话剧段落
   try{
-    var npcId = (npc && npc.id) || fallbackNpcId || (state && state.chatTarget) || '';
-    var scene = _loadSceneData(npcId);
-    return String((scene && scene.offlineMode) || 'stage');
-  }catch(e){
-    return 'stage';
-  }
-}
-
-function _renderOfflineStageParagraph(container, npc, role, text, ts, meta){
-  var displayText = _cleanOfflineDisplayText(text, { mode:'stage' });
+    var _npcIdForRender = (npc && npc.id) || (state && state.chatTarget) || '';
+    var _sceneForRender = _loadSceneData(_npcIdForRender);
+    var _offModeForRender = String((_sceneForRender && _sceneForRender.offlineMode) || 'stage');
+    if(_sceneForRender && _offModeForRender === 'game'){
+      _vnState.npcId = _npcIdForRender;
+      _vnState.npc = npc;
+      var displayTextVN = String(text||'').trim()
+        // 清理所有 HTML/伪标签变体
+        .replace(/<\/?[a-zA-Z][^>]*>/g,'')          // 真实 HTML 标签
+        .replace(/&lt;\/?[a-zA-Z][^&]*&gt;/g,'')    // HTML 实体编码的标签
+        .replace(/"rp[A-Za-z]+">\s*/g,'')           // "rpXxx"> 格式
+        .replace(/rp[A-Za-z]+>\s*/g,'')             // rpXxx> 格式
+        .replace(/class="[^"]*"\s*/g,'')            // class="..." 残留
+        .replace(/>\s*(?=\S)/g,'')                  // 孤立 > 开头
+        .replace(/^>\s*/gm,'')                      // 行首 >
+        .replace(/\s{2,}/g,' ')                     // 多余空白
+        .trim();
+      _vnEnqueue(_npcIdForRender, npc, role, displayTextVN, ts);
+      return;
+    }
+    if(_sceneForRender && _offModeForRender === 'novel'){
+      _renderOfflineNovelParagraph(container, npc, role, text, ts, meta);
+      return;
+    }
+  }catch(e){}
+  var displayText = _cleanOfflineDisplayText(text);
   var speaker = role === 'me' ? '你' : (npc.name || '对方');
 
+  // 获取头像
   var avatarContent = '';
   var npcId = (npc && npc.id) || state.chatTarget || '';
   if (role === 'me'){
+    // 用户头像
     try{
       var _myAvImg = (typeof phoneGetAvatar === 'function') ? phoneGetAvatar('me') : null;
-      if (_myAvImg){ avatarContent = '<img src="' + esc(_myAvImg) + '"/>'; }
-      else { avatarContent = '👤'; }
+      if (_myAvImg){
+        avatarContent = '<img src="' + esc(_myAvImg) + '"/>';
+      } else { avatarContent = '👤'; }
     }catch(e){ avatarContent = '👤'; }
   } else {
+    // NPC头像
     try{
       var _avImg = (typeof phoneGetAvatar === 'function') ? phoneGetAvatar(npcId) : null;
-      if (_avImg){ avatarContent = '<img src="' + esc(_avImg) + '"/>'; }
-      else {
+      if (_avImg){
+        avatarContent = '<img src="' + esc(_avImg) + '"/>';
+      } else {
         var avRaw = npc.avatar || (npc.name||'?').charAt(0);
         avatarContent = (typeof avRaw === 'string' && avRaw.startsWith('<img')) ? avRaw : esc(avRaw);
       }
-    }catch(e){ avatarContent = esc((npc.name||'?').charAt(0)); }
+    }catch(e){
+      avatarContent = esc((npc.name||'?').charAt(0));
+    }
   }
   var avatarHtml = '<div class="wxCBAvatar wxOfflineAvatar' + (role === 'them' ? '" data-act="wxAvatarTap" data-npcid="' + esc(npcId) + '" style="cursor:pointer;"' : '" data-act="wxMeAvatarTap" style="cursor:pointer;"') + '>' + avatarContent + '</div>';
 
+  // 解析舞台剧格式
   var segments = _parseTheaterSegments(displayText, speaker, role);
   var isFirst = true;
 
@@ -30906,102 +30974,139 @@ function _renderOfflineStageParagraph(container, npc, role, text, ts, meta){
     p.className = 'wxOfflineParagraph ' + (seg.type === 'stage' ? 'rpStageDir' : role);
     p.setAttribute('data-msgts', String(ts||0));
     p.setAttribute('data-msgrole', role);
-    p.setAttribute('data-msgtext', String(displayText||''));
+    p.setAttribute('data-msgtext', String(text||''));
     if (meta && meta.mode) p.setAttribute('data-mode', meta.mode);
     if (meta && meta.branch) p.setAttribute('data-branch', meta.branch);
 
+    // 只在第一个非舞台指示段显示头像
     if (seg.type !== 'stage' && isFirst){
       p.innerHTML = avatarHtml + '<div class="wxOfflineContent">' + seg.html + '</div>';
       isFirst = false;
     } else if (seg.type === 'stage') {
       p.innerHTML = seg.html;
     } else {
+      // 后续对话段：缩进对齐头像宽度
       p.innerHTML = '<div class="wxOfflineContent" style="margin-left:40px;">' + seg.html + '</div>';
     }
     container.appendChild(p);
   });
 }
 
-function _renderOfflineParagraph(container, npc, role, text, ts, meta){
-  try{
-    var _npcIdForRender = (npc && npc.id) || (state && state.chatTarget) || '';
-    var _offModeForRender = _getOfflineRenderMode(npc, _npcIdForRender);
-    var _displayText = _cleanOfflineDisplayText(text, { mode:_offModeForRender });
+// 自动把过长的线下文本切成更自然的段落（优先保留原有空行）
+function _autoParagraphizeOfflineText(text){
+  var src = String(text || '').replace(/\r\n?/g, '\n').trim();
+  if (!src) return '';
+  if (/\n\s*\n/.test(src)) return src;
 
-    if(_offModeForRender === 'game'){
-      _vnState.npcId = _npcIdForRender;
-      _vnState.npc = npc;
-      if (_displayText && !/\n\s*\n/.test(_displayText)) _displayText = _autoParagraphizeOfflineText(_displayText);
-      _vnEnqueue(_npcIdForRender, npc, role, _displayText, ts);
+  function splitSentenceUnits(line){
+    var units = [];
+    var s = String(line || '').trim();
+    if (!s) return units;
+    if (/^\*[^*]+\*$/.test(s)) return [s];
+    var buf = '';
+    var starCount = 0;
+    for (var i = 0; i < s.length; i++){
+      var ch = s.charAt(i);
+      buf += ch;
+      if (ch === '*') starCount++;
+      if (starCount % 2 === 1) continue;
+      var isEnd = /[。！？!?]/.test(ch);
+      if (!isEnd && ch === '…'){
+        var prev = s.charAt(i - 1);
+        var next = s.charAt(i + 1);
+        if (prev !== '…' && next !== '…') isEnd = true;
+        if (prev === '…' && next !== '…') isEnd = true;
+      }
+      if (isEnd){
+        while (i + 1 < s.length && /["”』」》）)】]/.test(s.charAt(i + 1))){
+          i++;
+          buf += s.charAt(i);
+        }
+        units.push(buf.trim());
+        buf = '';
+      }
+    }
+    if (buf.trim()) units.push(buf.trim());
+    return units.length ? units : [s];
+  }
+
+  function splitLongUnit(unit){
+    var u = String(unit || '').trim();
+    if (!u || u.length <= 54) return [u];
+    var parts = [];
+    var buf = '';
+    for (var i = 0; i < u.length; i++){
+      var ch = u.charAt(i);
+      buf += ch;
+      if (/[，、；：]/.test(ch) && buf.length >= 24){
+        parts.push(buf.trim());
+        buf = '';
+      }
+    }
+    if (buf.trim()) parts.push(buf.trim());
+    return parts.length ? parts : [u];
+  }
+
+  var out = [];
+  src.split(/\n+/).forEach(function(rawLine){
+    var line = rawLine.trim();
+    if (!line) return;
+    if (/^\*[^*]+\*$/.test(line) || line.length <= 90){
+      out.push(line);
       return;
     }
-    if(_offModeForRender === 'novel'){
-      _renderOfflineNovelParagraph(container, npc, role, _displayText, ts, meta);
+    var units = [];
+    splitSentenceUnits(line).forEach(function(unit){
+      splitLongUnit(unit).forEach(function(part){
+        if (part && part.trim()) units.push(part.trim());
+      });
+    });
+    if (!units.length){
+      out.push(line);
       return;
     }
-  }catch(e){}
-  _renderOfflineStageParagraph(container, npc, role, text, ts, meta);
+    var buf = [];
+    var bufLen = 0;
+    units.forEach(function(unit){
+      var u = String(unit || '').trim();
+      if (!u) return;
+      var shouldBreak = false;
+      if (buf.length >= 2) shouldBreak = true;
+      if (!shouldBreak && bufLen >= 58) shouldBreak = true;
+      if (!shouldBreak && /["「]/.test(u) && buf.length >= 1) shouldBreak = true;
+      if (!shouldBreak && bufLen + u.length > 76 && buf.length >= 1) shouldBreak = true;
+      if (shouldBreak){
+        out.push(buf.join(''));
+        buf = [u];
+        bufLen = u.length;
+      } else {
+        buf.push(u);
+        bufLen += u.length;
+      }
+    });
+    if (buf.length) out.push(buf.join(''));
+  });
+  return out.join('\n\n');
 }
 
-function _cleanOfflineDisplayText(text, opts){
-  var mode = opts && opts.mode ? String(opts.mode) : '';
-  var out = String(text || '')
-    .replace(/\r\n?/g, '\n')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&quot;/gi, '"')
-    .replace(/&gt;/gi, '>')
-    .replace(/&lt;/gi, '<')
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/(?:p|div|li|section|article|blockquote)>/gi, '\n')
-    .replace(/<(?:p|div|li|section|article|blockquote)[^>]*>/gi, '')
-    .replace(/<\/?(?:span|em|strong|b|i|u)[^>]*>/gi, '')
-    .replace(/&lt;br\s*\/??&gt;/gi, '\n')
-    .replace(/&lt;\/(?:p|div|li|section|article|blockquote)&gt;/gi, '\n')
-    .replace(/&lt;(?:p|div|li|section|article|blockquote)[^&]*&gt;/gi, '')
-    .replace(/&lt;\/?(?:span|em|strong|b|i|u)[^&]*&gt;/gi, '')
-    .replace(/["“”'‘’「」『』]?\s*(?:rp[A-Za-z]+|wx[A-Za-z]+)\s*["“”'‘’「」『』]?\s*(?:>|&gt;|：|:)?\s*/g, '')
-    .replace(/\b(?:rpAction|rpDialog|rpSpeaker|rpText|wxNovelAside|wxStageAside|wxNovelDialog|wxNovelP|wxNovelDialogLine)\b/g, '')
-    .replace(/class="[^"]*"/g, '')
+function _cleanOfflineDisplayText(text){
+  return String(text || '').trim()
+    .replace(/"rpAction"\s*>?\s*/g, '')
+    .replace(/"rpDialog"\s*>?\s*/g, '')
+    .replace(/"rpSpeaker"\s*>?\s*/g, '')
+    .replace(/"rpText"\s*>?\s*/g, '')
+    .replace(/rpAction\s*>?\s*/g, '')
+    .replace(/rpDialog\s*>?\s*/g, '')
     .replace(/^>\s*/gm, '')
-    .replace(/^[\-•·]\s+/gm, '')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/<\/?em[^>]*>/g, '')
+    .replace(/<\/?span[^>]*>/g, '')
+    .replace(/class="[^"]*"/g, '')
+    .replace(/\r\n?/g, '\n')
     .trim();
-
-  out = out.split('\n').map(function(line){
-    var s = String(line || '').trim();
-    if (!s) return '';
-    s = s
-      .replace(/^[>*＊*\-•·]+\s*/, '')
-      .replace(/["“”'‘’「」『』]?\s*(?:rp[A-Za-z]+|wx[A-Za-z]+)\s*["“”'‘’「」『』]?\s*(?:>|&gt;|：|:)?\s*/g, '')
-      .replace(/\b(?:rpAction|rpDialog|rpSpeaker|rpText|wxNovelAside|wxStageAside|wxNovelDialog|wxNovelP|wxNovelDialogLine)\b/g, '')
-      .replace(/[<>]+/g, '')
-      .trim();
-    if (/^(?:rp|wx)[A-Za-z]+$/i.test(s)) return '';
-    return s;
-  }).filter(function(line, idx, arr){
-    if (line) return true;
-    return idx > 0 && idx < arr.length - 1 && arr[idx - 1] && arr[idx + 1];
-  }).join('\n');
-
-  out = out.replace(/\n{3,}/g, '\n\n').trim();
-
-  if (mode === 'novel'){
-    out = out
-      .replace(/["“”'‘’「」『』]\s*(?:rp[A-Za-z]+|wx[A-Za-z]+)\s*["“”'‘’「」『』]?\s*(?:>|&gt;|：|:)?/g, '')
-      .replace(/(^|\s)[*＊]+(?=\s|$)/g, '$1')
-      .replace(/(^|[。！？；，、\n\s])[*＊]+/g, '$1')
-      .replace(/[*＊]+([。！？；，、\n\s]|$)/g, '$1')
-      .replace(/[<>]+/g, '')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-  }
-  return out;
 }
 
 function _formatOfflineNovelHTML(text){
-  var cleaned = _cleanOfflineDisplayText(text, { mode:'novel' });
+  var cleaned = _cleanOfflineDisplayText(text);
   if (!cleaned) return '<p class="wxNovelP">……</p>';
   if (!/\n\s*\n/.test(cleaned)) cleaned = _autoParagraphizeOfflineText(cleaned);
   var blocks = cleaned.split(/\n\s*\n+/).map(function(block){ return String(block || '').trim(); }).filter(function(block){ return block; });
@@ -31019,42 +31124,31 @@ function _formatOfflineNovelHTML(text){
 
 function _renderOfflineNovelParagraph(container, npc, role, text, ts, meta){
   var speaker = role === 'me' ? '你' : (npc.name || '对方');
-  var cleaned = _cleanOfflineDisplayText(text, { mode:'novel' });
   var p = doc.createElement('div');
   p.className = 'wxOfflineParagraph wxOfflineNovelCard ' + role;
   p.setAttribute('data-msgts', String(ts||0));
   p.setAttribute('data-msgrole', role);
-  p.setAttribute('data-msgtext', String(cleaned||''));
+  p.setAttribute('data-msgtext', String(text||''));
   if (meta && meta.mode) p.setAttribute('data-mode', meta.mode);
   if (meta && meta.branch) p.setAttribute('data-branch', meta.branch);
   p.innerHTML = '<div class="wxOfflineNovelHead"><span class="wxOfflineNovelRole">'+ esc(speaker) +'</span></div>'
-    + '<div class="wxOfflineNovelBody">' + _formatOfflineNovelHTML(cleaned) + '</div>';
+    + '<div class="wxOfflineNovelBody">' + _formatOfflineNovelHTML(text) + '</div>';
   container.appendChild(p);
 }
 
-function _splitOfflineMixedBlock(block){
-  var out = [];
-  var src = String(block || '').trim();
-  if (!src) return out;
-  var re = /(“[^”\n]+”|"[^"\n]+"|「[^」\n]+」|『[^』\n]+』)/g;
-  var last = 0;
-  var m;
-  while ((m = re.exec(src))){
-    var before = src.slice(last, m.index).trim();
-    if (before) out.push({ type:'stage', text: before });
-    var dialog = String(m[0] || '').trim();
-    if (dialog) out.push({ type:'speech', text: dialog });
-    last = m.index + m[0].length;
-  }
-  var after = src.slice(last).trim();
-  if (after) out.push({ type:'stage', text: after });
-  return out;
-}
-
+// 解析文本为舞台剧段落
 function _parseTheaterSegments(text, speaker, role){
   var segments = [];
-  var cleaned = _cleanOfflineDisplayText(text, { mode:'stage' });
-  if (!cleaned) return segments;
+  // 先清理所有 rpAction/rpDialog 残留（包括单独成行的情况）
+  var cleaned = text
+    .replace(/"rpAction"\s*>?\s*/g, '')
+    .replace(/"rpDialog"\s*>?\s*/g, '')
+    .replace(/rpAction\s*>?\s*/g, '')
+    .replace(/rpDialog\s*>?\s*/g, '')
+    .replace(/^>\s*/gm, '')
+    .replace(/^\s*"rp[A-Za-z]+"\s*$/gm, '')  // 单独一行的 "rpXxx"
+    .replace(/\r\n?/g, '\n')
+    .trim();
 
   if (!/\n\s*\n/.test(cleaned)){
     cleaned = _autoParagraphizeOfflineText(cleaned);
@@ -31077,9 +31171,9 @@ function _parseTheaterSegments(text, speaker, role){
     var nameTag = '<span class="rpSpeaker">' + esc(speaker) + '</span>';
     var formatted = safeLines.map(function(d){
       return esc(d)
-        .replace(/"([^"]+)"/g, '<span class="rpDialog">“$1”</span>')
-        .replace(/「([^」]+)」/g, '<span class="rpDialog">「$1」</span>')
-        .replace(/『([^』]+)』/g, '<span class="rpDialog">『$1』</span>');
+        .replace(/\*([^*]+)\*/g, '<em class="rpAction">$1</em>')
+        .replace(/"([^"]+)"/g, '<span class="rpDialog">"$1"</span>')
+        .replace(/「([^」]+)」/g, '<span class="rpDialog">「$1」</span>');
     }).join('<br/>');
     segments.push({
       type: 'speech',
@@ -31088,47 +31182,87 @@ function _parseTheaterSegments(text, speaker, role){
   }
 
   blocks.forEach(function(block){
-    var flat = block.split(/\n+/).map(function(line){ return String(line || '').trim(); }).filter(function(line){ return line; }).join(' ');
-    if (!flat) return;
+    var lines = block.split(/\n+/).map(function(line){ return String(line || '').trim(); }).filter(function(line){ return line; });
+    if (!lines.length) return;
 
-    if (/^\*[^*]+\*$/.test(flat)){
-      pushStage(flat.replace(/^\*|\*$/g, '').trim());
+    var onlyAction = lines.every(function(line){ return /^\*[^*]+\*$/.test(line); });
+    if (onlyAction){
+      pushStage(lines.map(function(line){ return line.replace(/^\*|\*$/g, '').trim(); }).join(' '));
       return;
     }
 
-    if (/["“「『]/.test(flat)){
-      var mixedParts = _splitOfflineMixedBlock(flat);
-      if (mixedParts.length){
-        mixedParts.forEach(function(part){
-          if (part.type === 'speech') pushSpeech([part.text]);
-          else pushStage(part.text);
-        });
+    var actionBuf = [];
+    var dialogBuf = [];
+    function flushAction(){
+      if(!actionBuf.length) return;
+      pushStage(actionBuf.join(' '));
+      actionBuf = [];
+    }
+    function flushDialog(){
+      if(!dialogBuf.length) return;
+      pushSpeech(dialogBuf.slice());
+      dialogBuf = [];
+    }
+
+    lines.forEach(function(line){
+      var trimmed = line.trim();
+      var pureActionMatch = trimmed.match(/^\*([^*]+)\*$/);
+      if (pureActionMatch){
+        flushDialog();
+        actionBuf.push(pureActionMatch[1]);
         return;
       }
-    }
-
-    if (/^["“「『].*["”」』]$/.test(flat)){
-      pushSpeech([flat]);
-      return;
-    }
-
-    pushStage(flat);
+      if (/["「]/.test(trimmed) || /^[^\*]/.test(trimmed)){
+        flushAction();
+        dialogBuf.push(trimmed);
+      } else {
+        flushDialog();
+        actionBuf.push(trimmed);
+      }
+    });
+    flushAction();
+    flushDialog();
   });
 
+  // 如果没有拆出任何段落，退回普通渲染
   if(!segments.length){
-    var fallback = _cleanOfflineDisplayText(text, { mode:'stage' });
-    segments.push({ type:'stage', html: '<em class="rpAction">— ' + esc(fallback || '……') + ' —</em>' });
+    var formatted2 = esc(text)
+      .replace(/\*([^*]+)\*/g, '<em class="rpAction">$1</em>')
+      .replace(/"([^"]+)"/g, '<span class="rpDialog">"$1"</span>')
+      .replace(/「([^」]+)」/g, '<span class="rpDialog">「$1」</span>');
+    var nameTag2 = role === 'me' ? '' : '<span class="rpSpeaker">' + esc(speaker) + '</span>';
+    segments.push({ type:'speech', html: nameTag2 + '<span class="rpText">' + formatted2 + '</span>' });
   }
   return segments;
 }
 
-// ========== Phase 3E：线下模式 buildSystemPrompt 追加 ==========
+function _renderSceneBanner(container, sceneName, sceneDesc){
+  var banner = doc.createElement('div');
+  banner.className = 'wxSceneBanner';
+  try{
+    var styles = _loadCustomStyle(state.chatTarget);
+    var tpl = styles && styles.offlineStyle && styles.offlineStyle.sceneBannerHTML;
+    if (tpl && String(tpl).trim()){
+      banner.innerHTML = _applyCustomHTMLTemplate(tpl, {
+        sceneName: esc(sceneName || '未命名场景'),
+        sceneDesc: esc(sceneDesc || '')
+      });
+      container.appendChild(banner);
+      return;
+    }
+  }catch(e){}
+  banner.innerHTML = '<div class="wxSceneName">🎭 ' + esc(sceneName || '未命名场景') + '</div>' +
+    (sceneDesc ? '<div class="wxSceneDesc">' + esc(sceneDesc) + '</div>' : '') +
+    '<div style="margin-top:6px;font-size:10px;opacity:.45;letter-spacing:2px;">— 幕 启 —</div>';
+  container.appendChild(banner);
+}
+
 // ========== Phase 3E：线下模式 buildSystemPrompt 追加 ==========
 
 function _buildOfflinePromptAddition(npcId){
   var scene = _loadSceneData(npcId);
   var mode = String(scene.offlineMode || 'stage');
-  var modeLabel = ({stage:'舞台剧模式', novel:'小说模式', game:'游戏模式'})[mode] || '舞台剧模式';
+  var modeLabel = ({stage:'舞台剧/广播剧', novel:'小说模式', game:'游戏模式'})[mode] || '舞台剧/广播剧';
   var npcPersonMap = { first:'第一人称', second:'第二人称', third:'第三人称' };
   var userPersonMap = { first:'第一人称', second:'第二人称', third:'第三人称' };
 
@@ -31138,21 +31272,19 @@ function _buildOfflinePromptAddition(npcId){
     '当前展示模式：' + modeLabel + '。'
   ];
 
-  if (mode === 'novel'){
-    lines.push('请写成自然的小说正文。');
-    lines.push('同一条回复里可以自然包含旁白、环境、动作、心理和对话，但整体仍要像正文，不要写成舞台剧脚本。');
-    lines.push('对白前后尽量自然分段，长旁白主动拆短段，阅读上要清楚。');
-    lines.push('不要输出 *动作标签*、角色名前缀、项目符号、代码块、说明书口吻，也不要输出 wxNovelAside、rpAction 这类内部标签。');
-  } else {
-    lines.push('你现在输出的是分段稳定的剧情文本。');
-    lines.push('只允许两种段落：旁白段、对话段。');
-    lines.push('旁白段用于环境、动作、神态、心理、气氛、场景变化等描述，必须单独成段。');
-    lines.push('对话段只写角色真正说出口的话，必须单独成段。');
-    lines.push('不要把旁白和对话写在同一段里。');
-    lines.push('动作、表情、心理、环境描写全部归入旁白段。');
-    lines.push('如果一句里同时出现动作和台词，也要主动拆成两段。');
-    lines.push('不要输出 *动作*、（动作）、[动作]、<动作>、角色名前缀、项目符号、代码块、wxStageAside、rpAction 等内部标签。');
-    lines.push('排版目标是清晰稳定，不要炫技。');
+  if (mode === 'stage'){
+    lines.push('格式上的区别仅仅是：动作/旁白用 *星号包裹*，台词用"引号"，这不是让你变成另一个人。');
+    lines.push('其他格式规则：');
+    lines.push('- 不输出任何代码、标签或特殊符号，只有纯文字、星号、引号');
+    lines.push('- 篇幅自然，不必凑段落数，跟线上聊天一样有来有回即可');
+  } else if (mode === 'novel'){
+    lines.push('请写成更接近小说正文的回复：同一条回复里可以自然包含旁白、环境、动作、心理与对话。');
+    lines.push('不要写成舞台剧脚本，不要把旁白和台词拆成一行一行的角色表演稿。');
+    lines.push('段落要自然，像酒馆里常见的叙事回复；对话直接嵌在叙述里，必要时放在中文引号中。');
+    lines.push('不要输出 *动作标签*、角色名前缀、项目符号、代码块、说明书口吻。');
+  } else if (mode === 'game'){
+    lines.push('请更接近视觉小说/橙光叙事：每一句都尽量简洁、镜头感明确、适合逐句播放。');
+    lines.push('旁白与对话分明，一次不要堆太多信息，适合点击逐句推进。');
   }
 
   lines.push('角色人称偏好：' + (npcPersonMap[scene.npcPerson || 'second'] || '第二人称') + '。');
@@ -31165,13 +31297,13 @@ function _buildOfflinePromptAddition(npcId){
   if (pd) {
     var presetLines = [];
     if (pd.basic && pd.basic.enabled && String(pd.basic.text||'').trim()){
-      presetLines.push('【角色基础人设】\n' + String(pd.basic.text).trim());
+      presetLines.push('【角色基础人设】\\n' + String(pd.basic.text).trim());
     }
     if (pd.style && pd.style.enabled && String(pd.style.text||'').trim()){
-      presetLines.push('【文风写作风格】\n' + String(pd.style.text).trim());
+      presetLines.push('【文风写作风格】\\n' + String(pd.style.text).trim());
     }
     if (pd.special && pd.special.enabled && String(pd.special.text||'').trim()){
-      presetLines.push('【特殊规则】\n' + String(pd.special.text).trim());
+      presetLines.push('【特殊规则】\\n' + String(pd.special.text).trim());
     }
     if (presetLines.length){
       lines.push('【⚠ 场景预设模块 — 严格遵守以下规则，与人设保持一致 ⚠】');
@@ -31184,10 +31316,10 @@ function _buildOfflinePromptAddition(npcId){
     lines.push(String(scene.customPrompt).trim());
   }
 
-  return lines.join('\n');
+  return lines.join('\\n');
 }
 
-// ========== Phase 3F：场景编辑弹窗 ==========
+
 // ========== Phase 3F：场景编辑弹窗 ==========
 function _openSceneEditor(npcId){
   var scene = _loadSceneData(npcId);
@@ -37751,7 +37883,14 @@ function _buildMapPromptBlock(npcId){
 var MEOW_PUSH_PUBLIC_KEY = 'BLrK-QDuRnQLDL_dMKHO7n6ngatzB_1s-BmmnspO9O1qPX7Th-lPF1DH1baLqq8I7r7kAkorAo53Rufr95WmDww';
 
 // ========== Service Worker 注册 ==========
-if ('serviceWorker' in navigator) {
+function _meowCanUseHttpPush() {
+  try {
+    var p = String((window.location && window.location.protocol) || '');
+    return p === 'http:' || p === 'https:';
+  } catch (e) { return false; }
+}
+
+if ('serviceWorker' in navigator && _meowCanUseHttpPush()) {
   window.addEventListener('load', function() {
     navigator.serviceWorker.register('/sw.js').then(function(reg) {
       console.log('[MeowPush] SW 注册成功');
@@ -37760,6 +37899,8 @@ if ('serviceWorker' in navigator) {
       console.warn('[MeowPush] SW 注册失败:', err);
     });
   });
+} else if ('serviceWorker' in navigator) {
+  console.warn('[MeowPush] 当前以 file:// 打开，SW / Push / /api 接口不可用；要后台推送请改为 http://localhost 或 https://');
 }
 
 // ========== 收集用户当前激活的 API 配置 ==========
@@ -37833,6 +37974,7 @@ function _meowCollectNpcs() {
 // ========== 核心：订阅 + 同步配置到后端 ==========
 async function _meowSyncSubscription() {
   try {
+    if (!_meowCanUseHttpPush()) return;
     if (typeof Notification === 'undefined') return;
     if (Notification.permission !== 'granted') return;
     if (!MEOW_PUSH_PUBLIC_KEY || MEOW_PUSH_PUBLIC_KEY === '填入你的VAPID公钥') return;
@@ -37909,6 +38051,13 @@ async function _meowRequestPush() {
 // ========== 拉取离线消息 ==========
 async function _meowPullOfflineMessages() {
   try {
+    if (!_meowCanUseHttpPush()) {
+      if (!_meowPullOfflineMessages._warned) {
+        console.warn('[MeowPush] 当前以 file:// 打开，/api/pull 不可用；要实现后台补拉消息，请改为 http://localhost 或 https:// 运行。');
+        _meowPullOfflineMessages._warned = 1;
+      }
+      return { ok:false, skipped:'protocol_not_supported' };
+    }
     var uid = 'standalone_main';
     var logsKey = 'meow_phone_c_' + uid + '_im_logs_v1';
     var threadsKey = 'meow_phone_c_' + uid + '_im_threads_v1';
@@ -38476,15 +38625,6 @@ function _meowUrlBase64ToUint8Array(base64String) {
   var _activeTab = 'status';
   var _renderStatusTabFn = null;
 
-  function _mfaEsc(s){
-    return String(s == null ? '' : s)
-      .replace(/&/g,'&amp;')
-      .replace(/</g,'&lt;')
-      .replace(/>/g,'&gt;')
-      .replace(/"/g,'&quot;')
-      .replace(/'/g,'&#39;');
-  }
-
   var STATS_DEF = [
     { key: 'energy',  label: '精力', color: '#ff7b7b', icon: '⚡' },
     { key: 'mood',    label: '心情', color: '#ffd86e', icon: '😊' },
@@ -38507,106 +38647,75 @@ function _meowUrlBase64ToUint8Array(base64String) {
       #meow-float-avatar .mfa-badge { position:absolute; top:4px; right:4px; width:10px; height:10px; border-radius:50%; background:#ff4444; border:1.5px solid #fff; display:none; }
       #meow-float-avatar .mfa-badge.show { display:block; }
 
-      /* ── 展开卡片（统一模糊玻璃风 + 更宽更松） ── */
-      #meow-float-card {
-        position:absolute; z-index:99999;
-        width:min(352px, calc(100vw - 28px));
-        max-width:352px; height:min(410px, calc(100vh - 96px)); max-height:min(410px, calc(100vh - 96px));
-        background:linear-gradient(180deg, rgba(255,255,255,.38), rgba(255,255,255,.18)), var(--ph-glass-strong, rgba(255,255,255,.72));
-        backdrop-filter:blur(calc(var(--ph-glass-blur,20px) * .92)) saturate(122%);
-        -webkit-backdrop-filter:blur(calc(var(--ph-glass-blur,20px) * .92)) saturate(122%);
-        border-radius:24px;
-        box-shadow:0 18px 44px rgba(0,0,0,.16), 0 4px 14px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.52);
-        padding:0; display:none; overflow:hidden;
-        border:1px solid rgba(255,255,255,.36);
-        animation:mfcIn .16s cubic-bezier(.34,1.4,.64,1);
-      }
+      /* ── 展开卡片（加宽支持3tab） ── */
+      #meow-float-card { position:absolute; z-index:99999; width:270px; height:380px; background:var(--ph-appbody-bg,#fff); border-radius:18px; box-shadow:0 4px 24px rgba(0,0,0,.10),0 1px 4px rgba(0,0,0,.06); padding:0; display:none; overflow:hidden; border:1px solid var(--ph-sep,rgba(0,0,0,.07)); animation:mfcIn .16s cubic-bezier(.34,1.4,.64,1); }
       #meow-float-card.show { display:flex; flex-direction:column; }
-      @keyframes mfcIn { from{opacity:0;transform:scale(.94) translateY(6px)} to{opacity:1;transform:scale(1) translateY(0)} }
+      @keyframes mfcIn { from{opacity:0;transform:scale(.92) translateY(4px)} to{opacity:1;transform:scale(1) translateY(0)} }
 
       /* ── Tab 栏 ── */
-      #meow-float-card .mfc-tabs {
-        display:flex; flex-shrink:0;
-        padding:0 12px;
-        background:rgba(255,255,255,.12);
-        border-bottom:1px solid rgba(255,255,255,.22);
-        backdrop-filter:blur(calc(var(--ph-glass-blur,20px) * .55));
-        -webkit-backdrop-filter:blur(calc(var(--ph-glass-blur,20px) * .55));
-      }
-      #meow-float-card .mfc-tab {
-        flex:1; padding:14px 0 12px; text-align:center; font-size:14px; font-weight:600;
-        color:var(--ph-text-dim,#aaa); cursor:pointer; border:none; background:none;
-        transition:color .15s,border-color .15s, background .15s; border-bottom:3px solid transparent;
-        -webkit-tap-highlight-color:transparent; white-space:nowrap;
-      }
+      #meow-float-card .mfc-tabs { display:flex; border-bottom:1px solid var(--ph-sep,rgba(0,0,0,.06)); flex-shrink:0; }
+      #meow-float-card .mfc-tab { flex:1; padding:8px 0; text-align:center; font-size:11px; font-weight:500; color:var(--ph-text-dim,#aaa); cursor:pointer; border:none; background:none; transition:color .15s,border-color .15s; border-bottom:2px solid transparent; -webkit-tap-highlight-color:transparent; }
       #meow-float-card .mfc-tab.on { color:var(--ph-text,#333); border-bottom-color:var(--ph-accent,#07c160); }
-      #meow-float-card .mfc-tab-body { flex:1; overflow-y:auto; overflow-x:hidden; min-height:0; display:flex; flex-direction:column; }
+      #meow-float-card .mfc-tab-body { flex:1; overflow-y:auto; overflow-x:hidden; min-height:0; }
 
       /* ── Tab1 状态 ── */
-      #meow-float-card .mfc-head { display:flex; align-items:center; gap:8px; padding:14px 16px 10px; font-size:12px; font-weight:600; color:var(--ph-text-sub,#888); }
-      #meow-float-card .mfc-head svg { width:13px; height:13px; fill:var(--ph-text-sub,#888); flex-shrink:0; }
-      #meow-float-card .mfc-body { padding:8px 16px 10px; }
-      #meow-float-card .mfc-row { display:flex; align-items:center; gap:4px; margin-bottom:9px; }
+      #meow-float-card .mfc-head { display:flex; align-items:center; gap:5px; padding:8px 14px 6px; font-size:11px; font-weight:500; color:var(--ph-text-dim,#aaa); }
+      #meow-float-card .mfc-head svg { width:11px; height:11px; fill:var(--ph-text-dim,#aaa); flex-shrink:0; }
+      #meow-float-card .mfc-body { padding:8px 14px 6px; }
+      #meow-float-card .mfc-row { display:flex; align-items:center; gap:0; margin-bottom:6px; }
       #meow-float-card .mfc-row:last-child { margin-bottom:0; }
-      #meow-float-card .mfc-label { font-size:12px; color:var(--ph-text-sub,#888); width:34px; flex-shrink:0; }
-      #meow-float-card .mfc-bar-wrap { flex:1; height:5px; background:var(--ph-sep,rgba(0,0,0,.08)); border-radius:999px; overflow:hidden; margin:0 8px; }
-      #meow-float-card .mfc-bar { height:100%; border-radius:999px; transition:width .45s cubic-bezier(.4,0,.2,1); }
-      #meow-float-card .mfc-val { font-size:11px; font-weight:600; color:var(--ph-text-sub,#888); width:26px; text-align:right; flex-shrink:0; font-variant-numeric:tabular-nums; }
-      #meow-float-card .mfc-foot { display:flex; align-items:center; gap:6px; padding:10px 16px 12px; border-top:1px solid rgba(255,255,255,.18); font-size:12px; color:var(--ph-text-sub,#888); }
-      #meow-float-card .mfc-foot svg { width:13px; height:13px; flex-shrink:0; fill:var(--ph-accent,#07c160); }
-      #meow-float-card .mfc-money-val { font-weight:700; color:var(--ph-accent,#07c160); font-size:14px; margin-right:2px; }
-      #meow-float-card .mfc-actions { display:flex; justify-content:space-around; padding:10px 10px 12px; border-top:1px solid rgba(255,255,255,.18); }
-      #meow-float-card .mfc-act-btn { display:flex; flex-direction:column; align-items:center; gap:4px; background:none; border:none; cursor:pointer; padding:8px 6px; border-radius:14px; transition:background .12s; -webkit-tap-highlight-color:transparent; min-width:54px; }
+      #meow-float-card .mfc-label { font-size:11px; color:var(--ph-text-sub,#888); width:28px; flex-shrink:0; }
+      #meow-float-card .mfc-bar-wrap { flex:1; height:3.5px; background:var(--ph-sep,rgba(0,0,0,.08)); border-radius:2px; overflow:hidden; margin:0 6px; }
+      #meow-float-card .mfc-bar { height:100%; border-radius:2px; transition:width .45s cubic-bezier(.4,0,.2,1); }
+      #meow-float-card .mfc-val { font-size:10px; font-weight:500; color:var(--ph-text-sub,#888); width:20px; text-align:right; flex-shrink:0; font-variant-numeric:tabular-nums; }
+      #meow-float-card .mfc-foot { display:flex; align-items:center; gap:4px; padding:6px 14px 8px; border-top:1px solid var(--ph-sep,rgba(0,0,0,.06)); font-size:11px; color:var(--ph-text-sub,#888); }
+      #meow-float-card .mfc-foot svg { width:11px; height:11px; flex-shrink:0; fill:var(--ph-accent,#07c160); }
+      #meow-float-card .mfc-money-val { font-weight:600; color:var(--ph-accent,#07c160); font-size:12px; margin-right:2px; }
+      #meow-float-card .mfc-actions { display:flex; justify-content:space-around; padding:6px 8px 8px; border-top:1px solid var(--ph-sep,rgba(0,0,0,.06)); }
+      #meow-float-card .mfc-act-btn { display:flex; flex-direction:column; align-items:center; gap:1px; background:none; border:none; cursor:pointer; padding:3px 5px; border-radius:8px; transition:background .12s; -webkit-tap-highlight-color:transparent; }
       #meow-float-card .mfc-act-btn:active { background:var(--ph-row-hover,rgba(0,0,0,.04)); }
-      #meow-float-card .mfc-act-btn svg { width:18px; height:18px; fill:var(--ph-text-sub,#666); }
-      #meow-float-card .mfc-act-label { font-size:10px; color:var(--ph-text-dim,#aaa); white-space:nowrap; }
-      #meow-float-card .mfc-task { padding:8px 16px 10px; border-top:1px solid rgba(255,255,255,.18); }
-      #meow-float-card .mfc-task-title { font-size:10px; color:var(--ph-text-dim,#aaa); text-transform:uppercase; letter-spacing:.45px; margin-bottom:6px; }
-      #meow-float-card .mfc-task-item { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--ph-text,#333); padding:4px 0; }
-      #meow-float-card .mfc-task-item svg { width:12px; height:12px; fill:var(--ph-accent,#07c160); flex-shrink:0; }
-      #meow-float-card .mfc-task-time { font-size:9px; color:var(--ph-text-dim,#aaa); margin-left:auto; flex-shrink:0; }
-      #meow-float-card .mfc-task-empty { font-size:10px; color:var(--ph-text-dim,#bbb); font-style:italic; }
+      #meow-float-card .mfc-act-btn svg { width:16px; height:16px; fill:var(--ph-text-sub,#666); }
+      #meow-float-card .mfc-act-label { font-size:8px; color:var(--ph-text-dim,#aaa); white-space:nowrap; }
+      #meow-float-card .mfc-task { padding:4px 14px 6px; border-top:1px solid var(--ph-sep,rgba(0,0,0,.06)); }
+      #meow-float-card .mfc-task-title { font-size:8px; color:var(--ph-text-dim,#aaa); text-transform:uppercase; letter-spacing:.3px; margin-bottom:3px; }
+      #meow-float-card .mfc-task-item { display:flex; align-items:center; gap:5px; font-size:10px; color:var(--ph-text,#333); padding:2px 0; }
+      #meow-float-card .mfc-task-item svg { width:11px; height:11px; fill:var(--ph-accent,#07c160); flex-shrink:0; }
+      #meow-float-card .mfc-task-time { font-size:8px; color:var(--ph-text-dim,#aaa); margin-left:auto; flex-shrink:0; }
+      #meow-float-card .mfc-task-empty { font-size:9px; color:var(--ph-text-dim,#bbb); font-style:italic; }
 
       /* ── Tab2 迷你聊天 ── */
       .mfc-chat-wrap { display:flex; flex-direction:column; height:100%; min-height:0; }
-      .mfc-chat-empty { padding:28px 18px; text-align:center; font-size:12px; line-height:1.7; color:var(--ph-text-dim,#bbb); }
-      .mfc-chat-msgs { flex:1; overflow-y:auto; padding:18px 24px 16px; display:flex; flex-direction:column; gap:14px; min-height:0; background:rgba(255,255,255,.08); box-sizing:border-box; }
-      .mfc-chat-bubble { display:flex; width:auto; max-width:calc(100% - 108px); box-sizing:border-box; }
-      .mfc-chat-bubble .mfc-chat-inner { display:block; width:100%; padding:14px 20px; border-radius:18px; font-size:13px; line-height:1.76; word-break:break-word; white-space:pre-wrap; overflow-wrap:anywhere; box-shadow:0 4px 14px rgba(0,0,0,.05); box-sizing:border-box; }
-      .mfc-chat-bubble.me { align-self:flex-end; margin-left:72px; margin-right:24px; }
-      .mfc-chat-bubble.me .mfc-chat-inner { background:var(--ph-accent,#07c160); color:#fff; border-bottom-right-radius:8px; }
-      .mfc-chat-bubble.them { align-self:flex-start; margin-left:24px; margin-right:72px; }
-      .mfc-chat-bubble.them .mfc-chat-inner { background:rgba(255,255,255,.30); color:var(--ph-text,#333); border-bottom-left-radius:8px; border:1px solid rgba(255,255,255,.22); }
-      .mfc-chat-bubble.them .mfc-chat-name { font-size:11px; font-weight:600; color:var(--ph-text-sub,#888); margin-bottom:5px; }
-      .mfc-chat-input-wrap { display:flex; gap:8px; padding:10px 18px 14px; border-top:1px solid rgba(255,255,255,.18); flex-shrink:0; background:rgba(255,255,255,.08); box-sizing:border-box; }
-      .mfc-chat-input { flex:1; border:1px solid rgba(255,255,255,.26); border-radius:999px; min-height:40px; padding:0 14px; font-size:13px; color:var(--ph-text,#333); background:rgba(255,255,255,.22); outline:none; }
-      .mfc-chat-send { width:40px; height:40px; border:none; border-radius:50%; background:var(--ph-accent,#07c160); color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; -webkit-tap-highlight-color:transparent; box-shadow:0 8px 18px rgba(0,0,0,.08); }
-      .mfc-chat-send svg { width:18px; height:18px; fill:#fff; }
-      .mfc-chat-typing { font-size:10px; color:var(--ph-text-dim,#aaa); padding:0 14px 8px; font-style:italic; }
+      .mfc-chat-empty { padding:20px 14px; text-align:center; font-size:10px; color:var(--ph-text-dim,#bbb); }
+      .mfc-chat-msgs { flex:1; overflow-y:auto; padding:10px 16px !important; display:flex; flex-direction:column; gap:6px; box-sizing:border-box !important; }
+      .mfc-chat-bubble { max-width:75% !important; padding:7px 11px !important; border-radius:12px; font-size:11px; line-height:1.5; word-break:break-word; box-sizing:border-box !important; }
+      .mfc-chat-bubble.me { align-self:flex-end !important; background:var(--ph-accent,#07c160); color:#fff; border-bottom-right-radius:4px; margin-right:4px !important; margin-left:auto !important; }
+      .mfc-chat-bubble.them { align-self:flex-start !important; background:var(--ph-glass-strong,rgba(0,0,0,.06)); color:var(--ph-text,#333); border-bottom-left-radius:4px; margin-left:4px !important; margin-right:auto !important; }
+      .mfc-chat-bubble.them .mfc-chat-name { font-size:9px; color:var(--ph-text-dim,#aaa); margin-bottom:2px; }
+      .mfc-chat-input-wrap { display:flex; gap:6px; padding:6px 14px 8px; border-top:1px solid var(--ph-sep,rgba(0,0,0,.06)); flex-shrink:0; }
+      .mfc-chat-input { flex:1; border:1px solid var(--ph-sep,rgba(0,0,0,.1)); border-radius:16px; padding:5px 10px; font-size:11px; color:var(--ph-text,#333); background:var(--ph-glass,rgba(255,255,255,.8)); outline:none; }
+      .mfc-chat-send { width:28px; height:28px; border:none; border-radius:50%; background:var(--ph-accent,#07c160); color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; -webkit-tap-highlight-color:transparent; }
+      .mfc-chat-send svg { width:14px; height:14px; fill:#fff; }
+      .mfc-chat-typing { font-size:9px; color:var(--ph-text-dim,#aaa); padding:2px 10px; font-style:italic; }
 
       /* ── Tab3 精灵 ── */
       .mfc-spirit-wrap { display:flex; flex-direction:column; height:100%; min-height:0; }
-      .mfc-spirit-header { text-align:center; padding:16px 16px 12px; border-bottom:1px solid rgba(255,255,255,.18); flex-shrink:0; background:rgba(255,255,255,.10); }
-      .mfc-spirit-avatar { display:inline-flex; align-items:center; justify-content:center; position:relative; width:78px; height:78px; margin:0 auto; border-radius:50%; background:rgba(255,255,255,.18); box-shadow:0 8px 24px rgba(0,0,0,.08), inset 0 1px 0 rgba(255,255,255,.45); }
-      .mfc-spirit-avatar svg { width:62px; height:62px; }
+      .mfc-spirit-header { text-align:center; padding:8px 10px 6px; border-bottom:1px solid var(--ph-sep,rgba(0,0,0,.06)); flex-shrink:0; }
+      .mfc-spirit-avatar { display:inline-block; position:relative; }
+      .mfc-spirit-avatar svg { width:48px; height:48px; }
       .mfc-spirit-avatar .spirit-glow { animation: spiritPulse 2s ease-in-out infinite; }
       @keyframes spiritPulse { 0%,100%{opacity:.3;transform:scale(1)} 50%{opacity:.7;transform:scale(1.08)} }
-      .mfc-spirit-name { font-size:18px; font-weight:700; color:var(--ph-text,#333); margin-top:8px; line-height:1.25; }
-      .mfc-spirit-mood { font-size:12px; color:var(--ph-text-sub,#aaa); line-height:1.45; margin-top:4px; }
-      .mfc-spirit-msgs { flex:1; overflow-y:auto; padding:18px 24px 16px; display:flex; flex-direction:column; gap:14px; min-height:0; box-sizing:border-box; }
-      .mfc-spirit-bubble { display:flex; width:auto; max-width:calc(100% - 108px); box-sizing:border-box; }
-      .mfc-spirit-bubble .mfc-spirit-inner { display:block; width:100%; padding:14px 20px; border-radius:18px; font-size:13px; line-height:1.76; word-break:break-word; white-space:pre-wrap; overflow-wrap:anywhere; box-sizing:border-box; box-shadow:0 4px 14px rgba(0,0,0,.05); }
-      .mfc-spirit-bubble.me { align-self:flex-end; margin-left:72px; margin-right:24px; }
-      .mfc-spirit-bubble.me .mfc-spirit-inner { background:var(--ph-accent,#07c160); color:#fff; border-bottom-right-radius:8px; }
-      .mfc-spirit-bubble.spirit { align-self:flex-start; margin-left:24px; margin-right:72px; }
-      .mfc-spirit-bubble.spirit .mfc-spirit-inner { background:linear-gradient(135deg,rgba(147,130,220,.18),rgba(120,180,220,.14)); color:var(--ph-text,#333); border-bottom-left-radius:8px; border:1px solid rgba(147,130,220,.18); }
-      .mfc-spirit-bubble.system { align-self:center; max-width:calc(100% - 48px); }
-      .mfc-spirit-bubble.system .mfc-spirit-inner { background:rgba(255,255,255,.20); color:var(--ph-text-dim,#aaa); font-size:10px; border-radius:999px; padding:4px 10px; box-shadow:none; }
-      .mfc-spirit-input-wrap { display:flex; gap:8px; padding:10px 18px 14px; border-top:1px solid rgba(255,255,255,.18); flex-shrink:0; box-sizing:border-box; }
-      .mfc-spirit-input { flex:1; border:1px solid rgba(147,130,220,.24); border-radius:999px; min-height:40px; padding:0 14px; font-size:13px; color:var(--ph-text,#333); background:rgba(255,255,255,.18); outline:none; }
-      .mfc-spirit-input:focus { border-color:rgba(147,130,220,.42); }
-      .mfc-spirit-send { width:40px; height:40px; border:none; border-radius:50%; background:linear-gradient(135deg,#9382dc,#78b4dc); color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; box-shadow:0 8px 18px rgba(104,120,188,.18); }
-      .mfc-spirit-send svg { width:18px; height:18px; fill:#fff; }
+      .mfc-spirit-name { font-size:12px; font-weight:600; color:var(--ph-text,#333); margin-top:2px; }
+      .mfc-spirit-mood { font-size:9px; color:var(--ph-text-dim,#aaa); }
+      .mfc-spirit-msgs { flex:1; overflow-y:auto; padding:10px 16px !important; display:flex; flex-direction:column; gap:5px; box-sizing:border-box !important; }
+      .mfc-spirit-bubble { max-width:75% !important; padding:7px 11px !important; border-radius:12px; font-size:11px; line-height:1.5; word-break:break-word; box-sizing:border-box !important; }
+      .mfc-spirit-bubble.me { align-self:flex-end !important; background:var(--ph-accent,#07c160); color:#fff; border-bottom-right-radius:4px; margin-right:4px !important; margin-left:auto !important; }
+      .mfc-spirit-bubble.spirit { align-self:flex-start !important; background:linear-gradient(135deg,rgba(147,130,220,.15),rgba(120,180,220,.12)); color:var(--ph-text,#333); border-bottom-left-radius:4px; border:1px solid rgba(147,130,220,.15); margin-left:4px !important; margin-right:auto !important; }
+      .mfc-spirit-bubble.system { align-self:center; background:rgba(0,0,0,.04); color:var(--ph-text-dim,#aaa); font-size:9px; border-radius:8px; padding:3px 8px; }
+      .mfc-spirit-input-wrap { display:flex; gap:5px; padding:6px 14px 8px; border-top:1px solid var(--ph-sep,rgba(0,0,0,.06)); flex-shrink:0; }
+      .mfc-spirit-input { flex:1; border:1px solid rgba(147,130,220,.2); border-radius:16px; padding:5px 10px; font-size:11px; color:var(--ph-text,#333); background:rgba(147,130,220,.05); outline:none; }
+      .mfc-spirit-input:focus { border-color:rgba(147,130,220,.4); }
+      .mfc-spirit-send { width:28px; height:28px; border:none; border-radius:50%; background:linear-gradient(135deg,#9382dc,#78b4dc); color:#fff; cursor:pointer; display:flex; align-items:center; justify-content:center; flex-shrink:0; }
+      .mfc-spirit-send svg { width:14px; height:14px; fill:#fff; }
     `;
     document.head.appendChild(s);
   }
@@ -38669,16 +38778,102 @@ function _meowUrlBase64ToUint8Array(base64String) {
       _activeTab = 'status'; // 使用外层 IIFE 的变量
       var _miniChatMsgs = []; // [{role:'me'|'them', text, name, t}]
       var _miniChatTarget = null; // 当前迷你聊天对象 npcId
+      var _miniChatTyping = false; // ★ 正在输入指示器
       var LS_MINI_CHAT = 'meow.floatavatar.minichat';
+      var _miniChatDrafts = {};
+      var _miniChatWatchTimer = 0;
+      var _miniChatWatchNpcId = '';
+      var _miniChatWatchLastLen = -1;
+      var _miniChatWatchLastChangeAt = 0;
+      var _miniChatRestoreFocus = false;
 
       function _loadMiniChatCfg() {
         try { return JSON.parse(localStorage.getItem(LS_MINI_CHAT)) || {}; } catch(e){ return {}; }
       }
 
+      function _getMiniChatLogLen(npcId){
+        try {
+          if (typeof window._meowGetLog === 'function') return (window._meowGetLog(npcId) || []).length;
+        } catch(e){}
+        return 0;
+      }
+
+      function _stopMiniChatWatcher() {
+        try {
+          if (_miniChatWatchTimer) clearInterval(_miniChatWatchTimer);
+        } catch(e){}
+        _miniChatWatchTimer = 0;
+        _miniChatWatchNpcId = '';
+        _miniChatWatchLastLen = -1;
+        _miniChatWatchLastChangeAt = 0;
+      }
+
+      function _captureMiniChatDraft() {
+        try {
+          if (!_card) return;
+          var liveInput = _card.querySelector('#mfc-chat-input');
+          if (!liveInput) return;
+          if (_miniChatTarget) _miniChatDrafts[_miniChatTarget] = liveInput.value || '';
+          _miniChatRestoreFocus = (document.activeElement === liveInput);
+        } catch(e){}
+      }
+
+      function _startMiniChatWatcher(npcId, opts) {
+        try {
+          npcId = String(npcId || _miniChatTarget || '').trim();
+          if (!npcId) return;
+          opts = opts || {};
+          var idleMs = Math.max(4000, Number(opts.idleMs || 12000));
+          if (!_cardOpen || _activeTab !== 'chat' || !_card) return;
+          _miniChatWatchNpcId = npcId;
+          _miniChatWatchLastLen = _getMiniChatLogLen(npcId);
+          _miniChatWatchLastChangeAt = Date.now();
+          if (_miniChatWatchTimer) clearInterval(_miniChatWatchTimer);
+          _miniChatWatchTimer = setInterval(function(){
+            try {
+              if (!_cardOpen || _activeTab !== 'chat' || !_card) {
+                _stopMiniChatWatcher();
+                return;
+              }
+              var watchingNpc = String(_miniChatTarget || _miniChatWatchNpcId || '').trim();
+              if (!watchingNpc) {
+                _stopMiniChatWatcher();
+                return;
+              }
+              if (_miniChatWatchNpcId !== watchingNpc) {
+                _miniChatWatchNpcId = watchingNpc;
+                _miniChatWatchLastLen = _getMiniChatLogLen(watchingNpc);
+                _miniChatWatchLastChangeAt = Date.now();
+                _captureMiniChatDraft();
+                var liveBody0 = _card.querySelector('#mfc-tab-body');
+                if (liveBody0) _renderChatTab(liveBody0);
+                return;
+              }
+              var curLen = _getMiniChatLogLen(watchingNpc);
+              if (curLen !== _miniChatWatchLastLen) {
+                _miniChatWatchLastLen = curLen;
+                _miniChatWatchLastChangeAt = Date.now();
+                _captureMiniChatDraft();
+                var liveBody = _card.querySelector('#mfc-tab-body');
+                if (liveBody) _renderChatTab(liveBody);
+                return;
+              }
+              if (Date.now() - _miniChatWatchLastChangeAt > idleMs && !_miniChatTyping) {
+                _stopMiniChatWatcher();
+              }
+            } catch(e) {
+              _stopMiniChatWatcher();
+            }
+          }, 220);
+        } catch(e) {}
+      }
+
       function _switchTab(tabId) {
+        if (_activeTab === 'chat' && tabId !== 'chat') _stopMiniChatWatcher();
         _activeTab = tabId;
         card.querySelectorAll('.mfc-tab').forEach(function(t){ t.classList.toggle('on', t.getAttribute('data-mfctab') === tabId); });
         _renderTabContent();
+        if (tabId === 'chat') _startMiniChatWatcher(_miniChatTarget, { idleMs: 8000 });
       }
 
       function _renderTabContent() {
@@ -38726,128 +38921,180 @@ function _meowUrlBase64ToUint8Array(base64String) {
 
       /* ── Tab2: 迷你聊天 ── */
       function _renderChatTab(body) {
-        // 读取快捷聊天列表
         var quickChats = [];
         try {
           var cr = localStorage.getItem('meow_phone_c_standalone_main_contacts_v1');
-          if (cr) {
-            var cdb = JSON.parse(cr);
-            quickChats = (cdb.list||[]).filter(function(c){ return c.quickChat; }).slice(0,5);
-          }
+          if (cr) { var cdb = JSON.parse(cr); quickChats = (cdb.list||[]).filter(function(c){ return c.quickChat; }).slice(0,5); }
         } catch(e){}
 
         if (quickChats.length === 0) {
-          body.innerHTML = '<div class="mfc-chat-wrap"><div class="mfc-chat-empty">还没有加入快捷聊天的角色<br><span style="font-size:11px;opacity:.78;">在聊天设置里开启“加入快捷聊天”，或先在聊天 App 里建立会话</span></div></div>';
+          body.innerHTML = '<div class="mfc-chat-empty" style="padding:20px 14px !important;">还没有加入快捷聊天的角色<br><span style="font-size:9px;">在聊天设置里开启「加入快捷聊天」</span></div>';
           return;
         }
+        if (!_miniChatTarget) _miniChatTarget = quickChats[0].id;
 
-        if (!_miniChatTarget) {
-          _miniChatTarget = quickChats[0].id;
-        }
-
-        // ★ 从 IM 日志加载已有聊天记录（最近20条）
-        if (_miniChatMsgs.length === 0 && _miniChatTarget) {
-          try {
-            var logRaw = localStorage.getItem('meow_phone_c_standalone_main_im_logs_v1');
-            if (logRaw) {
-              var logData = JSON.parse(logRaw);
-              var npcLogs = (logData.map && logData.map[_miniChatTarget]) || [];
-              _miniChatMsgs = npcLogs.slice(-20).map(function(m) {
-                return { role: m.role === 'me' ? 'me' : 'them', text: String(m.text||'').slice(0,300), t: m.t || 0 };
-              });
-            }
-          } catch(e){}
-        }
+        // ★ 读取真实聊天记录（与主聊天共享同一份 log）
+        var realMsgs = [];
+        try {
+          if (typeof window._meowGetLog === 'function') {
+            realMsgs = window._meowGetLog(_miniChatTarget) || [];
+          } else {
+            var uid = ''; try { uid = (typeof _phUID === 'function') ? _phUID() : 'standalone_main'; } catch(e2){ uid = 'standalone_main'; }
+            var logKey = 'meow_phone_c_' + uid + '_im_logs_v1';
+            var logRaw = localStorage.getItem(logKey);
+            if (logRaw) { var logData = JSON.parse(logRaw); realMsgs = (logData.map && logData.map[_miniChatTarget]) || []; }
+          }
+        } catch(e){}
+        var displayMsgs = realMsgs.slice(-25);
 
         // 选择器
-        var selectorHtml = '<div style="display:flex;gap:8px;padding:12px 14px 10px;border-bottom:1px solid rgba(255,255,255,.18);overflow-x:auto;flex-shrink:0;background:rgba(255,255,255,.08);">';
+        var selectorHtml = '<div style="display:flex;gap:4px;padding:6px 10px !important;border-bottom:1px solid var(--ph-sep,rgba(0,0,0,.06));overflow-x:auto;flex-shrink:0;">';
         quickChats.forEach(function(c) {
           var isActive = _miniChatTarget === c.id;
-          selectorHtml += '<button data-minichat-npc="'+c.id+'" style="padding:7px 12px;border-radius:999px;border:1px solid '+(isActive?'var(--ph-accent,#07c160)':'rgba(255,255,255,.24)')+';background:'+(isActive?'rgba(125,155,138,.14)':'rgba(255,255,255,.18)')+';font-size:12px;font-weight:'+(isActive?'600':'500')+';color:var(--ph-text,#333);cursor:pointer;white-space:nowrap;flex-shrink:0;line-height:1.2;">'+_mfaEsc(c.name||'对话')+'</button>';
+          selectorHtml += '<button data-minichat-npc="'+c.id+'" style="padding:3px 8px !important;border-radius:12px;border:1px solid '+(isActive?'var(--ph-accent,#07c160)':'var(--ph-sep,rgba(0,0,0,.08))')+';background:'+(isActive?'rgba(7,193,96,.08)':'var(--ph-glass,rgba(255,255,255,.8))')+';font-size:10px;color:var(--ph-text,#333);cursor:pointer;white-space:nowrap;flex-shrink:0;">'+c.name+'</button>';
         });
         selectorHtml += '</div>';
 
         var npcName = (quickChats.find(function(c){return c.id===_miniChatTarget;})||{}).name || _miniChatTarget;
         var msgsHtml = '';
-        if (_miniChatMsgs.length === 0) {
-          msgsHtml = '<div class="mfc-chat-empty" style="padding:12px;">暂无聊天记录</div>';
+        if (displayMsgs.length === 0) {
+          msgsHtml = '<div class="mfc-chat-empty" style="padding:12px !important;">暂无聊天记录</div>';
         } else {
-          msgsHtml = '<div class="mfc-chat-msgs" id="mfc-chat-msgs">';
-          _miniChatMsgs.forEach(function(m) {
-            var safeText = _mfaEsc(String(m.text||'')).replace(/\n/g, '<br/>');
-            if (m.role === 'me') msgsHtml += '<div class="mfc-chat-bubble me"><div class="mfc-chat-inner">'+safeText+'</div></div>';
-            else msgsHtml += '<div class="mfc-chat-bubble them"><div class="mfc-chat-inner"><div class="mfc-chat-name">'+_mfaEsc(npcName)+'</div>'+safeText+'</div></div>';
+          msgsHtml = '<div class="mfc-chat-msgs" id="mfc-chat-msgs" style="padding:10px 16px !important;">';
+          displayMsgs.forEach(function(m) {
+            var role = (m.role === 'me' || m.role === 'user') ? 'me' : 'them';
+            var txt = String(m.text || m.content || '').slice(0, 300);
+            if (m.role === 'system' || m.role === 'narrator') return;
+            if (!txt.trim()) return;
+            if (role === 'me') msgsHtml += '<div class="mfc-chat-bubble me" style="margin-right:4px !important;">'+txt+'</div>';
+            else msgsHtml += '<div class="mfc-chat-bubble them" style="margin-left:4px !important;"><div class="mfc-chat-name">'+npcName+'</div>'+txt+'</div>';
           });
           msgsHtml += '</div>';
         }
 
+        var typingHtml = _miniChatTyping ? '<div class="mfc-chat-typing" style="padding:2px 16px !important;">'+npcName+' 正在输入…</div>' : '';
+
         body.innerHTML = '<div class="mfc-chat-wrap">'
-          + selectorHtml + msgsHtml
-          + '<div class="mfc-chat-input-wrap">'
-          + '<input class="mfc-chat-input" id="mfc-chat-input" placeholder="说点什么…" maxlength="200"/>'
+          + selectorHtml + msgsHtml + typingHtml
+          + '<div class="mfc-chat-input-wrap" style="padding:6px 14px 8px !important;">'
+          + '<input class="mfc-chat-input" id="mfc-chat-input" placeholder="说点什么…" maxlength="500" style="padding:5px 10px !important;"/>'
           + '<button class="mfc-chat-send" id="mfc-chat-send"><svg viewBox="0 0 24 24"><path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/></svg></button>'
           + '</div></div>';
 
+        var _freshInput = body.querySelector('#mfc-chat-input');
+        if (_freshInput) {
+          _freshInput.value = _miniChatDrafts[_miniChatTarget] || '';
+          if (_miniChatRestoreFocus) {
+            _miniChatRestoreFocus = false;
+            setTimeout(function(){
+              try {
+                _freshInput.focus();
+                var _len = (_freshInput.value || '').length;
+                _freshInput.setSelectionRange(_len, _len);
+              } catch(e){}
+            }, 0);
+          }
+        }
+
         // 切换联系人
         body.querySelectorAll('[data-minichat-npc]').forEach(function(btn){
-          btn.addEventListener('click', function(e){
-            e.stopPropagation();
-            _miniChatTarget = btn.getAttribute('data-minichat-npc');
-            _miniChatMsgs = []; // 清空让它重新从 IM 日志加载
-            _renderChatTab(body);
-          });
+          btn.addEventListener('click', function(e){ e.stopPropagation(); _miniChatTarget = btn.getAttribute('data-minichat-npc'); _renderChatTab(body); });
         });
 
-        // 发送
+        // ★ 发送：接管真实聊天系统
         var sendBtn = body.querySelector('#mfc-chat-send');
         var inputEl = body.querySelector('#mfc-chat-input');
+        var _prevLogLen = realMsgs.length;
+
         function _doSend() {
           if (!inputEl || !inputEl.value.trim()) return;
           var text = inputEl.value.trim();
-          _miniChatMsgs.push({ role:'me', text:text, t:Date.now() });
-
-          // ★ 同步写入 IM 日志（这样聊天App也能看到）
-          try {
-            var logKey = 'meow_phone_c_standalone_main_im_logs_v1';
-            var logData = JSON.parse(localStorage.getItem(logKey) || '{"map":{}}');
-            if (!logData.map) logData.map = {};
-            if (!logData.map[_miniChatTarget]) logData.map[_miniChatTarget] = [];
-            logData.map[_miniChatTarget].push({ role:'me', text:text, t:Date.now(), fromMiniChat:true });
-            localStorage.setItem(logKey, JSON.stringify(logData));
-          } catch(e){}
-
           inputEl.value = '';
-          _renderChatTab(body);
+          _miniChatDrafts[_miniChatTarget] = '';
 
-          // AI回复
-          if (typeof window.PhoneAI !== 'undefined' && window.PhoneAI.chat) {
-            var npc = quickChats.find(function(c){return c.id===_miniChatTarget;}) || {};
-            var sys = '你是「'+(npc.name||'角色')+'」，简短回复（50字以内），风格自然符合角色性格。';
-            if (npc.profile) sys += '\n角色设定：' + String(npc.profile).slice(0,300);
-            var msgs = _miniChatMsgs.slice(-8).map(function(m){ return {role:m.role==='me'?'user':'assistant',content:m.text}; });
-            window.PhoneAI.chat({ system:sys, messages:msgs, temperature:0.9, maxTokens:150, channel:'default', timeout:25 }).then(function(r){
-              if(r&&r.ok&&r.data){
-                var replyText = String(r.data).trim().slice(0,300);
-                _miniChatMsgs.push({role:'them', text:replyText, t:Date.now()});
-                // ★ 回复也写入 IM 日志
-                try {
-                  var logKey2 = 'meow_phone_c_standalone_main_im_logs_v1';
-                  var logData2 = JSON.parse(localStorage.getItem(logKey2) || '{"map":{}}');
-                  if (!logData2.map) logData2.map = {};
-                  if (!logData2.map[_miniChatTarget]) logData2.map[_miniChatTarget] = [];
-                  logData2.map[_miniChatTarget].push({ role:'them', text:replyText, t:Date.now(), fromMiniChat:true });
-                  localStorage.setItem(logKey2, JSON.stringify(logData2));
-                } catch(e){}
+          // 记录发送前的 log 长度
+          var logBefore = 0;
+          try { if (typeof window._meowGetLog === 'function') logBefore = (window._meowGetLog(_miniChatTarget) || []).length; } catch(e){}
+
+          // 显示正在输入
+          _miniChatTyping = true;
+
+          // ★ 调用真实聊天系统发送（内部会 pushLog me + AI回复）
+          var sent = false;
+          try {
+            if (typeof window._meowSendChatText === 'function') {
+              // ★ 设置 chatTarget 让 AI 回复检查通过（防止 seqId 不匹配被丢弃）
+              if (window._meowState) window._meowState.chatTarget = _miniChatTarget;
+              window._meowSendChatText(_miniChatTarget, text).catch(function(e){ console.warn('[MiniChat] send error:', e); });
+              sent = true;
+            }
+          } catch(e) { console.warn('[MiniChat] send trigger error:', e); }
+
+          if (!sent) {
+            // Fallback: 手动写 log
+            try { if (typeof window._meowPushLog === 'function') window._meowPushLog(_miniChatTarget, 'me', text); } catch(e){}
+            try { if (typeof window._meowBumpThread === 'function') window._meowBumpThread(_miniChatTarget, { lastMsg:text, lastTime:Date.now(), unread:0 }); } catch(e){}
+          }
+
+          // 短延迟后刷新显示我的气泡（等 pushLog 完成）
+          setTimeout(function(){ _renderChatTab(body); }, 300);
+          _startMiniChatWatcher(_miniChatTarget, { idleMs: 15000 });
+
+          // ★ 轮询等待 AI 回复（加强版：不在第一条 them 就立刻停，而是等一小段“稳定期”）
+          var pollCount = 0;
+          var lastSeenLen = logBefore;
+          var seenThemAfterSend = false;
+          var lastChangeAt = Date.now();
+          var pollTimer = setInterval(function() {
+            pollCount++;
+            try {
+              var curMsgs = [];
+              if (typeof window._meowGetLog === 'function') curMsgs = window._meowGetLog(_miniChatTarget) || [];
+
+              // 只要长度变化，就立刻重绘一次，避免多段回复/卡片消息漏刷
+              if (curMsgs.length !== lastSeenLen) {
+                lastSeenLen = curMsgs.length;
+                lastChangeAt = Date.now();
                 _renderChatTab(body);
               }
-            }).catch(function(){});
-          }
+
+              // 检查发送后是否已经出现过对方消息
+              if (!seenThemAfterSend && curMsgs.length > logBefore) {
+                for (var pi = logBefore; pi < curMsgs.length; pi++) {
+                  var pm = curMsgs[pi];
+                  if (pm && pm.role !== 'me' && pm.role !== 'user' && pm.role !== 'system' && pm.role !== 'narrator') {
+                    seenThemAfterSend = true;
+                    _miniChatTyping = false;
+                    _renderChatTab(body);
+                    break;
+                  }
+                }
+              }
+
+              // 已经看到 them 后，再等 1.8s 没有新增消息才停止轮询
+              if (seenThemAfterSend && Date.now() - lastChangeAt > 1800) {
+                clearInterval(pollTimer);
+                _miniChatTyping = false;
+                _renderChatTab(body);
+                return;
+              }
+            } catch(e){}
+            if (pollCount > 120) {
+              clearInterval(pollTimer);
+              _miniChatTyping = false;
+              _renderChatTab(body);
+            }
+          }, 350);
         }
         if (sendBtn) sendBtn.addEventListener('click', function(e){ e.stopPropagation(); _doSend(); });
-        if (inputEl) inputEl.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.stopPropagation(); _doSend(); } });
-        // 滚到底
+        if (inputEl) {
+          inputEl.addEventListener('keydown', function(e){ if(e.key==='Enter'){ e.stopPropagation(); e.preventDefault(); _doSend(); } });
+          inputEl.addEventListener('click', function(e){ e.stopPropagation(); });
+          inputEl.addEventListener('input', function(){ _miniChatDrafts[_miniChatTarget] = inputEl.value || ''; });
+        }
         var msgsEl = body.querySelector('#mfc-chat-msgs');
         if (msgsEl) setTimeout(function(){ msgsEl.scrollTop = msgsEl.scrollHeight; }, 50);
+        _startMiniChatWatcher(_miniChatTarget, { idleMs: 10000 });
       }
 
       /* ── Tab3: 小精灵助手 ── */
@@ -38956,14 +39203,13 @@ function _meowUrlBase64ToUint8Array(base64String) {
       function _renderSpiritTab(body) {
         var msgsHtml = '';
         if (_spiritMsgs.length === 0) {
-          _spiritMsgs.push({role:'spirit', text:'你好呀，我是星尘。\n有什么需要我帮你处理的吗？', t:Date.now()});
+          _spiritMsgs.push({role:'spirit', text:'你好呀～我是星尘 ✦ 你的小精灵助手！(◕ᴗ◕✿)\n有什么需要帮忙的吗？', t:Date.now()});
         }
-        msgsHtml = '<div class="mfc-spirit-msgs" id="mfc-spirit-msgs">';
+        msgsHtml = '<div class="mfc-spirit-msgs" id="mfc-spirit-msgs" style="padding:10px 16px !important;">';
         _spiritMsgs.forEach(function(m) {
-          var safeText = _mfaEsc(String(m.text||'')).replace(/\n/g, '<br/>');
-          msgsHtml += '<div class="mfc-spirit-bubble '+m.role+'"><div class="mfc-spirit-inner">'+(m.role==='system'?'⚡ ':'')+safeText+'</div></div>';
+          msgsHtml += '<div class="mfc-spirit-bubble '+m.role+'">'+(m.role==='system'?'⚡ ':'')+m.text+'</div>';
         });
-        if (_spiritBusy) msgsHtml += '<div class="mfc-spirit-bubble spirit" style="opacity:.5;"><div class="mfc-spirit-inner">思考中…✨</div></div>';
+        if (_spiritBusy) msgsHtml += '<div class="mfc-spirit-bubble spirit" style="opacity:.5;">思考中…✨</div>';
         msgsHtml += '</div>';
 
         body.innerHTML = '<div class="mfc-spirit-wrap">'
@@ -39230,6 +39476,9 @@ function _meowUrlBase64ToUint8Array(base64String) {
       if (_activeTab === 'status' && _card && _renderStatusTabFn) {
         var body = _card.querySelector('#mfc-tab-body');
         if (body) _renderStatusTabFn(body);
+      } else if (_activeTab === 'chat' && _card) {
+        var chatBody = _card.querySelector('#mfc-tab-body');
+        if (chatBody) _renderChatTab(chatBody);
       }
     } catch(e) { console.warn('[MeowFloatAvatar] _refresh error:', e); }
   }
@@ -39245,7 +39494,7 @@ function _meowUrlBase64ToUint8Array(base64String) {
     var pr = _getPhoneRoot();
     var ox = _root.offsetLeft;
     var oy = _root.offsetTop;
-    var cw = Math.min(352, (pr.offsetWidth || window.innerWidth) - 28), ch = Math.min(560, (pr.offsetHeight || window.innerHeight) - 96);
+    var cw = 270, ch = 380;
     var vw = pr.offsetWidth  || window.innerWidth;
     var vh = pr.offsetHeight || window.innerHeight;
     var left = ox + 64;
@@ -39375,6 +39624,48 @@ function _meowUrlBase64ToUint8Array(base64String) {
     window.addEventListener('meow:floating-avatar-toggle', function(e) {
       e.detail && e.detail.show ? _show() : _hide();
     });
+
+    var _miniChatBurstTimer = 0;
+    function _scheduleMiniChatBurstRefresh() {
+      try {
+        if (!_cardOpen || _activeTab !== 'chat' || !_card) return;
+        var body = _card.querySelector('#mfc-tab-body');
+        if (body) _renderChatTab(body);
+        if (_miniChatBurstTimer) clearInterval(_miniChatBurstTimer);
+        var startedAt = Date.now();
+        _miniChatBurstTimer = setInterval(function(){
+          try {
+            if (!_cardOpen || _activeTab !== 'chat' || !_card) {
+              clearInterval(_miniChatBurstTimer);
+              _miniChatBurstTimer = 0;
+              return;
+            }
+            var liveBody = _card.querySelector('#mfc-tab-body');
+            if (liveBody) _renderChatTab(liveBody);
+            if (Date.now() - startedAt > 2600) {
+              clearInterval(_miniChatBurstTimer);
+              _miniChatBurstTimer = 0;
+            }
+          } catch(e) {
+            clearInterval(_miniChatBurstTimer);
+            _miniChatBurstTimer = 0;
+          }
+        }, 260);
+      } catch(e) { console.warn('[MeowFloatAvatar] mini chat burst refresh error:', e); }
+    }
+    function _refreshMiniChatOnEvent(e) {
+      try {
+        if (_cardOpen && _activeTab === 'chat') {
+          var changedNpc = String(e && e.detail && e.detail.npcId || '').trim();
+          if (!changedNpc || !_miniChatTarget || changedNpc === String(_miniChatTarget)) {
+            _startMiniChatWatcher(_miniChatTarget, { idleMs: 12000 });
+          }
+        }
+      } catch(err){}
+      _scheduleMiniChatBurstRefresh();
+    }
+    window.addEventListener('meow:chat-updated', _refreshMiniChatOnEvent);
+    window.addEventListener('meow:messages-pulled', _refreshMiniChatOnEvent);
 
     /* 每 60s 被动刷新一次（对齐 world 引擎的 tick） */
     setInterval(function() {
