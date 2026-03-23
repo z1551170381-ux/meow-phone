@@ -1,579 +1,431 @@
-// functions/api/proactive.js
-// Cloudflare Pages Functions
-// 用法：/api/proactive?secret=你的CRON_SECRET&force=1
+// functions/api/proactive.js  —  Cloudflare Pages Functions
+// /api/proactive?secret=CRON_SECRET&force=1
 
-function isDailyWindow(now) {
-  const h = new Date(now).getHours();
-  return h >= 10 && h <= 22;
-}
-
-function isRandomWindow(now) {
-  const h = new Date(now).getHours();
-  return h >= 8 && h <= 23;
-}
-
+// ─────────── 时间工具 ───────────
+function isDailyWindow(now)  { const h = new Date(now).getHours(); return h >= 10 && h <= 22; }
+function isRandomWindow(now) { const h = new Date(now).getHours(); return h >= 8  && h <= 23; }
 function todayKey(now) {
   const d = new Date(now);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function normalizeTimeLabel(now) {
+  const h = new Date(now).getHours();
+  if (h < 5)  return '\u6df1\u591c';
+  if (h < 8)  return '\u6e05\u6668';
+  if (h < 11) return '\u4e0a\u5348';
+  if (h < 14) return '\u4e2d\u5348';
+  if (h < 18) return '\u4e0b\u5348';
+  if (h < 21) return '\u665a\u4e0a';
+  return '\u591c\u91cc';
 }
 
-function cleanText(v, max = 400) {
+function cleanText(v, max) {
   return String(v || '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/[\r\n]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, max);
+    .slice(0, max || 400);
 }
 
-function pickFirst(obj, keys, max = 400) {
+function pickFirst(obj, keys, max) {
   for (const k of keys) {
-    if (obj && obj[k] != null && String(obj[k]).trim()) {
-      return cleanText(obj[k], max);
-    }
+    if (obj && obj[k] != null && String(obj[k]).trim())
+      return cleanText(obj[k], max || 400);
   }
   return '';
 }
 
-function normalizeTimeLabel(now) {
-  const h = new Date(now).getHours();
-  if (h < 5) return '深夜';
-  if (h < 8) return '清晨';
-  if (h < 11) return '上午';
-  if (h < 14) return '中午';
-  if (h < 18) return '下午';
-  if (h < 21) return '晚上';
-  return '夜里';
-}
-
+// ─────────── NPC 过滤 ───────────
 function looksLikeReservedNpc(npc) {
-  const rawId = String(npc?.npc_id || '').trim().toLowerCase();
-  const rawName = String(npc?.npc_name || '').trim().toLowerCase();
+  const rawId   = String(npc && npc.npc_id   || '').trim().toLowerCase();
+  const rawName = String(npc && npc.npc_name || '').trim().toLowerCase();
   if (!rawId || !rawName) return true;
-
   const reserved = new Set([
-    'player', 'chatdetail', 'chat', 'contacts', 'discover', 'me', 'settings',
-    'moments', 'forum', 'browser', 'weather', 'sms', 'calendar', 'shop',
-    'map', 'home', 'phone', 'system', 'app', 'null', 'undefined'
+    'player','chatdetail','chat','contacts','discover','me','settings',
+    'moments','forum','browser','weather','sms','calendar','shop',
+    'map','home','phone','system','app','null','undefined'
   ]);
-
   if (reserved.has(rawId) || reserved.has(rawName)) return true;
-  if (/^(chat|app|page|tab|view|screen)[-_:/]?[a-z0-9]*$/i.test(rawId)) return true;
+  if (/^(chat|app|page|tab|view|screen)[-_:/]?[a-z0-9]*$/i.test(rawId))   return true;
   if (/^(chat|app|page|tab|view|screen)[-_:/]?[a-z0-9]*$/i.test(rawName)) return true;
-  if (/开发中|construction|coming soon/i.test(String(npc?.npc_name || ''))) return true;
   return false;
 }
 
-// ========== Supabase REST ==========
-async function sbSelect(env, table, filters) {
+// ─────────── Supabase REST ───────────
+async function sbSelect(env, table, filters, extra) {
   let url = `${env.SUPABASE_URL}/rest/v1/${table}?select=*`;
-  for (const [k, v] of Object.entries(filters || {})) {
-    url += `&${k}=eq.${encodeURIComponent(v)}`;
-  }
-
-  const resp = await fetch(url, {
-    headers: {
-      apikey: env.SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`
-    }
+  for (const k of Object.keys(filters || {}))
+    url += `&${k}=eq.${encodeURIComponent(filters[k])}`;
+  if (extra) url += extra;
+  const r = await fetch(url, {
+    headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` }
   });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`sbSelect ${table} ${resp.status}: ${errText.slice(0, 200)}`);
-  }
-
-  return await resp.json();
+  if (!r.ok) throw new Error(`sbSelect ${table} ${r.status}: ${(await r.text()).slice(0,200)}`);
+  return r.json();
 }
 
 async function sbInsert(env, table, data) {
-  const resp = await fetch(`${env.SUPABASE_URL}/rest/v1/${table}`, {
+  const r = await fetch(`${env.SUPABASE_URL}/rest/v1/${table}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: env.SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      Prefer: 'return=minimal'
-    },
+    headers: { 'Content-Type':'application/json', apikey:env.SUPABASE_SERVICE_KEY,
+               Authorization:`Bearer ${env.SUPABASE_SERVICE_KEY}`, Prefer:'return=minimal' },
     body: JSON.stringify(data)
   });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`sbInsert ${table} ${resp.status}: ${errText.slice(0, 200)}`);
-  }
+  if (!r.ok) throw new Error(`sbInsert ${table} ${r.status}: ${(await r.text()).slice(0,200)}`);
 }
 
 async function sbUpsert(env, table, data, onConflict) {
-  const resp = await fetch(`${env.SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
+  const r = await fetch(`${env.SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      apikey: env.SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`,
-      Prefer: 'resolution=merge-duplicates'
-    },
+    headers: { 'Content-Type':'application/json', apikey:env.SUPABASE_SERVICE_KEY,
+               Authorization:`Bearer ${env.SUPABASE_SERVICE_KEY}`, Prefer:'resolution=merge-duplicates' },
     body: JSON.stringify(data)
   });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`sbUpsert ${table} ${resp.status}: ${errText.slice(0, 200)}`);
-  }
+  if (!r.ok) throw new Error(`sbUpsert ${table} ${r.status}: ${(await r.text()).slice(0,200)}`);
 }
 
 async function sbDelete(env, table, filters) {
   let url = `${env.SUPABASE_URL}/rest/v1/${table}?`;
-  for (const [k, v] of Object.entries(filters || {})) {
-    url += `${k}=eq.${encodeURIComponent(v)}&`;
-  }
-
-  const resp = await fetch(url, {
+  for (const k of Object.keys(filters || {})) url += `${k}=eq.${encodeURIComponent(filters[k])}&`;
+  const r = await fetch(url, {
     method: 'DELETE',
-    headers: {
-      apikey: env.SUPABASE_SERVICE_KEY,
-      Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`
-    }
+    headers: { apikey:env.SUPABASE_SERVICE_KEY, Authorization:`Bearer ${env.SUPABASE_SERVICE_KEY}` }
   });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`sbDelete ${table} ${resp.status}: ${errText.slice(0, 200)}`);
-  }
+  if (!r.ok) throw new Error(`sbDelete ${table} ${r.status}: ${(await r.text()).slice(0,200)}`);
 }
 
-function buildMessageContext(npc, recentMsgs, now) {
-  const timeLabel = normalizeTimeLabel(now);
-  const scene = pickFirst(npc, ['current_scene', 'scene', 'scene_name', 'recent_scene'], 180);
-  const location = pickFirst(npc, ['location', 'current_location', 'place', 'landmark'], 120);
-  const userState = pickFirst(npc, ['user_state', 'player_state', 'persona_state'], 240);
-  const npcState = pickFirst(npc, ['npc_state', 'current_state', 'status', 'doing', 'mood_state'], 240);
-  const world = pickFirst(npc, ['world_book', 'worldbook', 'worldbook_text', 'world_context', 'world_summary'], 600);
-  const summary = pickFirst(npc, ['summary', 'recent_summary', 'chat_summary', 'summary_text', 'timeline_summary'], 700);
-  const relation = pickFirst(npc, ['relationship_note', 'bond_note', 'relation_summary'], 240);
-  const memory = pickFirst(npc, ['recent_memory', 'memory', 'recent_event', 'last_topic'], 320);
-  const userProfile = pickFirst(npc, ['user_profile', 'persona_profile', 'player_profile'], 260);
+async function fetchRecentChatHistory(env, uid, npcId, limit) {
+  try {
+    const rows = await sbSelect(env, 'meow_chat_history', { uid, npc_id: npcId },
+      `&order=ts.desc&limit=${limit || 14}`);
+    if (!Array.isArray(rows) || !rows.length) return [];
+    return rows.reverse()
+      .map(r => ({ role: String(r.role || 'npc'), text: cleanText(r.text || r.content || '', 120) }))
+      .filter(r => r.text);
+  } catch (_) { return []; }
+}
 
+function buildMessageContext(npc, chatHistory, now) {
   return {
-    timeLabel,
-    scene,
-    location,
-    userState,
-    npcState,
-    world,
-    summary,
-    relation,
-    memory,
-    userProfile,
-    recentMsgs: (recentMsgs || []).map(x => cleanText(x, 90)).filter(Boolean).slice(-6)
+    timeLabel:   normalizeTimeLabel(now),
+    scene:       pickFirst(npc, ['current_scene','scene','scene_name','recent_scene'], 120),
+    location:    pickFirst(npc, ['location','current_location','place','landmark'], 80),
+    userState:   pickFirst(npc, ['user_state','player_state','persona_state'], 140),
+    npcState:    pickFirst(npc, ['npc_state','current_state','status','doing','mood_state'], 140),
+    world:       pickFirst(npc, ['world_book','worldbook','worldbook_text','world_context','world_summary'], 300),
+    summary:     pickFirst(npc, ['summary','recent_summary','chat_summary','summary_text','timeline_summary'], 320),
+    relation:    pickFirst(npc, ['relationship_note','bond_note','relation_summary'], 160),
+    memory:      pickFirst(npc, ['recent_memory','memory','recent_event','last_topic'], 200),
+    userProfile: pickFirst(npc, ['user_profile','persona_profile','player_profile'], 180),
+    chatHistory: chatHistory || []
   };
 }
 
-function looksIncompleteMessage(text) {
-  const s = String(text || '').trim();
-  if (!s) return true;
-  if (s.length < 10) return true;
-  if (/[，、：；（(]$/.test(s)) return true;
-  if (!/[。！？!?~～…]$/.test(s) && s.length <= 18) return true;
-  return false;
-}
-
-function looksTemplateMessage(text) {
-  const s = String(text || '').trim();
-  if (!s) return true;
-
-  const badPatterns = [
-    /^在忙吗[。！!？?]?$/i,
-    /^你在干嘛[呢吗]?[。！!？?]?$/i,
-    /^突然想起你[了啦呀]?[。！!？?]?$/i,
-    /^顺手问问你[。！!？?]?$/i,
-    /^刚空下来一点/i,
-    /^就想来和你说句话/i,
-    /^刚才在/i,
-    /^刚从.+出来[，。！!？?]?$/i,
-    /^楼下那家/i,
-    /^刚路过/i
-  ];
-
-  if (badPatterns.some(re => re.test(s))) return true;
-  if (/想起你|说句话|来找你|顺手问问你/.test(s) && s.length <= 24) return true;
-
-  return false;
-}
-
-// ========== AI ==========
+// ─────────── AI 生成 ───────────
 async function generateMessage(npc, kind, apiCfg, ctx) {
   const { base_url, api_key, model } = apiCfg;
   if (!base_url || !api_key || !model) throw new Error('用户未配置 API');
 
-  const bondMap = {
-    '亲近': '你们已经比较熟，允许自然关心、分享当下、轻微依赖，但不要油腻。',
-    '暧昧': '你对对方有在意和试探，语气可以更柔和，但不要直接越界。',
-    '普通': '你们有来往，但还没到特别亲密的程度，语气自然、有分寸。',
-    '疏远': '你们距离感更明显，语气克制，不要突然热络或说不符合关系的话。'
-  };
+  const bond = npc.bond || '普通';
+  const bondVibe =
+    bond === '亲近' ? '你们关系很好，像老朋友，说话随意，偶尔会吐槽或撒娇，不会客气。' :
+    bond === '暧昧' ? '你们之间有点说不清楚，有时候会特意找借口聊天，说话带一点隐隐的在意，但不会太明显。' :
+    bond === '疏远' ? '你们不算很熟，偶尔联系，不会太热络，语气比较平。' :
+                     '你们是普通朋友，正常聊天，不生硬也不过热。';
 
-  function sanitizeOutput(raw) {
-    let text = String(raw || '')
-      .replace(/```[\s\S]*?```/g, ' ')
-      .replace(/[\r\n]+/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (!text) return '';
-
-    text = text
-      .replace(/^(["'“”‘’「『【]+)|(["'“”‘’」』】]+)$/g, '')
-      .replace(/^(阿文|对方|角色|NPC)\s*[:：]\s*/i, '')
-      .trim();
-
-    return text.slice(0, 160);
-  }
-
-  const contextBlock = [
-    `【当前时段】${ctx.timeLabel}`,
-    ctx.scene ? `【当前场景】${ctx.scene}` : '',
-    ctx.location ? `【所在地点】${ctx.location}` : '',
-    ctx.npcState ? `【角色状态】${ctx.npcState}` : '',
-    ctx.userState ? `【用户状态】${ctx.userState}` : '',
-    ctx.relation ? `【关系补充】${ctx.relation}` : '',
-    ctx.memory ? `【最近话题/事件】${ctx.memory}` : '',
-    ctx.summary ? `【聊天总结】${ctx.summary}` : '',
-    ctx.world ? `【世界设定】${ctx.world}` : '',
-    ctx.userProfile ? `【用户设定】${ctx.userProfile}` : '',
-    ctx.recentMsgs?.length ? `【你最近几次主动发过的话】${ctx.recentMsgs.join('｜')}` : ''
+  const ctxLines = [
+    '现在是' + ctx.timeLabel + '。',
+    ctx.npcState    && ('你当前：' + ctx.npcState),
+    ctx.scene       && ('场景：' + ctx.scene),
+    ctx.location    && ('地点：' + ctx.location),
+    ctx.userState   && ('对方现在：' + ctx.userState),
+    ctx.memory      && ('你们最近聊过：' + ctx.memory),
+    ctx.summary     && ('聊天记录要点：' + ctx.summary),
+    ctx.world       && ('世界背景：' + ctx.world),
+    ctx.userProfile && ('关于对方：' + ctx.userProfile),
+    ctx.relation    && ('关系备注：' + ctx.relation),
   ].filter(Boolean).join('\n');
 
   const systemPrompt = [
-    `你正在扮演「${npc.npc_name}」给用户发一条主动消息。`,
-    npc.npc_profile ? `【角色设定】${cleanText(npc.npc_profile, 1200)}` : '',
-    `【关系阶段】${npc.bond || '普通'}。${bondMap[npc.bond] || bondMap['普通']}`,
-    npc.online_chat_prompt ? `【聊天风格附加要求】${cleanText(npc.online_chat_prompt, 900)}` : '',
-    `【主动联系背景】${kind === 'daily' ? '这是今天自然发生的一次主动联系。' : '这是一个偶然瞬间引发的主动联系。'}`,
-    contextBlock,
-    '【你的任务】',
-    '基于角色设定、关系、最近聊天总结、世界观、状态和此刻情境，写一条像真实聊天里会突然收到的主动消息。',
-    '这条消息应该像角色本人在生活里自然想到用户，于是顺手说一句，而不是系统模板或客服文案。',
-    '【写法要求】',
-    '1. 优先从具体细节里找话题，比如地点、场景、状态、刚发生的事、最近聊过的话题。',
-    '2. 关系普通或疏远时，不要突然过分亲密；关系亲近或暧昧时，也不要油腻。',
-    '3. 像即时聊天，不像旁白，不像通知播报。',
-    '4. 允许自然问候，但必须符合角色个性和关系远近，不能像客服开场白。',
-    '【输出要求】',
-    '- 只输出消息正文，不要解释，不要引号，不要署名。',
-    '- 只写 1 句完整的话；优先 20-56 字，最多 80 字。',
-    '- 这句话必须是完整句，单独显示在通知里也成立。',
-    '- 必须自然收尾，优先用句号、问号、感叹号、波浪号结尾。',
-    '- 不要写成半句，不要只剩一个画面或一个短语。',
-    '- 不要写成这些模板：如“在忙吗”“突然想起你”“顺手问问你”“刚空下来一点”。',
-    '- 如果实在写不出自然完整的话，就只返回：__SKIP__'
-  ].join('\n');
+    '你正在扮演「' + npc.npc_name + '」，用第一人称生活着，不要跳出角色。',
+    npc.npc_profile && cleanText(npc.npc_profile, 900),
+    npc.online_chat_prompt && cleanText(npc.online_chat_prompt, 400),
+    '',
+    '【你和对方的关系】',
+    bondVibe,
+    ctxLines ? ('\n【此刻的状态和背景】\n' + ctxLines) : '',
+  ].filter(Boolean).join('\n');
 
-  const userPrompt = [
-    '直接输出那条消息。',
-    '让它看起来像角色此刻真的会发出来的话。',
-    '优先使用上下文里的具体细节，自然把话题带出来。',
-    '必须是完整句，不能是残句。'
-  ].join('\n');
+  const historyMessages = (ctx.chatHistory || []).map(function(t) {
+    return {
+      role: (t.role === 'me' || t.role === 'user') ? 'user' : 'assistant',
+      content: t.text
+    };
+  });
 
-  async function runOnce(extraHint) {
-    const resp = await fetch(`${base_url}/chat/completions`, {
+  // user prompt：纯文本输出，不用 JSON，彻底避免 JSON 截断问题
+  const trigger = kind === 'daily'
+    ? '你今天在忙自己的事，忽然想起对方——可能是看到了什么、经历了什么、或者这个时段让你想聊聊。找个符合你当下状态的真实理由，自然地发条消息给 ta。'
+    : '你某个瞬间想到了对方，顺手发条消息，就像正常人刷手机时忽然想说句话一样。';
+
+  const userPrompt = trigger + '\n\n'
+    + '【输出要求——必须严格遵守】\n'
+    + '1. 直接输出你要发的那条消息，不要加任何前缀、解释或引号。\n'
+    + '2. 消息必须是一句完整的话，有头有尾，能独立读懂。绝对不能在逗号处断开、不能只说半句留悬念。\n'
+    + '3. 错误示范："刚在便利店买冰美式，看到货架"（半句话，没说完）\n'
+    + '4. 正确示范："刚在便利店买冰美式，看到一个新口味想到你了，要不要帮你带一杯？"\n'
+    + '5. 消息应该简短自然（15-50字），但必须是语义完整的一整句。';
+
+  async function callAI() {
+    const resp = await fetch(base_url + '/chat/completions', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${api_key}`
-      },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + api_key },
       body: JSON.stringify({
-        model,
+        model: model,
         messages: [
           { role: 'system', content: systemPrompt },
-          { role: 'user', content: userPrompt + (extraHint ? '\n' + extraHint : '') }
-        ],
-        temperature: 0.82,
-        presence_penalty: 0.28,
-        frequency_penalty: 0.22,
-        max_tokens: 180
+        ].concat(historyMessages).concat([
+          { role: 'user', content: userPrompt }
+        ]),
+        temperature: 0.9,
+        presence_penalty: 0.3,
+        frequency_penalty: 0.3,
+        max_tokens: 300,
       })
     });
-
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error(`AI ${resp.status}: ${errText.slice(0, 200)}`);
-    }
-
+    if (!resp.ok) throw new Error('AI ' + resp.status + ': ' + (await resp.text()).slice(0, 200));
     const data = await resp.json();
-    return sanitizeOutput(data?.choices?.[0]?.message?.content || '');
+    return String(
+      data && data.choices && data.choices[0] &&
+      data.choices[0].message && data.choices[0].message.content || ''
+    ).trim();
   }
 
-  let text = await runOnce('');
-
-  if (text === '__SKIP__') return '';
-  if (!text || looksIncompleteMessage(text) || looksTemplateMessage(text)) {
-    text = await runOnce('重写一次：这次必须写成完整句，不能残句，不能只停在半截场景上，不能模板化。');
+  function postProcess(raw) {
+    let s = raw.trim();
+    // 去掉明确的系统前缀（"消息："/"回复："等）
+    s = s.replace(/^(消息|回复|内容|正文|发送|我说|我发|我的消息)\s*[\uff1a:]\s*/, '');
+    // 去掉首尾引号/空白
+    s = s.replace(/^["'\u201c\u201d\u2018\u2019\u300c\u300e\s]+|["'\u201c\u201d\u2018\u2019\u300d\u300f\s]+$/g, '');
+    // ★ 把所有换行（包括单个\n）替换成空格，彻底消灭隐藏的断行
+    //   这样"刚刚在健身房\n照片想起你了"→"刚刚在健身房 照片想起你了"，手机完整显示
+    s = s.replace(/[\n\r]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    // 如果模型输出了多条消息用空行分隔，只取第一条（已被上面合并成一行，此步保险）
+    s = s.split(/\s{4,}/)[0].trim();
+    return s.slice(0, 200);
   }
 
-  if (text === '__SKIP__') return '';
-  if (!text || looksIncompleteMessage(text) || looksTemplateMessage(text)) return '';
 
-  return sanitizeOutput(text);
+  function isBadOutput(t) {
+    if (!t || t.replace(/\s/g, '').length < 2) return true;
+    // 纯 ASCII 无中文 → 指令泄漏
+    if (!/[\u4e00-\u9fff]/.test(t)) return true;
+    // ★ 检测半句话：以逗号、顿号、冒号等非终止标点结尾 → 不完整
+    if (/[，、：；—…·,;:\-]$/.test(t.trim())) return true;
+    // ★ 太短且没有终止标点 → 大概率也是半句
+    var endOk = /[。！？~～）)」』""'!?]$/.test(t.trim());
+    if (t.trim().length < 8 && !endOk) return true;
+    return false;
+  }
+
+  let text = '';
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const raw     = await callAI();
+      const cleaned = postProcess(raw);
+      if (!isBadOutput(cleaned)) { text = cleaned; break; }
+      console.warn('[proactive] attempt ' + (attempt + 1) + ' bad: ' + raw.slice(0, 80));
+    } catch (e) {
+      if (attempt === 2) throw e;
+    }
+  }
+
+  return text;
 }
 
-// ========== Web Push utils ==========
+
+// ─────────── Web Push 工具 ───────────
 function b64u(buf) {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
+  return btoa(String.fromCharCode.apply(null, new Uint8Array(buf)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
-
 function b64uDec(s) {
-  return Uint8Array.from(
-    atob(String(s).replace(/-/g, '+').replace(/_/g, '/')),
-    c => c.charCodeAt(0)
-  );
+  const str = atob(String(s).replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) out[i] = str.charCodeAt(i);
+  return out;
+}
+function concatU8() {
+  const arrays = Array.prototype.slice.call(arguments);
+  let total = 0;
+  for (let i = 0; i < arrays.length; i++) total += arrays[i].length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (let i = 0; i < arrays.length; i++) { out.set(arrays[i], off); off += arrays[i].length; }
+  return out;
 }
 
 async function makeVapidJWT(env, audience) {
-  const now = Math.floor(Date.now() / 1000);
-  const header = b64u(new TextEncoder().encode(JSON.stringify({
-    alg: 'ES256',
-    typ: 'JWT'
-  })));
-  const claims = b64u(new TextEncoder().encode(JSON.stringify({
-    aud: audience,
-    exp: now + 12 * 60 * 60,
-    sub: `mailto:${env.VAPID_EMAIL}`
-  })));
-  const input = `${header}.${claims}`;
-
-  const d = b64uDec(env.VAPID_PRIVATE_KEY);
-  const pub = b64uDec(env.VAPID_PUBLIC_KEY);
-
-  if (d.length !== 32) {
-    throw new Error(`Bad private key length: ${d.length}`);
-  }
-  if (pub.length !== 65 || pub[0] !== 0x04) {
-    throw new Error(`Bad public key format/length: ${pub.length}`);
-  }
-
-  const x = pub.slice(1, 33);
-  const y = pub.slice(33, 65);
-
-  const jwk = {
-    kty: 'EC',
-    crv: 'P-256',
-    d: b64u(d),
-    x: b64u(x),
-    y: b64u(y),
-    ext: true
-  };
-
+  const now    = Math.floor(Date.now() / 1000);
+  const enc    = new TextEncoder();
+  const header = b64u(enc.encode(JSON.stringify({ alg:'ES256', typ:'JWT' })));
+  const claims = b64u(enc.encode(JSON.stringify({ aud:audience, exp:now+43200, sub:`mailto:${env.VAPID_EMAIL}` })));
+  const input  = header + '.' + claims;
+  const d      = b64uDec(env.VAPID_PRIVATE_KEY);
+  const pub    = b64uDec(env.VAPID_PUBLIC_KEY);
+  if (d.length !== 32)                      throw new Error('Bad VAPID private key length: ' + d.length);
+  if (pub.length !== 65 || pub[0] !== 0x04) throw new Error('Bad VAPID public key format');
   const key = await crypto.subtle.importKey(
     'jwk',
-    jwk,
-    { name: 'ECDSA', namedCurve: 'P-256' },
-    false,
-    ['sign']
+    { kty:'EC', crv:'P-256', d:b64u(d), x:b64u(pub.slice(1,33)), y:b64u(pub.slice(33,65)), ext:true },
+    { name:'ECDSA', namedCurve:'P-256' }, false, ['sign']
   );
+  const sig = await crypto.subtle.sign({ name:'ECDSA', hash:'SHA-256' }, key, enc.encode(input));
+  return input + '.' + b64u(sig);
+}
 
-  const sig = await crypto.subtle.sign(
-    { name: 'ECDSA', hash: 'SHA-256' },
-    key,
-    new TextEncoder().encode(input)
-  );
+// RFC 8291 aes128gcm 加密（Apple Web Push 强制要求）
+async function encryptPayload(plaintextStr, p256dhB64u, authB64u) {
+  const enc        = new TextEncoder();
+  const clientPub  = b64uDec(p256dhB64u);
+  const authSecret = b64uDec(authB64u);
 
-  return `${input}.${b64u(sig)}`;
+  const serverKP   = await crypto.subtle.generateKey({ name:'ECDH', namedCurve:'P-256' }, true, ['deriveBits']);
+  const clientKey  = await crypto.subtle.importKey('raw', clientPub, { name:'ECDH', namedCurve:'P-256' }, false, []);
+  const sharedBits = new Uint8Array(await crypto.subtle.deriveBits({ name:'ECDH', public:clientKey }, serverKP.privateKey, 256));
+  const serverPub  = new Uint8Array(await crypto.subtle.exportKey('raw', serverKP.publicKey));
+  const salt       = crypto.getRandomValues(new Uint8Array(16));
+
+  async function hkdf(ikm, saltBytes, info, len) {
+    const k = await crypto.subtle.importKey('raw', ikm, { name:'HKDF' }, false, ['deriveBits']);
+    return new Uint8Array(await crypto.subtle.deriveBits(
+      { name:'HKDF', hash:'SHA-256', salt:saltBytes, info: info }, k, len * 8
+    ));
+  }
+
+  const prk   = await hkdf(sharedBits, authSecret,
+    concatU8(enc.encode('WebPush: info\x00'), clientPub, serverPub), 32);
+  const cek   = await hkdf(prk, salt, enc.encode('Content-Encoding: aes128gcm\x00'), 16);
+  const nonce = await hkdf(prk, salt, enc.encode('Content-Encoding: nonce\x00'), 12);
+
+  const aesKey     = await crypto.subtle.importKey('raw', cek, { name:'AES-GCM' }, false, ['encrypt']);
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
+    { name:'AES-GCM', iv:nonce }, aesKey,
+    concatU8(enc.encode(plaintextStr), new Uint8Array([2]))
+  ));
+
+  const rs = new Uint8Array(4);
+  new DataView(rs.buffer).setUint32(0, 4096, false); // big-endian 4096
+
+  return concatU8(salt, rs, new Uint8Array([serverPub.length]), serverPub, ciphertext);
 }
 
 async function sendWebPush(device, npcName, npcId, text, env) {
   try {
-    const endpoint = String(device && device.endpoint || '').trim();
-    if (!endpoint) {
-      return { result: 'fail', status: 0, text: 'empty-endpoint' };
-    }
+    const url      = new URL(device.endpoint);
+    const audience = url.protocol + '//' + url.host;
+    const jwt      = await makeVapidJWT(env, audience);
+    const payload  = JSON.stringify({ type:'chat_message', npcId, npcName, title:npcName, body:text, text, ts:Date.now() });
 
-    const url = new URL(endpoint);
-    const audience = `${url.protocol}//${url.host}`;
-    const jwt = await makeVapidJWT(env, audience);
-    const host = String(url.host || '').toLowerCase();
-    const isApple = /(^|\.)web\.push\.apple\.com$/.test(host);
+    const headers = {
+      Authorization: 'vapid t=' + jwt + ',k=' + env.VAPID_PUBLIC_KEY,
+      TTL: '86400',
+      Urgency: 'normal'
+    };
 
-    async function postOnce(headersObj) {
-      return await fetch(endpoint, {
-        method: 'POST',
-        headers: headersObj
-      });
-    }
-
-    let resp;
-
-    if (isApple) {
-      resp = await postOnce({
-        Authorization: `WebPush ${jwt}`,
-        'Crypto-Key': `p256ecdsa=${env.VAPID_PUBLIC_KEY}`,
-        TTL: '86400',
-        Urgency: 'normal'
-      });
-
-      if (resp.status === 400 || resp.status === 401 || resp.status === 403) {
-        try {
-          const retryResp = await postOnce({
-            Authorization: `vapid t=${jwt},k=${env.VAPID_PUBLIC_KEY}`,
-            'Crypto-Key': `p256ecdsa=${env.VAPID_PUBLIC_KEY}`,
-            TTL: '86400',
-            Urgency: 'normal'
-          });
-          resp = retryResp;
-        } catch (retryErr) {}
-      }
+    let body;
+    if (device.p256dh && device.auth) {
+      body = await encryptPayload(payload, device.p256dh, device.auth);
+      headers['Content-Type']     = 'application/octet-stream';
+      headers['Content-Encoding'] = 'aes128gcm';
     } else {
-      resp = await postOnce({
-        Authorization: `vapid t=${jwt},k=${env.VAPID_PUBLIC_KEY}`,
-        TTL: '86400',
-        Urgency: 'normal'
-      });
+      headers['Content-Length'] = '0';
     }
 
-    if (resp.status === 410 || resp.status === 404) {
-      return { result: 'expired', status: resp.status, text: '' };
-    }
-
-    if (resp.ok || resp.status === 201) {
-      return { result: 'ok', status: resp.status, text: '' };
-    }
-
-    const errText = await resp.text();
-    console.warn('[push] status:', resp.status, errText.slice(0, 200), 'host=', host);
-    return { result: 'fail', status: resp.status, text: errText.slice(0, 200) };
+    const resp = await fetch(device.endpoint, { method:'POST', headers, body: body || undefined });
+    if (resp.status === 410 || resp.status === 404) return { result:'expired', status:resp.status, text:'' };
+    if (resp.ok || resp.status === 201)             return { result:'ok',      status:resp.status, text:'' };
+    const err = await resp.text();
+    return { result:'fail', status:resp.status, text:err.slice(0,200) };
   } catch (err) {
-    console.warn('[push] error:', err.message);
-    return { result: 'fail', status: 0, text: String(err.message || err) };
+    return { result:'fail', status:0, text:String(err.message || err) };
   }
 }
 
-// ========== 主流程 ==========
+// ─────────── 主流程 ───────────
 export async function onRequestGet(context) {
   const { request, env } = context;
-  const url = new URL(request.url);
-
+  const url    = new URL(request.url);
   const secret = url.searchParams.get('secret') || '';
-  const force = url.searchParams.get('force') === '1';
+  const force  = url.searchParams.get('force') === '1';
 
-  if (env.CRON_SECRET && secret !== env.CRON_SECRET) {
-    return new Response('Unauthorized', { status: 401 });
-  }
+  if (env.CRON_SECRET && secret !== env.CRON_SECRET) return new Response('Unauthorized', { status:401 });
 
-  const now = Date.now();
-  const today = todayKey(now);
-  const results = [];
+  const now = Date.now(), today = todayKey(now), results = [];
 
   try {
     const npcs = await sbSelect(env, 'meow_npc_push_config', { enable_push: true });
-
-    if (!npcs || npcs.length === 0) {
-      return new Response(JSON.stringify({ ok: true, msg: '暂无角色配置' }), {
-        headers: { 'Content-Type': 'application/json' }
-      });
+    if (!npcs || !npcs.length) {
+      return new Response(JSON.stringify({ ok:true, msg:'暂无角色配置' }), { headers:{'Content-Type':'application/json'} });
     }
 
     const byUid = {};
-    for (const npc of npcs) {
-      byUid[npc.uid] = byUid[npc.uid] || [];
-      byUid[npc.uid].push(npc);
-    }
+    for (const npc of npcs) { byUid[npc.uid] = byUid[npc.uid] || []; byUid[npc.uid].push(npc); }
 
     for (const uid of Object.keys(byUid)) {
       const apiCfgList = await sbSelect(env, 'meow_user_api_config', { uid });
       const apiCfg = apiCfgList && apiCfgList[0];
-
-      if (!apiCfg || !apiCfg.api_key) {
-        results.push({ uid, skipped: true, reason: '未开启后台推送' });
-        continue;
-      }
+      if (!apiCfg || !apiCfg.api_key) { results.push({ uid, skipped:true, reason:'未开启后台推送' }); continue; }
 
       for (const npc of byUid[uid]) {
         const { npc_id } = npc;
-
-        if (looksLikeReservedNpc(npc)) {
-          results.push({ npc_id, skipped: true, reason: 'reserved-or-invalid-npc' });
-          continue;
-        }
+        if (looksLikeReservedNpc(npc)) { results.push({ npc_id, skipped:true, reason:'reserved' }); continue; }
 
         const cdList = await sbSelect(env, 'meow_push_cooldown', { uid, npc_id });
         const cd = (cdList && cdList[0]) || {};
 
         let kind = null;
-
         if (force) {
           kind = 'daily';
         } else {
           if (isDailyWindow(now)) {
-            const sentToday = cd.last_daily_push_date === today;
-            const recentlyTried = cd.last_daily_try_at && (now - Number(cd.last_daily_try_at)) < 30 * 60 * 1000;
+            const sentToday     = cd.last_daily_push_date === today;
+            const recentlyTried = cd.last_daily_try_at && (now - Number(cd.last_daily_try_at)) < 30*60*1000;
             if (!sentToday && !recentlyTried) kind = 'daily';
           }
-
           if (!kind && isRandomWindow(now)) {
-            const lastRandom = Number(cd.last_random_push_at || 0);
-            if (now - lastRandom > 2 * 60 * 60 * 1000 && Math.random() < 0.3) {
-              kind = 'random';
-            }
+            if (now - Number(cd.last_random_push_at || 0) > 2*60*60*1000 && Math.random() < 0.3) kind = 'random';
           }
         }
 
-        if (!kind) {
-          results.push({ npc_id, skipped: true });
-          continue;
-        }
+        if (!kind) { results.push({ npc_id, skipped:true }); continue; }
 
         await sbUpsert(env, 'meow_push_cooldown', {
-          uid,
-          npc_id,
-          last_daily_try_at: kind === 'daily' ? now : (cd.last_daily_try_at || 0),
+          uid, npc_id,
+          last_daily_try_at:    kind === 'daily'  ? now : (cd.last_daily_try_at || 0),
           last_daily_push_date: cd.last_daily_push_date || '',
-          last_random_push_at: cd.last_random_push_at || 0,
+          last_random_push_at:  cd.last_random_push_at  || 0,
           updated_at: new Date().toISOString()
         }, 'uid,npc_id');
 
         let text = '';
         try {
-          const hist = await sbSelect(env, 'meow_pending_messages', { uid, npc_id });
-          const recentMsgs = (hist || [])
-            .sort((a, b) => Number(a.ts || 0) - Number(b.ts || 0))
-            .map(x => x.text)
-            .filter(Boolean)
-            .slice(-6);
+          const chatHistory = await fetchRecentChatHistory(env, uid, npc_id, 14);
+          text = await generateMessage(npc, kind, apiCfg, buildMessageContext(npc, chatHistory, now));
+        } catch (aiErr) { results.push({ npc_id, error: aiErr.message }); continue; }
 
-          const msgCtx = buildMessageContext(npc, recentMsgs, now);
-          text = await generateMessage(npc, kind, apiCfg, msgCtx);
-        } catch (aiErr) {
-          results.push({ npc_id, error: aiErr.message });
-          continue;
-        }
-
-        if (!text) {
-          results.push({ npc_id, skipped: true, reason: 'empty-message' });
-          continue;
-        }
-
-        const msgTs = now;
+        if (!text) { results.push({ npc_id, error: 'AI返回空' }); continue; }
 
         await sbInsert(env, 'meow_pending_messages', {
-          uid,
-          npc_id,
-          npc_name: npc.npc_name,
-          text,
-          kind,
-          ts: msgTs,
-          is_pulled: false
+          uid, npc_id, npc_name: npc.npc_name, text, kind, ts: now, is_pulled: false
         });
 
         await sbUpsert(env, 'meow_push_cooldown', {
-          uid,
-          npc_id,
-          last_daily_push_date: kind === 'daily' ? today : (cd.last_daily_push_date || ''),
-          last_daily_try_at: kind === 'daily' ? now : (cd.last_daily_try_at || 0),
-          last_random_push_at: kind === 'random' ? now : (cd.last_random_push_at || 0),
+          uid, npc_id,
+          last_daily_push_date: kind === 'daily'  ? today : (cd.last_daily_push_date || ''),
+          last_daily_try_at:    kind === 'daily'  ? now   : (cd.last_daily_try_at    || 0),
+          last_random_push_at:  kind === 'random' ? now   : (cd.last_random_push_at  || 0),
           updated_at: new Date().toISOString()
         }, 'uid,npc_id');
 
@@ -582,54 +434,26 @@ export async function onRequestGet(context) {
         const pushDebug = [];
 
         for (const dev of (devices || [])) {
-          const host = (() => {
-            try { return new URL(dev.endpoint).host; } catch (e) { return 'bad-endpoint'; }
-          })();
-
-          const pushRes = await sendWebPush(dev, npc.npc_name, npc_id, text, env);
-
-          pushDebug.push({
-            host,
-            result: pushRes.result,
-            status: pushRes.status,
-            text: pushRes.text,
-            endpoint: String(dev.endpoint || '').slice(0, 80)
-          });
-
-          if (pushRes.result === 'expired') {
-            await sbDelete(env, 'meow_devices', { endpoint: dev.endpoint });
-          } else if (pushRes.result === 'ok') {
-            pushed++;
-          }
+          const host = (function() { try { return new URL(dev.endpoint).host; } catch(_) { return 'bad-endpoint'; } })();
+          const res  = await sendWebPush(dev, npc.npc_name, npc_id, text, env);
+          pushDebug.push({ host, result:res.result, status:res.status, text:res.text,
+            endpoint: String(dev.endpoint || '').slice(0, 80), encrypted: !!(dev.p256dh && dev.auth) });
+          if (res.result === 'expired') await sbDelete(env, 'meow_devices', { endpoint: dev.endpoint });
+          else if (res.result === 'ok') pushed++;
         }
 
-        results.push({
-          npc_id,
-          kind,
-          pushed,
-          preview: text.slice(0, 20),
-          fullText: text,
-          textLength: String(text || '').length,
-          pushDebug
-        });
+        results.push({ npc_id, kind, pushed, preview: text.slice(0, 20), pushDebug });
       }
     }
 
-    return new Response(JSON.stringify({
-      ok: true,
-      total: results.length,
-      results
-    }), {
-      headers: { 'Content-Type': 'application/json' }
+    return new Response(JSON.stringify({ ok:true, total:results.length, results }), {
+      headers: { 'Content-Type':'application/json' }
     });
+
   } catch (err) {
     console.error('[proactive] fatal:', err);
-    return new Response(JSON.stringify({
-      ok: false,
-      error: String(err.message || err)
-    }), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
+    return new Response(JSON.stringify({ ok:false, error:String(err.message || err) }), {
+      status:500, headers:{'Content-Type':'application/json'}
     });
   }
 }
