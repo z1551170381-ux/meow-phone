@@ -145,8 +145,7 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     ctx.world       && ('世界背景：' + ctx.world),
     ctx.userProfile && ('关于对方：' + ctx.userProfile),
     ctx.relation    && ('关系备注：' + ctx.relation),
-  ].filter(Boolean).join('
-');
+  ].filter(Boolean).join('\n');
 
   const systemPrompt = [
     '你正在扮演「' + npc.npc_name + '」，用第一人称生活着，不要跳出角色。',
@@ -155,11 +154,8 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     '',
     '【你和对方的关系】',
     bondVibe,
-    ctxLines ? ('
-【此刻的状态和背景】
-' + ctxLines) : '',
-  ].filter(Boolean).join('
-');
+    ctxLines ? ('\n【此刻的状态和背景】\n' + ctxLines) : '',
+  ].filter(Boolean).join('\n');
 
   const historyMessages = (ctx.chatHistory || []).map(function(t) {
     return {
@@ -173,9 +169,7 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     ? '你今天在忙自己的事，忽然想起对方——可能是看到了什么、经历了什么、或者这个时段让你想聊聊。找个符合你当下状态的真实理由，自然地发条消息给 ta。'
     : '你某个瞬间想到了对方，顺手发条消息，就像正常人刷手机时忽然想说句话一样。';
 
-  const userPrompt = trigger + '
-
-直接输出你要发的那条消息，不要加任何前缀、解释或引号。就是那条消息本身。';
+  const userPrompt = trigger + '\n\n直接输出你要发的那条消息，不要加任何前缀、解释或引号。就是那条消息本身。';
 
   async function callAI() {
     const resp = await fetch(base_url + '/chat/completions', {
