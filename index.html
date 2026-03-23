@@ -10629,9 +10629,10 @@ function getNPCCandidatesFromRecentMainChat(){
         return { v:1, list:[], updatedAt:0 };
       }
       function saveThreads(db){
-        db.updatedAt = _now();
-        _phSave(PHONE_IM_KEYS.threads, db);
-      }
+  db.updatedAt = _now();
+  _phSave(PHONE_IM_KEYS.threads, db);
+  try{ _meowScheduleAutoResync('saveThreads'); }catch(e){}
+}
       function ensureThread(npcId, name, avatar){
         const th = loadThreads();
         let it = th.list.find(x => String(x.id) === String(npcId));
@@ -10682,9 +10683,10 @@ function getNPCCandidatesFromRecentMainChat(){
         return { v:1, map:{}, updatedAt:0 };
       }
       function saveLogs(db){
-        db.updatedAt = _now();
-        _phSave(PHONE_IM_KEYS.logs, db);
-      }
+  db.updatedAt = _now();
+  _phSave(PHONE_IM_KEYS.logs, db);
+  try{ _meowScheduleAutoResync('saveLogs'); }catch(e){}
+}
       function pushLog(npcId, role, text, extra){
         const logs = loadLogs();
         logs.map ||= {};
@@ -20978,20 +20980,42 @@ const npc = _wxGetChatTargetMeta(npcId);
         var energyPct = Math.max(0, Math.min(100, (s.attrs && s.attrs.energy) || 0));
         var energyColor = energyPct > 60 ? '#07c160' : energyPct > 30 ? '#f39c12' : '#e74c3c';
 
-        // 当前作息时段 — ★ 直接从存储读，避免 catchUpStats 丢失 isKeyNPC/schedule
+        // 当前作息时段 — ★ 直接从存储读，分钟级判断，避免只按整点卡死
         var scheduleNow = '';
         var _rawState = _loadCharState(npcId);
-        var _scheduleForCard = (_rawState.isKeyNPC && _rawState.schedule && _rawState.schedule.length) ? _rawState.schedule : (s.schedule && s.schedule.length ? s.schedule : []);
+        var _scheduleForCard = (_rawState.isKeyNPC && _rawState.schedule && _rawState.schedule.length)
+          ? _rawState.schedule
+          : (s.schedule && s.schedule.length ? s.schedule : []);
+
+        function _cardFmtTime(h, m){
+          h = Number(h || 0);
+          m = Number(m || 0);
+          return (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+        }
+
         if (_scheduleForCard.length > 0){
-          var _ch = new Date().getHours();
+          var _nowCard = new Date();
+          var _nowTotalMin = _nowCard.getHours() * 60 + _nowCard.getMinutes();
+
           for (var _si = 0; _si < _scheduleForCard.length; _si++){
             var _sl = _scheduleForCard[_si];
-            var _in = _sl.endHour <= _sl.hour
-              ? (_ch >= _sl.hour || _ch < _sl.endHour)
-              : (_ch >= _sl.hour && _ch < _sl.endHour);
+            var _startMin = Number(_sl.hour || 0) * 60 + Number(_sl.startMin || 0);
+            var _endMin = Number(_sl.endHour || 0) * 60 + Number(_sl.endMin || 0);
+
+            var _in = _endMin <= _startMin
+              ? (_nowTotalMin >= _startMin || _nowTotalMin < _endMin)
+              : (_nowTotalMin >= _startMin && _nowTotalMin < _endMin);
+
             if (_in){
               var _tIcon = SCHEDULE_TAGS.find(function(tt){ return tt.tag === _sl.tag; });
-              scheduleNow = (_tIcon ? _tIcon.icon + ' ' : '') + _sl.activity + '（' + _sl.hour + ':00–' + _sl.endHour + ':00）';
+              scheduleNow =
+                (_tIcon ? _tIcon.icon + ' ' : '') +
+                _sl.activity +
+                '（' +
+                _cardFmtTime(_sl.hour || 0, _sl.startMin || 0) +
+                '—' +
+                _cardFmtTime(_sl.endHour || 0, _sl.endMin || 0) +
+                '）';
               break;
             }
           }
@@ -21502,8 +21526,9 @@ const npc = _wxGetChatTargetMeta(npcId);
         return raw;
       }
       function _saveCharState(npcId, s){
-        _phSave('charstate_'+String(npcId), s);
-      }
+  _phSave('charstate_'+String(npcId), s);
+  try{ _meowScheduleAutoResync('saveCharState:' + String(npcId || '')); }catch(e){}
+}
 
       // ========== 用户（玩家）状态系统 ==========
       function _loadUserState(){
@@ -38291,6 +38316,8 @@ async function _meowRequestPush() {
     try{ toast('开启失败，请重试'); }catch(e){}
   }
 }
+
+拉取离线消息 ======
 
 // ========== 拉取离线消息 ==========
 async function _meowPullOfflineMessages() {
