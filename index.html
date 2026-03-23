@@ -8732,6 +8732,10 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
             _generateCalendarData().then(function(){ var b=root.querySelector('[data-ph="appBody"]'); if(b&&state.currentApp==='calendar') renderCalendar(b); });
             return;
           }
+          if (act === 'calendarManageNPC'){
+            _openCalendarNPCManager();
+            return;
+          }
           if (act === 'smsRefresh'){
             try{ toast('✉️ 正在生成短信…'); }catch(e){}
             _generateSmsData().then(function(){ var b=root.querySelector('[data-ph="appBody"]'); if(b&&state.currentApp==='sms') renderSmsApp(b); });
@@ -26391,25 +26395,163 @@ const npc = _wxGetChatTargetMeta(npcId);
         }catch(e){}
       }
 
-      /* ========== 日历 App ========== */
-      // ===== 日历 AI 生成 =====
+      /* ========== 日历 App（增强版：NPC动态日程 + 世界节日） ========== */
+      // ===== 日历存储 =====
       var LS_PHONE_CALENDAR_DATA = 'meow_phone_g_calendar_ai_v1';
+      var LS_PHONE_CALENDAR_FESTIVALS = 'meow_phone_g_calendar_festivals_v1';
+      var LS_PHONE_NPC_DAILY_SCHEDULE = 'meow_phone_g_npc_daily_v1'; // NPC 每日动态日程
       function _loadCalendarData(){ try{ return lsGet(LS_PHONE_CALENDAR_DATA, null); }catch(e){ return null; } }
       function _saveCalendarData(d){ try{ lsSet(LS_PHONE_CALENDAR_DATA, d); }catch(e){} }
 
+      /* ── 收集所有已开启作息驱动的 NPC ── */
+      function _collectNpcSchedules() {
+        var result = [];
+        try {
+          var db = loadContactsDB();
+          _safeArr(db.list).forEach(function(c) {
+            if (!c || !c.id) return;
+            var s = _loadCharState(c.id);
+            if (s && s.isKeyNPC && s.schedule && s.schedule.length) {
+              result.push({
+                id: c.id, name: c.name || String(c.id),
+                avatar: c.avatar || (c.name || '?').charAt(0),
+                occupation: c.occupation || c.identity || '',
+                profile: (c.profile || '').slice(0, 200),
+                schedule: s.schedule
+              });
+            }
+          });
+        } catch(e) {}
+        return result;
+      }
+
+      /* ── 关注的 NPC 列表 ── */
+      function _getCalendarWatchedNPCs() { try { return lsGet('meow_calendar_watched_npcs_v1', []); } catch(e) { return []; } }
+      function _setCalendarWatchedNPCs(list) { try { lsSet('meow_calendar_watched_npcs_v1', list); } catch(e) {} }
+
+      /* ── 世界观节日缓存 ── */
+      function _loadFestivals() { try { return lsGet(LS_PHONE_CALENDAR_FESTIVALS, null); } catch(e) { return null; } }
+      function _saveFestivals(d) { try { lsSet(LS_PHONE_CALENDAR_FESTIVALS, d); } catch(e) {} }
+
+      /* ── NPC 每日动态日程缓存（每天重新生成） ── */
+      function _loadNpcDailySchedules() { try { return lsGet(LS_PHONE_NPC_DAILY_SCHEDULE, null); } catch(e) { return null; } }
+      function _saveNpcDailySchedules(d) { try { lsSet(LS_PHONE_NPC_DAILY_SCHEDULE, d); } catch(e) {} }
+      function _todayKey() { var d = new Date(); return d.getFullYear() + '-' + (d.getMonth()+1) + '-' + d.getDate(); }
+
+      /* ── AI 生成世界观节日（按月，只需要偶尔调一次） ── */
+      async function _generateFestivals(worldCtx) {
+        var cached = _loadFestivals();
+        var now = new Date();
+        var curMonth = now.getFullYear() + '-' + (now.getMonth()+1);
+        if (cached && cached._month === curMonth && cached.festivals && cached.festivals.length) return cached.festivals;
+
+        var bgParts = [];
+        try { var cd2 = _readCurrentCharCardDesc(); if(cd2) bgParts.push(cd2.slice(0,500)); } catch(e){}
+        try { var gwb = loadPhoneGlobalWB(); if(gwb&&gwb.enabled&&gwb.text) bgParts.push(gwb.text.slice(0,500)); } catch(e){}
+        var bgInfo = (worldCtx || '') + '\n' + bgParts.join('\n');
+
+        var sysPrompt = '你是虚拟世界的节日历法生成器。根据世界观生成本月的特色节日。只返回JSON数组。';
+        var userPrompt = '世界背景：' + (bgInfo.slice(0,1500) || '现代都市虚拟世界') + '\n当前：' + now.getFullYear() + '年' + (now.getMonth()+1) + '月\n'
+          + '为本月生成3-5个世界观专属节日/纪念日。\n格式：[{"day":日期数字,"name":"节日名","desc":"说明20字内","emoji":"emoji","type":"festival|memorial|special"}]\n要贴合世界观，不要现实节日。';
+
+        try {
+          var result = await _tlApiEnqueue(function(){
+            return PhoneAI.chat({ system:sysPrompt, messages:[{role:'user',content:userPrompt}], temperature:0.85, maxTokens:500, channel:'background', timeout:45 });
+          });
+          if (!result.ok) return [];
+          var raw = String(result.data||'').replace(/```json\s*/gi,'').replace(/```\s*/gi,'').trim();
+          var arrMatch = raw.match(/\[[\s\S]*\]/); if (arrMatch) raw = arrMatch[0];
+          raw = raw.replace(/,\s*([\]}])/g, '$1');
+          var festivals = JSON.parse(raw);
+          if (!Array.isArray(festivals)) return [];
+          festivals = festivals.filter(function(f){ return f && f.day && f.name; });
+          _saveFestivals({ _month: curMonth, festivals: festivals, _at: Date.now() });
+          return festivals;
+        } catch(e) { console.warn('[CalendarAI] 节日生成失败:', e); return []; }
+      }
+
+      /* ── AI 为关注的 NPC 生成"今日动态日程"（作息为基础，1-2个时段有变化） ── */
+      async function _generateNpcDailySchedules(worldCtx) {
+        var cached = _loadNpcDailySchedules();
+        var today = _todayKey();
+        // 今天已经生成过了就不重复
+        if (cached && cached._day === today && cached.npcs && Object.keys(cached.npcs).length) return cached;
+
+        var watchedIds = _getCalendarWatchedNPCs();
+        var allNpcs = _collectNpcSchedules();
+        var watched = allNpcs.filter(function(n){ return watchedIds.indexOf(n.id) >= 0; });
+        if (!watched.length) return { _day: today, npcs: {} };
+
+        // 构建 prompt：告诉 AI 每个 NPC 的常规作息，让 AI 给每人安排1-2个"今日变化"
+        var npcDescList = watched.map(function(npc) {
+          var routine = npc.schedule.map(function(sl) {
+            return (sl.hour||0) + ':' + String(sl.startMin||0).padStart(2,'0') + '-' + (sl.endHour||0) + ':' + String(sl.endMin||0).padStart(2,'0') + ' ' + sl.activity;
+          }).join('；');
+          return '【' + npc.name + '】' + (npc.occupation ? '(' + npc.occupation + ')' : '')
+            + (npc.profile ? ' ' + npc.profile.slice(0,80) : '')
+            + '\n常规作息：' + routine;
+        }).join('\n\n');
+
+        // 额外收集世界背景信息
+        var bgParts = [];
+        if (worldCtx) bgParts.push(worldCtx.slice(0, 800));
+        try { var sr = localStorage.getItem('meow_phone_chat_summary_v1');
+          if (sr) { var ss = JSON.parse(sr); var snips = [];
+            Object.values(ss.byChat || {}).forEach(function(entry) { var modes = entry.modes || {}; var m = modes.online || modes.offline || Object.values(modes)[0]; if (m && (m.lastSummary || m.summary)) snips.push(String(m.lastSummary || m.summary).slice(0, 60)); });
+            if (snips.length) bgParts.push('近期动态：' + snips.slice(0,3).join('｜'));
+          }
+        } catch(e){}
+
+        var sysPrompt = '你是虚拟世界NPC日程生成器。每个NPC有固定的常规作息表，但每天不完全按作息表来——会有1-2个时段和平时不一样，做些临时的、有趣的、或者突发的事情。这让角色有真实生活感。只返回JSON，不加其他文字或代码块。';
+        var userPrompt = (bgParts.join('\n').slice(0, 1200) || '现代都市世界') + '\n\n'
+          + '以下是今天要安排日程的NPC：\n\n' + npcDescList + '\n\n'
+          + '任务：为每个NPC生成今天的"实际日程"。规则：\n'
+          + '- 大部分时段和常规作息一样（直接复制作息即可）\n'
+          + '- 但要有1-2个时段和常规不同（比如：临时约了朋友、心血来潮去了新地方、发现了什么有趣的事、工作有变动、情绪影响了计划等）\n'
+          + '- 变化的时段要标记 "changed":true，并写明变化原因 "reason":"为什么今天不一样"\n'
+          + '- 变化要符合角色性格和当前世界状况\n'
+          + '- 不需要涉及玩家\n\n'
+          + '格式：{"npcId的名字做key":{"name":"NPC名","slots":[{"hour":起始时,"startMin":分,"endHour":结束时,"endMin":分,"activity":"今天实际做的事","tag":"作息tag","changed":false},{"hour":14,"startMin":0,"endHour":16,"endMin":0,"activity":"临时去了猫咖","tag":"leisure","changed":true,"reason":"路过看到新开的店"}]}}\n'
+          + '每个NPC 8-12个时段覆盖全天。';
+
+        try {
+          var result = await _tlApiEnqueue(function(){
+            return PhoneAI.chat({ system:sysPrompt, messages:[{role:'user',content:userPrompt}], temperature:0.88, maxTokens:1500, channel:'background', timeout:60 });
+          });
+          if (!result.ok) { console.warn('[NpcDaily] 生成失败:', result.error); return { _day: today, npcs: {} }; }
+          var raw = String(result.data||'').replace(/```json\s*/gi,'').replace(/```\s*/gi,'').trim();
+          var objMatch = raw.match(/\{[\s\S]*\}/); if (objMatch) raw = objMatch[0];
+          raw = raw.replace(/,\s*([\]}])/g, '$1');
+          var parsed = JSON.parse(raw);
+          if (typeof parsed !== 'object') throw new Error('not object');
+          var dailyData = { _day: today, _at: Date.now(), npcs: parsed };
+          _saveNpcDailySchedules(dailyData);
+          console.log('[NpcDaily] 生成', Object.keys(parsed).length, '个NPC今日日程');
+          return dailyData;
+        } catch(e) {
+          console.warn('[NpcDaily] 生成失败:', e);
+          // 降级：直接用常规作息
+          var fallback = { _day: today, _at: Date.now(), npcs: {} };
+          watched.forEach(function(npc) {
+            fallback.npcs[npc.name] = {
+              name: npc.name,
+              slots: npc.schedule.map(function(sl){ return Object.assign({}, sl, { changed: false }); })
+            };
+          });
+          _saveNpcDailySchedules(fallback);
+          return fallback;
+        }
+      }
+
+      /* ── 玩家自己的日程生成（保持原逻辑，不强制安排NPC碰面） ── */
       async function _generateCalendarData(worldCtx){
         var ctx = worldCtx || '';
         if(!ctx){
-          try{
-            var cfg = getAutofeedCfg();
-            ctx = AutoFeedEngine._buildContext(cfg);
-          }catch(e){}
+          try{ var cfg = getAutofeedCfg(); ctx = AutoFeedEngine._buildContext(cfg); }catch(e){}
         }
-        // 额外收集用户设定和角色卡信息
         var extraParts = [];
         try{ var cd = _readCurrentCharCardDesc(); if(cd) extraParts.push('[角色卡]\n'+cd.slice(0,1000)); }catch(e){}
         try{ var stCtx = meowGetSTCtx(); if(stCtx&&stCtx.persona_description) extraParts.push('[用户设定]\n'+stCtx.persona_description.slice(0,500)); }catch(e){}
-        // 收集时间线总结
         try{
           var cid = (typeof phoneGetChatUID==='function')?phoneGetChatUID():'';
           ['online','offline'].forEach(function(md){
@@ -26419,35 +26561,45 @@ const npc = _wxGetChatTargetMeta(npcId);
         }catch(e){}
         var fullCtx = ctx + '\n\n' + extraParts.join('\n\n');
 
-        var sysPrompt = '你是一个角色扮演世界的日历/日程生成器。根据世界观、角色关系、聊天总结、用户设定等信息，为"用户（主角）"生成今日和近几天的日程安排。\n'
-          + '日程应包含：工作/学习安排、社交约会、重要事件、纪念日提醒等，要符合世界观和角色关系。\n'
+        var sysPrompt = '你是角色扮演世界的日历/日程生成器。根据世界观、角色关系、聊天总结、用户设定，为"用户（主角）"生成今日和近几天的日程。\n'
+          + '日程应包含：工作安排、社交约会、重要事件、纪念日提醒等，要符合世界观。\n'
           + '请输出纯 JSON（不要 markdown 代码块）：\n'
-          + '{\n'
-          + '  "todayEvents": [ {"time":"10:00","title":"事件名","desc":"简短描述","color":"#6366f1","category":"work|social|personal|reminder"}, ... ],\n'
-          + '  "upcoming": [ {"day":"明天","events":[{"time":"14:00","title":"...","desc":"..."}]}, {"day":"后天","events":[...]} ],\n'
-          + '  "reminders": ["提醒1","提醒2"]\n'
-          + '}\n生成4-8个今日事件和2-3天的未来日程。内容要贴合角色关系和世界观。';
+          + '{"todayEvents":[{"time":"10:00","title":"事件名","desc":"简短描述","color":"#6366f1","category":"work|social|personal|reminder"}],"upcoming":[{"day":"明天","events":[{"time":"14:00","title":"...","desc":"..."}]}],"reminders":["提醒1"]}\n'
+          + '生成4-6个今日事件和2天未来日程。';
         try{
           var result = await _tlApiEnqueue(function(){
             return PhoneAI.chat({ system:sysPrompt, messages:[{role:'user',content:fullCtx.slice(0,4000)||'（请根据一般都市生活生成日程）'}], temperature:0.8, maxTokens:1000, channel:'background', timeout:60 });
           });
           if(!result.ok) return;
           var raw = String(result.data||'').replace(/```json\s*/gi,'').replace(/```\s*/gi,'').trim();
+          var objMatch = raw.match(/\{[\s\S]*\}/); if (objMatch) raw = objMatch[0];
+          raw = raw.replace(/,\s*([\]}])/g, '$1');
           var parsed = JSON.parse(raw);
           parsed._generatedAt = Date.now();
           _saveCalendarData(parsed);
+          // 同时触发节日 + NPC动态日程生成（异步不阻塞）
+          _generateFestivals(ctx).catch(function(){});
+          _generateNpcDailySchedules(ctx).catch(function(){});
           try{ toast('📅 日历日程已更新'); }catch(e){}
         }catch(e){ console.warn('[CalendarAI] 生成失败:', e); }
       }
 
       function renderCalendar(container){
-        setAppBarRight('<button class="phBarRBtn" data-act="calendarRefresh" title="刷新日程">' + _phFlatIcon('🔄') + '</button>');
+        setAppBarRight(
+          '<button class="phBarRBtn" data-act="calendarManageNPC" title="关注角色">👥</button>'
+          + '<button class="phBarRBtn" data-act="calendarRefresh" title="刷新日程">' + _phFlatIcon('🔄') + '</button>'
+        );
         const now=new Date();
         const y=now.getFullYear(),m=now.getMonth(),today=now.getDate();
         const firstDay=new Date(y,m,1).getDay();
         const dim=new Date(y,m+1,0).getDate();
         const dip=new Date(y,m,0).getDate();
         const mn=['一月','二月','三月','四月','五月','六月','七月','八月','九月','十月','十一月','十二月'];
+
+        // 节日标注
+        var festivals = (_loadFestivals() || {}).festivals || [];
+        var festivalMap = {}; festivals.forEach(function(f){ if(f.day) festivalMap[f.day] = f; });
+
         let html='<div class="phCard" style="margin-top:8px;">'
           + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">'
           + '<span style="font-weight:700;color:var(--ph-text);font-size:16px;">'+y+'年 '+mn[m]+'</span>'
@@ -26455,60 +26607,177 @@ const npc = _wxGetChatTargetMeta(npcId);
           + '</div><div class="calGrid">';
         ['日','一','二','三','四','五','六'].forEach(function(h){html+='<div class="calH">'+h+'</div>';});
         for(let i=firstDay-1;i>=0;i--) html+='<div class="calD other">'+(dip-i)+'</div>';
-        for(let d=1;d<=dim;d++) html+='<div class="calD'+(d===today?' today':'')+'">'+d+'</div>';
+        for(let d=1;d<=dim;d++) {
+          var fst = festivalMap[d];
+          html += '<div class="calD' + (d===today?' today':'') + '" title="' + (fst ? esc(fst.name) : '') + '">'
+            + d + (fst ? '<div style="font-size:6px;color:var(--ph-accent,#e74c3c);line-height:1;margin-top:1px;">' + esc(fst.emoji||'🎉') + '</div>' : '')
+            + '</div>';
+        }
         const rem=(firstDay+dim)%7===0?0:7-(firstDay+dim)%7;
         for(let i=1;i<=rem;i++) html+='<div class="calD other">'+i+'</div>';
         html+='</div></div>';
 
+        // ★ 世界观节日板块
+        if (festivals.length) {
+          html += '<div class="phCard"><div style="font-weight:600;color:var(--ph-text);margin-bottom:10px;">🎊 本月节日</div>';
+          festivals.forEach(function(f) {
+            var isPast = f.day < today;
+            html += '<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(0,0,0,.04);' + (isPast ? 'opacity:.5;' : '') + '">'
+              + '<span style="font-size:18px;">' + esc(f.emoji||'🎉') + '</span>'
+              + '<div style="flex:1;"><div style="font-size:13px;color:var(--ph-text);">' + f.day + '日 · ' + esc(f.name)
+              + (f.day === today ? ' <span style="font-size:10px;color:var(--ph-accent);font-weight:600;">— 今天！</span>' : '') + '</div>'
+              + (f.desc ? '<div style="font-size:11px;color:var(--ph-text-dim);">' + esc(f.desc) + '</div>' : '')
+              + '</div></div>';
+          });
+          html += '</div>';
+        }
+
+        // ★ 玩家自己的日程
         var cd = _loadCalendarData();
         var hasData = cd && cd.todayEvents && cd.todayEvents.length;
         var catColors = { work:'#6366f1', social:'#ec4899', personal:'#8b5cf6', reminder:'#f59e0b' };
         var catLabels = { work:'工作', social:'社交', personal:'个人', reminder:'提醒' };
 
         if(!hasData){
-          html += '<div class="phCard"><div style="font-weight:600;color:var(--ph-text);margin-bottom:10px;">📌 今日事项</div>'
+          html += '<div class="phCard"><div style="font-weight:600;color:var(--ph-text);margin-bottom:10px;">📌 我的日程</div>'
             + '<div style="text-align:center;padding:20px 0;color:var(--ph-text-dim);font-size:12px;">暂无日程数据<br><br><button data-act="calendarRefresh" style="padding:6px 16px;border-radius:8px;border:0;background:var(--ph-accent,#07c160);color:#fff;font-size:12px;cursor:pointer;">📅 生成日程</button></div></div>';
-          container.innerHTML = html;
-          return;
-        }
-
-        // 今日事项
-        html += '<div class="phCard"><div style="font-weight:600;color:var(--ph-text);margin-bottom:10px;">📌 今日事项</div>';
-        cd.todayEvents.forEach(function(ev){
-          var color = ev.color || catColors[ev.category] || '#6366f1';
-          var catTag = ev.category ? '<span style="font-size:9px;padding:1px 4px;border-radius:3px;background:'+color+'22;color:'+color+';margin-left:4px;">'+esc(catLabels[ev.category]||ev.category)+'</span>' : '';
-          html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);">'
-            + '<div style="width:4px;height:32px;border-radius:2px;background:'+color+';flex-shrink:0;"></div>'
-            + '<div style="flex:1;"><div style="font-size:13px;color:var(--ph-text);">'+esc(ev.title||'')+catTag+'</div>'
-            + '<div style="font-size:11px;color:var(--ph-text-dim);">'+(ev.time||'')+(ev.desc?' · '+esc(ev.desc):'')+'</div></div></div>';
-        });
-        html += '</div>';
-
-        // 未来几天
-        var upcoming = cd.upcoming || [];
-        if(upcoming.length){
-          html += '<div class="phCard"><div style="font-weight:600;color:var(--ph-text);margin-bottom:10px;">📆 近期安排</div>';
-          upcoming.forEach(function(day){
-            html += '<div style="font-size:12px;font-weight:600;color:var(--ph-text);padding:6px 0 2px;">'+esc(day.day||'')+'</div>';
-            (day.events||[]).forEach(function(ev){
-              html += '<div style="font-size:12px;color:var(--ph-text-sub);padding:3px 0 3px 12px;">'+esc(ev.time||'')+' '+esc(ev.title||'')+'</div>';
-            });
+        } else {
+          html += '<div class="phCard"><div style="font-weight:600;color:var(--ph-text);margin-bottom:10px;">📌 我的日程</div>';
+          cd.todayEvents.forEach(function(ev){
+            var color = ev.color || catColors[ev.category] || '#6366f1';
+            var catTag = ev.category ? '<span style="font-size:9px;padding:1px 4px;border-radius:3px;background:'+color+'22;color:'+color+';margin-left:4px;">'+esc(catLabels[ev.category]||ev.category)+'</span>' : '';
+            html += '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.04);">'
+              + '<div style="width:4px;height:32px;border-radius:2px;background:'+color+';flex-shrink:0;"></div>'
+              + '<div style="flex:1;"><div style="font-size:13px;color:var(--ph-text);">'+esc(ev.title||'')+catTag+'</div>'
+              + '<div style="font-size:11px;color:var(--ph-text-dim);">'+(ev.time||'')+(ev.desc?' · '+esc(ev.desc):'')+'</div></div></div>';
           });
           html += '</div>';
+
+          var upcoming = cd.upcoming || [];
+          if(upcoming.length){
+            html += '<div class="phCard"><div style="font-weight:600;color:var(--ph-text);margin-bottom:10px;">📆 近期安排</div>';
+            upcoming.forEach(function(day){
+              html += '<div style="font-size:12px;font-weight:600;color:var(--ph-text);padding:6px 0 2px;">'+esc(day.day||'')+'</div>';
+              (day.events||[]).forEach(function(ev){
+                html += '<div style="font-size:12px;color:var(--ph-text-sub);padding:3px 0 3px 12px;">'+esc(ev.time||'')+' '+esc(ev.title||'')+'</div>';
+              });
+            });
+            html += '</div>';
+          }
+          var reminders = cd.reminders || [];
+          if(reminders.length){
+            html += '<div class="phCard"><div style="font-weight:600;color:var(--ph-text);margin-bottom:8px;">🔔 提醒</div>';
+            reminders.forEach(function(r){ html += '<div style="font-size:12px;color:var(--ph-text-sub);padding:3px 0;">· '+esc(r)+'</div>'; });
+            html += '</div>';
+          }
         }
 
-        // 提醒
-        var reminders = cd.reminders || [];
-        if(reminders.length){
-          html += '<div class="phCard"><div style="font-weight:600;color:var(--ph-text);margin-bottom:8px;">🔔 提醒</div>';
-          reminders.forEach(function(r){ html += '<div style="font-size:12px;color:var(--ph-text-sub);padding:3px 0;">· '+esc(r)+'</div>'; });
-          html += '</div>';
+        // ★ 关注的 NPC 今日动态日程
+        var watchedIds = _getCalendarWatchedNPCs();
+        var npcSchedules = _collectNpcSchedules();
+        var watchedNpcs = npcSchedules.filter(function(n){ return watchedIds.indexOf(n.id) >= 0; });
+
+        if (watchedNpcs.length) {
+          var dailyData = _loadNpcDailySchedules();
+          var hasDailyData = dailyData && dailyData._day === _todayKey() && dailyData.npcs;
+          var nowTotalMin = now.getHours() * 60 + now.getMinutes();
+
+          watchedNpcs.forEach(function(npc) {
+            // 优先用 AI 生成的今日动态日程，否则 fallback 到常规作息
+            var dailyNpc = hasDailyData ? (dailyData.npcs[npc.name] || dailyData.npcs[npc.id]) : null;
+            var slots = (dailyNpc && dailyNpc.slots && dailyNpc.slots.length) ? dailyNpc.slots : npc.schedule;
+            var usingDaily = !!(dailyNpc && dailyNpc.slots && dailyNpc.slots.length);
+
+            html += '<div class="phCard">'
+              + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">'
+              + '<span style="font-size:18px;">' + esc(npc.avatar || '👤') + '</span>'
+              + '<div style="flex:1;"><div style="font-size:13px;font-weight:600;color:var(--ph-text);">'
+              + esc(npc.name) + ' · 今日日程</div>'
+              + '<div style="font-size:11px;color:var(--ph-text-dim);">'
+              + (npc.occupation ? esc(npc.occupation) + ' · ' : '')
+              + (usingDaily ? '动态日程' : '常规作息') + '</div>'
+              + '</div></div>';
+
+            slots.forEach(function(sl) {
+              var slStart = (sl.hour||0) * 60 + (sl.startMin||0);
+              var slEnd = (sl.endHour||0) * 60 + (sl.endMin||0);
+              var isCurrent = slEnd <= slStart ? (nowTotalMin >= slStart || nowTotalMin < slEnd) : (nowTotalMin >= slStart && nowTotalMin < slEnd);
+              var isChanged = !!sl.changed;
+              var startStr = String(sl.hour||0).padStart(2,'0') + ':' + String(sl.startMin||0).padStart(2,'0');
+              var endStr = String(sl.endHour||0).padStart(2,'0') + ':' + String(sl.endMin||0).padStart(2,'0');
+
+              html += '<div style="display:flex;align-items:flex-start;gap:8px;padding:5px 0;font-size:12px;'
+                + (isCurrent ? 'color:var(--ph-accent,#07c160);font-weight:600;' : 'color:var(--ph-text-sub,#888);')
+                + (isChanged ? 'background:color-mix(in srgb, #f59e0b 6%, transparent);margin:1px -6px;padding:5px 6px;border-radius:8px;' : '')
+                + '">'
+                + '<span style="min-width:80px;font-variant-numeric:tabular-nums;flex-shrink:0;">' + startStr + '-' + endStr + '</span>'
+                + '<div style="flex:1;">'
+                + '<span>' + esc(sl.activity||'') + '</span>'
+                + (isChanged ? '<span style="font-size:10px;color:#f59e0b;margin-left:4px;">✦ 今日变化</span>' : '')
+                + (isCurrent ? '<span style="font-size:10px;background:color-mix(in srgb, var(--ph-accent,#07c160) 12%, transparent);padding:1px 6px;border-radius:6px;margin-left:4px;">现在</span>' : '')
+                + (isChanged && sl.reason ? '<div style="font-size:10px;color:#d97706;margin-top:2px;font-weight:400;">' + esc(sl.reason) + '</div>' : '')
+                + '</div></div>';
+            });
+            html += '</div>';
+          });
+        } else if (npcSchedules.length) {
+          html += '<div class="phCard" style="text-align:center;padding:16px;">'
+            + '<div style="font-size:12px;color:var(--ph-text-dim);">💡 右上角 👥 可添加关注角色<br>在日历中查看 TA 们的每日动态</div></div>';
         }
 
-        if(cd._generatedAt){
+        if(cd && cd._generatedAt){
           html += '<div style="text-align:center;font-size:10px;color:var(--ph-text-dim);padding:8px 0;">上次更新：'+new Date(cd._generatedAt).toLocaleString()+'</div>';
         }
         container.innerHTML = html;
+      }
+
+      /* ── 日历：管理关注 NPC 弹窗 ── */
+      function _openCalendarNPCManager() {
+        var pr = document.getElementById('meow-phone-root') || document.body;
+        var old = document.getElementById('calendar-npc-modal'); if(old) old.remove();
+        var modal = document.createElement('div');
+        modal.id = 'calendar-npc-modal';
+        modal.style.cssText = 'position:absolute;inset:0;background:rgba(0,0,0,.4);z-index:99990;display:flex;align-items:flex-end;';
+
+        var allNpcs = _collectNpcSchedules();
+        var watchedIds = _getCalendarWatchedNPCs();
+
+        function renderList() {
+          if (!allNpcs.length) {
+            modal.innerHTML = '<div style="width:100%;background:var(--ph-appbody-bg,#f7f5f2);border-radius:20px 20px 0 0;padding:20px 16px;">'
+              + '<div style="font-size:16px;font-weight:700;color:var(--ph-text);margin-bottom:12px;">关注角色日程'
+              + '<button onclick="document.getElementById(\'calendar-npc-modal\').remove()" style="float:right;background:none;border:none;font-size:18px;cursor:pointer;color:var(--ph-text-sub);">×</button></div>'
+              + '<div style="text-align:center;padding:30px;color:var(--ph-text-dim);font-size:13px;">暂无已开启作息驱动的角色<br><span style="font-size:11px;">请先在通讯录→角色设置→作息表中开启「作息驱动」</span></div></div>';
+            return;
+          }
+          var rows = allNpcs.map(function(n) {
+            var isW = watchedIds.indexOf(n.id) >= 0;
+            var slotCount = n.schedule ? n.schedule.length : 0;
+            return '<div style="display:flex;align-items:center;gap:10px;padding:12px 0;border-bottom:1px solid rgba(0,0,0,.05);">'
+              + '<span style="font-size:20px;">' + esc(n.avatar || '👤') + '</span>'
+              + '<div style="flex:1;"><div style="font-size:14px;color:var(--ph-text);">' + esc(n.name) + '</div>'
+              + '<div style="font-size:11px;color:var(--ph-text-dim);">' + (n.occupation ? esc(n.occupation) + ' · ' : '') + slotCount + '个时段</div></div>'
+              + '<button onclick="window._calToggleNPC(\'' + esc(n.id) + '\')" style="padding:6px 14px;border-radius:8px;border:none;font-size:12px;font-weight:600;cursor:pointer;'
+              + (isW ? 'background:var(--ph-accent,#07c160);color:#fff;' : 'background:var(--ph-glass,rgba(0,0,0,.06));color:var(--ph-text-sub,#666);')
+              + '">' + (isW ? '✓ 已关注' : '+ 关注') + '</button></div>';
+          }).join('');
+          modal.innerHTML = '<div style="width:100%;background:var(--ph-appbody-bg,#f7f5f2);border-radius:20px 20px 0 0;padding:20px 16px;max-height:70%;overflow-y:auto;">'
+            + '<div style="font-size:16px;font-weight:700;color:var(--ph-text);margin-bottom:4px;">关注角色日程'
+            + '<button onclick="document.getElementById(\'calendar-npc-modal\').remove()" style="float:right;background:none;border:none;font-size:18px;cursor:pointer;color:var(--ph-text-sub);">×</button></div>'
+            + '<div style="font-size:12px;color:var(--ph-text-dim);margin-bottom:12px;">关注后在日历中查看 TA 的今日动态日程<br>每天 AI 会基于作息表生成 1-2 个变化</div>'
+            + rows + '</div>';
+        }
+
+        window._calToggleNPC = function(npcId) {
+          var idx = watchedIds.indexOf(npcId);
+          if (idx >= 0) watchedIds.splice(idx, 1); else watchedIds.push(npcId);
+          _setCalendarWatchedNPCs(watchedIds);
+          renderList();
+        };
+
+        renderList();
+        pr.appendChild(modal);
+        modal.addEventListener('click', function(e){ if(e.target===modal) modal.remove(); });
       }
 
       /* ========== 论坛 App（微博风格） ========== */
@@ -40450,61 +40719,48 @@ function _meowUrlBase64ToUint8Array(base64String) {
 
       var catName = (_CATEGORIES.find(function(c){ return c.id === category; }) || {}).name || category;
       var ctx = _buildShopContext();
-
       var worldCtxLines = [];
-      if (ctx.worldName) worldCtxLines.push('世界名称：' + ctx.worldName);
-      if (ctx.landmarks) worldCtxLines.push('主要地标：' + ctx.landmarks);
-      if (ctx.characters) worldCtxLines.push('相关角色：' + ctx.characters);
-      if (ctx.worldBookSnippet) worldCtxLines.push('世界设定：' + ctx.worldBookSnippet.slice(0, 200));
-      if (ctx.recentChatSummary) worldCtxLines.push('最近动态：' + ctx.recentChatSummary.slice(0, 150));
-      if (ctx.playerNeeds) worldCtxLines.push('玩家当前需求：' + ctx.playerNeeds);
-      if (ctx.playerState) {
-        worldCtxLines.push('玩家状态：体力' + ctx.playerState.energy
-          + ' 心情' + ctx.playerState.mood
-          + ' 饥饿' + ctx.playerState.hunger
-          + ' 所在地点「' + ctx.playerState.location + '」');
+      if (ctx.worldName) worldCtxLines.push('世界：' + ctx.worldName);
+      if (ctx.landmarks) worldCtxLines.push('地标：' + ctx.landmarks);
+      if (ctx.characters) worldCtxLines.push('角色：' + ctx.characters);
+      if (ctx.worldBookSnippet) worldCtxLines.push('设定：' + ctx.worldBookSnippet.slice(0, 150));
+      if (ctx.playerNeeds && ctx.playerNeeds !== '状态正常') worldCtxLines.push('需求：' + ctx.playerNeeds);
+      if (ctx.playerState) worldCtxLines.push('状态：体力' + ctx.playerState.energy + ' 心情' + ctx.playerState.mood + ' 饥饿' + ctx.playerState.hunger);
+      var worldCtx = worldCtxLines.join('；');
+
+      var sysPrompt = '你是虚拟商城选品AI。只返回JSON数组，不加任何其他文字或代码块。';
+      var userPrompt = '背景：' + (worldCtx || '现代都市虚拟世界') + '\n为「' + catName + '」生成5件商品。'
+        + (ctx.playerNeeds && ctx.playerNeeds !== '状态正常' ? '至少2件针对玩家需求。' : '')
+        + (lsGet('meow.shop.settings',{}).customPrompt ? '额外：' + lsGet('meow.shop.settings',{}).customPrompt : '')
+        + '\n格式：[{"id":"p_xx","name":"名称6字内","emoji":"emoji","price":10-300,"desc":"卖点20字内","tags":["标签"],"effect":{"mood":N,"energy":N,"hunger":N,"health":N}}]\neffect只写有效字段(5-25)。';
+
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          var text;
+          if (hasPhoneAI) {
+            var result = await window.PhoneAI.chat({ system: sysPrompt, messages: [{ role:'user', content: userPrompt }], temperature: 0.85, maxTokens: 800, channel: 'background', timeout: 45 });
+            if (!result || !result.ok || !result.data) throw new Error(result ? result.error : 'PhoneAI failed');
+            text = String(result.data);
+          } else {
+            var res = await fetch((cfg.baseUrl.replace(/\/$/, '')) + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey }, body: JSON.stringify({ model: cfg.model || 'gpt-3.5-turbo', max_tokens: 800, temperature: 0.85, messages: [{ role:'system', content:sysPrompt },{ role:'user', content:userPrompt }] }) });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            var data = await res.json();
+            text = (data.choices[0].message.content || '');
+          }
+          text = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+          var arrMatch = text.match(/\[[\s\S]*\]/); if (arrMatch) text = arrMatch[0];
+          text = text.replace(/,\s*([\]}])/g, '$1');
+          var products = JSON.parse(text);
+          if (!Array.isArray(products) || !products.length) throw new Error('empty');
+          products = products.filter(function(p){ return p && p.name && p.price; });
+          products.forEach(function(p, idx){ if (!p.id) p.id = 'p_' + Date.now().toString(36) + '_' + idx; });
+          if (products.length > 0) { console.log('[Shop] AI 商品生成成功'); return products; }
+        } catch(e) {
+          console.warn('[Shop] 第' + (attempt+1) + '次生成失败:', e.message);
+          if (attempt === 0) await new Promise(function(r){ setTimeout(r, 1500); });
+        }
       }
-      var worldCtx = worldCtxLines.join('\n');
-
-      var sysPrompt = '你是虚拟世界网购平台「喵喵商城」的选品AI。只输出JSON数组，不要任何其他文字、不要markdown代码块。';
-
-      var userPrompt =
-        '## 背景信息\n' + (worldCtx || '普通现代都市虚拟世界') + '\n\n'
-        + '## 任务\n'
-        + '请根据世界观背景和玩家当前状态，为「' + catName + '」类目生成8件商品。\n\n'
-        + '## 要求\n'
-        + '- 商品名、描述必须符合该世界的风格和语境\n'
-        + '- 如果玩家有明显需求（饥饿/低体力/低心情），商品中至少2件能针对性补充\n'
-        + '- 如果有聊天内容，商品可以和角色喜好/剧情有所关联\n'
-        + '- 每件商品必须有详细的 tags 字段\n'
-        + (lsGet('meow.shop.settings',{}).customPrompt ? ('- 额外要求：' + lsGet('meow.shop.settings',{}).customPrompt + '\n') : '')
-        + '\n## 输出格式\n'
-        + '[{"id":"p_唯一字母数字","name":"商品名（6字以内）","emoji":"单个emoji","price":价格整数(10-300),"desc":"一句话卖点（20字以内）","story":"商品背景故事（30字以内）","tags":["标签1","标签2"],"effect":{"mood":N,"energy":N,"hunger":N,"health":N}}]\n'
-        + 'effect 只填有实际意义的字段，数值5-25。';
-
-      var text;
-      if (hasPhoneAI) {
-        var result = await window.PhoneAI.chat({
-          system: sysPrompt,
-          messages: [{ role:'user', content: userPrompt }],
-          temperature: 0.88, maxTokens: 1500, channel: 'background', timeout: 60
-        });
-        if (!result || !result.ok || !result.data) throw new Error(result ? result.error : 'PhoneAI failed');
-        text = String(result.data).replace(/```json|```/g, '').trim();
-      } else {
-        var res = await fetch((cfg.baseUrl.replace(/\/$/, '')) + '/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey },
-          body: JSON.stringify({ model: cfg.model || 'gpt-3.5-turbo', max_tokens: 1200, temperature: 0.88, messages: [{ role:'system', content:sysPrompt },{ role:'user', content:userPrompt }] })
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        var data = await res.json();
-        text = (data.choices[0].message.content || '').replace(/```json|```/g, '').trim();
-      }
-      var products = JSON.parse(text);
-      if (!Array.isArray(products) || products.length === 0) throw new Error('empty');
-      console.log('[Shop] AI 商品生成成功 via', hasPhoneAI ? 'PhoneAI' : 'rawFetch');
-      return products;
+      return _fallbackProducts(category);
     } catch(e) {
       console.warn('[Shop] AI生成失败，使用fallback:', e.message);
       return _fallbackProducts(category);
@@ -40980,10 +41236,11 @@ function _meowUrlBase64ToUint8Array(base64String) {
         : orders.map(function(o) {
             var arrived = now >= o.deliveryTime;
             var statusColor = o.status==='claimed' ? '#aaa' : (arrived ? 'var(--ph-accent,#07c160)' : '#f90');
-            var statusText  = o.status==='claimed' ? '已领取' : (arrived ? '待领取' : '运输中');
+            var statusText  = o.status==='claimed' ? '已领取' : (arrived ? '📦 待领取' : '🚚 运输中');
             var eta = arrived ? '已到达' : ('约'+Math.ceil((o.deliveryTime-now)/60000)+'分钟后');
             var emojis = o.items.map(function(p){ return '<span style="font-size:20px;" title="'+p.name+'">'+p.emoji+'</span>'; }).join('');
-            var claimBtn = (o.status==='pending' && arrived)
+            var canClaim = arrived && (o.status==='pending' || o.status==='arrived');
+            var claimBtn = canClaim
               ? '<button onclick="window._shopClaim(\''+o.id+'\')" style="background:var(--ph-accent,#07c160);color:#fff;border:none;border-radius:8px;padding:5px 14px;font-size:12px;font-weight:600;cursor:pointer;">领取</button>'
               : '';
             return '<div style="background:var(--ph-glass,rgba(255,255,255,.8));border-radius:12px;padding:12px;margin-bottom:10px;">'
@@ -41010,7 +41267,8 @@ function _meowUrlBase64ToUint8Array(base64String) {
     window._shopClaim = function(ordId) {
       var orders = loadOrders();
       var ord = orders.orders.find(function(o){ return o.id===ordId; });
-      if (!ord || ord.status!=='pending') return;
+      if (!ord || ord.status==='claimed') return;
+      if (Date.now() < ord.deliveryTime) { try{toast('📦 快递还在路上…');}catch(e){} return; }
       ord.status = 'claimed';
       saveOrders(orders);
       if (ord.to==='self') {
@@ -41902,95 +42160,84 @@ function _meowUrlBase64ToUint8Array(base64String) {
     return ctx;
   }
 
-  /* ── AI 生成资讯 ── */
+  /* ── AI 生成资讯（优化版：减量 + 重试 + 健壮解析） ── */
   async function _generateNews(tabId) {
     var ctx = _buildNewsContext();
-    // ★ 优先用 PhoneAI，fallback 到 raw fetch
     var hasPhoneAI = (typeof window.PhoneAI !== 'undefined' && window.PhoneAI && typeof window.PhoneAI.chat === 'function');
     var hasCfg = (typeof _meowGetActiveApiConfig === 'function') && _meowGetActiveApiConfig();
     if (!hasPhoneAI && !hasCfg) return _fallbackNews(tabId);
 
-    var catFilter = tabId === 'all' ? '五种类型各2-3条，共12条左右' : ({
-      chance:'「机会」类6-8条',
-      trade: '「商机」类6-8条',
-      event: '「活动」类6-8条',
-      intel: '「情报」类6-8条',
-      world: '「动态」类6-8条',
-    }[tabId] || '各类型均匀分布10条');
+    // ★ 减量：all 5-6条，分类 3-4条
+    var catFilter = tabId === 'all' ? '共5-6条，chance/trade/event/intel/world各一条' : ({
+      chance:'「机会」类3-4条', trade:'「商机」类3-4条', event:'「活动」类3-4条',
+      intel:'「情报」类3-4条', world:'「动态」类3-4条',
+    }[tabId] || '各类型均匀3-4条');
 
     var ctxDesc = [
       ctx.worldName ? '世界名：' + ctx.worldName : '',
-      ctx.landmarks ? '已知地标：' + ctx.landmarks : '',
-      ctx.characters ? '认识的角色：' + ctx.characters : '',
-      ctx.recentEvents ? '最近发生：' + ctx.recentEvents.slice(0,150) : '',
-      ctx.recentActions ? '玩家最近行动：' + ctx.recentActions : '',
-      ctx.playerNeeds ? '玩家当前状况：' + ctx.playerNeeds : '',
-      ctx.money != null ? '玩家余额：$' + ctx.money : '',
-      ctx.location ? '当前位置：' + ctx.location : '',
-    ].filter(Boolean).join('\n');
+      ctx.landmarks ? '地标：' + ctx.landmarks : '',
+      ctx.characters ? '角色：' + ctx.characters : '',
+      ctx.recentEvents ? '近况：' + ctx.recentEvents.slice(0,100) : '',
+      ctx.recentActions ? '玩家动态：' + ctx.recentActions : '',
+      ctx.playerNeeds && ctx.playerNeeds !== '状态正常' ? '需求：' + ctx.playerNeeds : '',
+      ctx.money != null ? '余额$' + ctx.money : '',
+      ctx.location ? '位置：' + ctx.location : '',
+    ].filter(Boolean).join('；');
 
-    var sysPrompt = '你是虚拟世界的「资讯雷达」AI。只输出JSON数组，不要任何其他文字、不要markdown代码块。';
+    // ★ 精简 prompt
+    var sysPrompt = '你是虚拟世界资讯AI。只返回JSON数组，不加任何其他文字或代码块。';
+    var userPrompt = '背景：' + (ctxDesc || '现代都市虚拟世界') + '\n'
+      + '生成' + catFilter + '。\n'
+      + '要求：符合世界观，给玩家可行动机会，关联已知角色地标。'
+      + (ctx.playerNeeds && ctx.playerNeeds !== '状态正常' ? '优先满足玩家需求。' : '')
+      + (lsGet('meow.news.settings', {}).customPrompt ? '额外：' + lsGet('meow.news.settings', {}).customPrompt : '')
+      + '\n类型：chance(机会)/trade(商机)/event(活动)/intel(情报)/world(动态)\n'
+      + '格式：[{"id":"n_xx","type":"类型","title":"标题15字内","summary":"摘要30字内","detail":"详情60字内","urgent":false,"reward":"收益","landmark":"地标","action":{"label":"按钮","type":"move|work|quest","value":"地标"}}]\n'
+      + 'quest时加quest字段：{"title":"任务名","desc":"说明","cost":{"energy":数字},"reward":{"money":数字}}';
 
-    var userPrompt = '## 世界背景\n' + (ctxDesc || '普通现代都市虚拟世界') + '\n\n'
-      + '## 任务\n'
-      + '请生成' + catFilter + '条资讯。\n'
-      + '每条资讯必须：\n'
-      + '1. 符合世界观风格和当前情境\n'
-      + '2. 给玩家提供可行动的机会或线索\n'
-      + '3. 如果玩家状态有需求（饥饿/低体力/缺钱），优先生成对应的机会\n'
-      + '4. 尽量与已知角色、地标产生关联\n'
-      + (lsGet('meow.news.settings', {}).customPrompt ? ('5. 额外要求：' + lsGet('meow.news.settings', {}).customPrompt + '\n') : '')
-      + '\n'
-      + '## 资讯类型说明\n'
-      + '- chance（机会）：工作机会、任务线索、限时活动入口\n'
-      + '- trade（商机）：特价、限量、赚钱机会、稀有物品出现\n'
-      + '- event（活动）：比赛、聚会、节日、特殊事件\n'
-      + '- intel（情报）：NPC 动态、关系变化、秘密消息\n'
-      + '- world（动态）：世界天气、区域变化、背景氛围\n\n'
-      + '## 输出格式\n'
-      + '[{\n'
-      + '  "id": "n_唯一id",\n'
-      + '  "type": "chance|trade|event|intel|world",\n'
-      + '  "title": "标题（15字以内）",\n'
-      + '  "summary": "摘要（40字以内）",\n'
-      + '  "detail": "详情（80字以内，包含具体信息）",\n'
-      + '  "urgent": true或false,\n'
-      + '  "reward": "预期收益（可选）",\n'
-      + '  "landmark": "相关地标名（可选，必须是已知地标之一）",\n'
-      + '  "action": {"label":"按钮文字","type":"move|work|quest|event|shop|chat","value":"地标名或动作描述","quest":{"title":"任务标题","desc":"任务说明","cost":{"energy":数字},"reward":{"money":数字}}}\n'
-      + '}]\n'
-      + 'action.type为quest时quest字段必填。type为work跳转工作App，move跳转地图。';
-
-    try {
-      var result;
-      if (hasPhoneAI) {
-        result = await window.PhoneAI.chat({
-          system: sysPrompt,
-          messages: [{ role:'user', content: userPrompt }],
-          temperature: 0.88, maxTokens: 2000, channel: 'background', timeout: 90
-        });
-        if (!result || !result.ok || !result.data) throw new Error(result ? result.error : 'PhoneAI failed');
-        var text = String(result.data).replace(/```json|```/g, '').trim();
-      } else {
-        var cfg = _meowGetActiveApiConfig();
-        var res = await fetch((cfg.baseUrl.replace(/\/$/, '')) + '/chat/completions', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey },
-          body: JSON.stringify({ model: cfg.model || 'gpt-3.5-turbo', max_tokens: 2000, temperature: 0.88, messages: [{ role:'system', content:sysPrompt },{ role:'user', content:userPrompt }] })
-        });
-        if (!res.ok) throw new Error('HTTP ' + res.status);
-        var data = await res.json();
-        var text = (data.choices[0].message.content || '').replace(/```json|```/g, '').trim();
+    // ★ 带重试
+    async function _doRequest(retryCount) {
+      for (var attempt = 0; attempt <= retryCount; attempt++) {
+        try {
+          var text;
+          if (hasPhoneAI) {
+            var result = await window.PhoneAI.chat({ system: sysPrompt, messages: [{ role:'user', content: userPrompt }], temperature: 0.85, maxTokens: 1200, channel: 'background', timeout: 60 });
+            if (!result || !result.ok || !result.data) throw new Error(result ? result.error : 'PhoneAI failed');
+            text = String(result.data);
+          } else {
+            var cfg = _meowGetActiveApiConfig();
+            var res = await fetch((cfg.baseUrl.replace(/\/$/, '')) + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey }, body: JSON.stringify({ model: cfg.model || 'gpt-3.5-turbo', max_tokens: 1200, temperature: 0.85, messages: [{ role:'system', content:sysPrompt },{ role:'user', content:userPrompt }] }) });
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            var data = await res.json();
+            text = (data.choices[0].message.content || '');
+          }
+          // ★ 健壮解析
+          text = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+          var arrMatch = text.match(/\[[\s\S]*\]/);
+          if (arrMatch) text = arrMatch[0];
+          text = text.replace(/,\s*([\]}])/g, '$1');
+          var items = JSON.parse(text);
+          if (!Array.isArray(items) || !items.length) throw new Error('empty');
+          items = items.filter(function(n){ return n && n.type && n.title; });
+          if (!items.length) throw new Error('no valid items');
+          items.forEach(function(n, idx){ if (!n.id) n.id = 'n_' + Date.now().toString(36) + '_' + idx; });
+          return items;
+        } catch(e) {
+          console.warn('[MeowNews] 第' + (attempt+1) + '次尝试失败:', e.message);
+          if (attempt < retryCount) await new Promise(function(r){ setTimeout(r, 1500 * (attempt + 1)); });
+        }
       }
-      var items = JSON.parse(text);
-      if (!Array.isArray(items) || !items.length) throw new Error('empty');
-      try { localStorage.setItem(LS_NEWS_CACHE + '_' + tabId, JSON.stringify({ items: items, at: Date.now() })); } catch(e) {}
-      console.log('[MeowNews] AI 生成', items.length, '条资讯 (', tabId, ') via', hasPhoneAI ? 'PhoneAI' : 'rawFetch');
-      return items;
-    } catch(e) {
-      console.warn('[MeowNews] AI生成失败:', e.message);
+      return null;
+    }
+
+    var items = await _doRequest(1);
+    if (!items) {
+      try { var oldCache = localStorage.getItem(LS_NEWS_CACHE + '_' + tabId); if (oldCache) { var old = JSON.parse(oldCache); if (old.items && old.items.length) { try{ toast('⚠ AI 生成失败，显示缓存'); }catch(e){} return old.items; } } } catch(e) {}
       return _fallbackNews(tabId);
     }
+    try { localStorage.setItem(LS_NEWS_CACHE + '_' + tabId, JSON.stringify({ items: items, at: Date.now() })); } catch(e) {}
+    console.log('[MeowNews] AI 生成', items.length, '条资讯 (', tabId, ') via', hasPhoneAI ? 'PhoneAI' : 'rawFetch');
+    return items;
   }
 
   function _fallbackNews(tabId) {
