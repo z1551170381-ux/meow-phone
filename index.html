@@ -9749,6 +9749,8 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
       window._meowPushLog = pushLog;
       window._meowBumpThread = bumpThread;
       window._meowState = state; // ★ 暴露 state 给迷你聊天设置 chatTarget
+      window._meowOpenChat = function(contactId){ try{ openChat(contactId); }catch(e){} };
+      window._meowLoadContactsDB = function(){ try{ return loadContactsDB(); }catch(e){ return null; } };
 
       // ★ 来电弹窗共享引用（已移至外层，此行保留作兼容占位）
       var _triggerIncomingCall = null;
@@ -9836,6 +9838,10 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
           case 'inventory': window.renderInventoryApp(body); break;
           case 'work': setAppBarRight('<button class="phBarRBtn" data-act="afWorkSettings" title="工作设置">' + _phFlatIcon('⚙️') + '</button>'); window.renderWorkApp(body); break;
           case 'widgetEditor': renderWidgetEditor(body); break;
+          case 'chatDetail':
+            // ★ 修复：renderApp('chatDetail') 不应显示占位，而应跳回消息列表
+            renderApp('chats');
+            break;
           default: renderPlaceholder(body,'📦',`「${id}」开发中…`);
         }
       }
@@ -29679,6 +29685,9 @@ function bindPageScroll(){
             }catch(e){ console.warn('[LifePush] toast error:', e); }
           }
 
+          // ★ 暴露给悬浮头像模块使用
+          window._meowShowLifePushToast = _showLifePushToast;
+
           var _lastFgPushCheck = {}; // npcId → timestamp，防止同一角色连续推
 
           var _fgPushTimer = setInterval(function(){
@@ -39653,10 +39662,145 @@ function _meowUrlBase64ToUint8Array(base64String) {
         }, 260);
       } catch(e) { console.warn('[MeowFloatAvatar] mini chat burst refresh error:', e); }
     }
+    /* ── 浮窗通知：记录每个 NPC 上次通知时的 log 长度，防重复 ── */
+    var _notifLastLen = {};
+    var _notifCooldown = {}; // npcId → timestamp，3s 内不重复弹
+
+    function _showMiniMsgNotif(npcId, npcName, avatarHint, msgText) {
+      try {
+        var now = Date.now();
+        // 3 秒冷却，避免同一角色连续弹
+        if (_notifCooldown[npcId] && now - _notifCooldown[npcId] < 3000) return;
+        _notifCooldown[npcId] = now;
+
+        // 复用主体的 _showLifePushToast（如已注入）
+        if (typeof window._meowShowLifePushToast === 'function') {
+          window._meowShowLifePushToast(npcId, npcName, avatarHint, msgText, function(){
+            try {
+              if (typeof window._meowOpenChat === 'function') window._meowOpenChat(npcId);
+            } catch(e2){}
+          });
+          return;
+        }
+
+        // Fallback：自制浮窗（iOS 风格横幅，从顶部滑入）
+        var root = document.getElementById('meow-phone-root') || document.body;
+        var old = root.querySelector('#meow-minichat-notif');
+        if (old) old.remove();
+
+        var avatarImg = (typeof phoneGetAvatar === 'function') ? phoneGetAvatar(npcId) : null;
+        var avatarHtml = avatarImg
+          ? '<img src="' + avatarImg + '" style="width:100%;height:100%;object-fit:cover;border-radius:50%;"/>'
+          : '<span style="font-size:15px;font-weight:700;color:#fff;">' + String(avatarHint || (npcName||'?').charAt(0)) + '</span>';
+
+        var el = document.createElement('div');
+        el.id = 'meow-minichat-notif';
+        el.style.cssText = [
+          'position:fixed','top:12px','left:50%',
+          'transform:translateX(-50%) translateY(-80px)',
+          'min-width:220px','max-width:88%',
+          'background:rgba(30,30,40,.93)',
+          'backdrop-filter:blur(24px)','-webkit-backdrop-filter:blur(24px)',
+          'border:1px solid rgba(255,255,255,.14)',
+          'border-radius:18px',
+          'padding:10px 14px',
+          'display:flex','align-items:center','gap:10px',
+          'box-shadow:0 8px 32px rgba(0,0,0,.5)',
+          'z-index:999999','cursor:pointer',
+          'transition:transform .32s cubic-bezier(.22,1,.36,1),opacity .32s',
+          'opacity:0',
+        ].join(';');
+
+        el.innerHTML =
+          '<div style="width:36px;height:36px;border-radius:50%;background:rgba(255,255,255,.18);'
+          + 'display:flex;align-items:center;justify-content:center;flex-shrink:0;overflow:hidden;">'
+          + avatarHtml + '</div>'
+          + '<div style="flex:1;min-width:0;">'
+          + '<div style="font-size:11px;font-weight:600;color:rgba(255,255,255,.65);margin-bottom:2px;">' + String(npcName||npcId) + '</div>'
+          + '<div style="font-size:13px;color:#fff;line-height:1.4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px;">' + String(msgText||'').slice(0,60) + '</div>'
+          + '</div>'
+          + '<button id="meow-minichat-notif-close" style="font-size:14px;color:rgba(255,255,255,.35);background:transparent;border:0;cursor:pointer;padding:0 2px;flex-shrink:0;line-height:1;">✕</button>';
+
+        root.appendChild(el);
+
+        // 滑入动画
+        requestAnimationFrame(function(){
+          requestAnimationFrame(function(){
+            el.style.transform = 'translateX(-50%) translateY(0)';
+            el.style.opacity = '1';
+          });
+        });
+
+        function _dismiss() {
+          el.style.transform = 'translateX(-50%) translateY(-80px)';
+          el.style.opacity = '0';
+          setTimeout(function(){ if(el.isConnected) el.remove(); }, 360);
+        }
+
+        el.querySelector('#meow-minichat-notif-close').addEventListener('click', function(e){
+          e.stopPropagation(); _dismiss();
+        });
+        el.addEventListener('click', function(){
+          _dismiss();
+          // 点击跳转到对应聊天
+          try {
+            if (typeof window._meowOpenChat === 'function') { window._meowOpenChat(npcId); return; }
+            // 备用：触发悬浮头像打开 chat tab
+            if (_root && _miniChatTarget !== npcId) _miniChatTarget = npcId;
+            _openCard();
+            setTimeout(function(){
+              _switchTab('chat');
+            }, 80);
+          } catch(e2){}
+        });
+
+        // 6 秒后自动消失
+        setTimeout(function(){ if(el.isConnected) _dismiss(); }, 6000);
+      } catch(e){ console.warn('[MeowNotif] toast error:', e); }
+    }
+
+    /* ── 记录上次 log 长度（初始化时快照） ── */
+    function _snapshotLogLen(npcId) {
+      try {
+        if (typeof window._meowGetLog === 'function') {
+          _notifLastLen[npcId] = (window._meowGetLog(npcId) || []).length;
+        }
+      } catch(e){}
+    }
+
     function _refreshMiniChatOnEvent(e) {
       try {
+        var changedNpc = String(e && e.detail && e.detail.npcId || '').trim();
+        var role = String(e && e.detail && e.detail.role || '').trim();
+        var textPreview = String(e && e.detail && e.detail.textPreview || '').trim();
+
+        // ── 当卡片关闭，或卡片打开但不在 chat tab，或 chat tab 看的是另一个人 ──
+        // 且是对方（NPC）发来的消息 → 弹浮窗提醒
+        var isNpcMsg = role && role !== 'me' && role !== 'user' && role !== 'system' && role !== 'narrator';
+        var cardNotActive = !_cardOpen || _activeTab !== 'chat' || (changedNpc && _miniChatTarget && changedNpc !== String(_miniChatTarget));
+
+        if (isNpcMsg && changedNpc && cardNotActive) {
+          // 防止重复：检查 log 长度是否真的变化
+          var curLen = 0;
+          try { if (typeof window._meowGetLog === 'function') curLen = (window._meowGetLog(changedNpc) || []).length; } catch(e2){}
+          var lastLen = _notifLastLen[changedNpc] != null ? _notifLastLen[changedNpc] : -1;
+          if (curLen > lastLen) {
+            _notifLastLen[changedNpc] = curLen;
+            // 拿角色名和头像提示
+            var nName = changedNpc, nAvatar = changedNpc.charAt(0);
+            try {
+              if (typeof window._meowLoadContactsDB === 'function') {
+                var db2 = window._meowLoadContactsDB();
+                var npc2 = db2 && db2.contacts && db2.contacts.find(function(x){ return String(x.id)===changedNpc; });
+                if (npc2) { nName = npc2.name || nName; nAvatar = npc2.avatar || nAvatar; }
+              }
+            } catch(e3){}
+            var preview = textPreview || '发来了新消息';
+            _showMiniMsgNotif(changedNpc, nName, nAvatar, preview);
+          }
+        }
+
         if (_cardOpen && _activeTab === 'chat') {
-          var changedNpc = String(e && e.detail && e.detail.npcId || '').trim();
           if (!changedNpc || !_miniChatTarget || changedNpc === String(_miniChatTarget)) {
             _startMiniChatWatcher(_miniChatTarget, { idleMs: 12000 });
           }
