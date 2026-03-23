@@ -136,51 +136,52 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
   const { base_url, api_key, model } = apiCfg;
   if (!base_url || !api_key || !model) throw new Error('用户未配置 API');
 
-  // ── 上下文信息（纯描述，不夹指令）──
+  // ── 上下文（纯信息，不夹规则）──
   const ctxLines = [
     `现在是${ctx.timeLabel}。`,
+    ctx.npcState    && `你当前的状态：${ctx.npcState}`,
     ctx.scene       && `当前场景：${ctx.scene}`,
-    ctx.location    && `所在地点：${ctx.location}`,
-    ctx.npcState    && `你现在的状态：${ctx.npcState}`,
+    ctx.location    && `地点：${ctx.location}`,
     ctx.userState   && `对方状态：${ctx.userState}`,
-    ctx.memory      && `最近聊过的话题：${ctx.memory}`,
-    ctx.summary     && `聊天记录摘要：${ctx.summary}`,
+    ctx.memory      && `最近聊过：${ctx.memory}`,
+    ctx.summary     && `聊天摘要：${ctx.summary}`,
     ctx.world       && `世界背景：${ctx.world}`,
-    ctx.userProfile && `对方的设定：${ctx.userProfile}`,
+    ctx.userProfile && `对方设定：${ctx.userProfile}`,
     ctx.relation    && `你们的关系：${ctx.relation}`,
   ].filter(Boolean).join('\n');
 
-  // ── system：只建立角色身份，不列规则 ──
+  const bond = npc.bond || '普通';
+  const bondDesc =
+    bond === '亲近' ? '你们关系熟，说话随意自然，像朋友发消息。' :
+    bond === '暧昧' ? '你们之间有些暧昧，说话带一点在意，但不刻意。' :
+    bond === '疏远' ? '你们不算特别熟，语气平和，不过热。' :
+                     '你们是普通朋友，正常说话。';
+
+  // ── system：纯角色身份 + 上下文 ──
   const systemPrompt = [
     `你是「${npc.npc_name}」。`,
-    npc.npc_profile      && cleanText(npc.npc_profile, 800),
-    npc.online_chat_prompt && cleanText(npc.online_chat_prompt, 500),
+    npc.npc_profile       && cleanText(npc.npc_profile, 800),
+    npc.online_chat_prompt && cleanText(npc.online_chat_prompt, 400),
+    bondDesc,
     ctxLines,
   ].filter(Boolean).join('\n\n');
 
-  // ── 对话历史：直接作为多轮上下文 ──
+  // ── 对话历史 ──
   const historyMessages = (ctx.chatHistory || []).map(turn => ({
     role: (turn.role === 'me' || turn.role === 'user') ? 'user' : 'assistant',
     content: turn.text
   }));
 
-  // ── user：一句话任务描述，Few-shot 示范完整句子的语感 ──
-  const bond = npc.bond || '普通';
-  const bondHint =
-    bond === '亲近' ? '像跟熟悉的人发消息，随意自然。' :
-    bond === '暧昧' ? '带一点在意，但不要刻意。' :
-    bond === '疏远' ? '语气平和，不过热。' : '正常说话，不客套。';
-
+  // ── user prompt：要求输出 JSON，强制完整句子、避免截断 ──
   const nudge = kind === 'daily'
-    ? '你今天想起对方了，发一条消息过去。'
-    : '你突然想跟对方说句话，就随手发了。';
+    ? '今天某个时刻你想起对方了，想发条消息。'
+    : '某个瞬间你想跟对方说句话。';
 
-  // Few-shot：给两个完整句子示例，让模型直接模仿格式而非复读指令
-  const fewShot = `示例风格（不要照抄，只参考句子完整度和口吻）：
-- 今天路过那家奶茶店，想到上次你推荐的那杯，结果喝了还挺好喝的
-- 刚健完身出来，外面天气不错，你那边呢`;
-
-  const userPrompt = `${nudge}${bondHint}\n\n${fewShot}\n\n现在你发给对方的这条消息是：`;
+  const userPrompt =
+    `${nudge}` +
+    `\n\n以 JSON 格式回复，只输出这一行，不加任何其他内容：` +
+    `\n{"msg": "你想发的那条消息"}` +
+    `\n\n消息要像真人发的，口语自然，一句或两句，说完整。`;
 
   async function callAI() {
     const resp = await fetch(`${base_url}/chat/completions`, {
@@ -189,14 +190,14 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
       body: JSON.stringify({
         model,
         messages: [
-          { role: 'system',    content: systemPrompt },
+          { role: 'system', content: systemPrompt },
           ...historyMessages,
-          { role: 'user',      content: userPrompt },
+          { role: 'user',   content: userPrompt },
         ],
         temperature: 0.9,
-        presence_penalty: 0.4,
+        presence_penalty: 0.3,
         frequency_penalty: 0.3,
-        max_tokens: 100,
+        max_tokens: 120,
       })
     });
     if (!resp.ok) throw new Error(`AI ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
@@ -204,39 +205,36 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     return (data?.choices?.[0]?.message?.content || '').trim();
   }
 
-  // ── 后处理：去掉引号/前缀，保留原文，不做过度校验 ──
-  function postProcess(raw) {
+  // ── 解析 JSON，失败时直接用原文 ──
+  function extractMsg(raw) {
+    // 优先解析 JSON
+    try {
+      const m = raw.match(/\{[\s\S]*?"msg"\s*:\s*"([\s\S]*?)"\s*\}/);
+      if (m) return m[1].replace(/\\n/g, ' ').trim();
+    } catch (_) {}
+    // 降级：去掉可能的 JSON 壳，取纯文本
     return raw
-      // 去掉模型可能加的引导前缀，如"这条消息是：xxx"
-      .replace(/^.*?[：:]\s*/, '')
-      // 去掉首尾引号
-      .replace(/^[\u201c\u201d\u2018\u2019\u300c\u300e"'\s]+|[\u201c\u201d\u2018\u2019\u300d\u300f"'\s]+$/g, '')
-      // 只取第一段（避免模型输出多条）
+      .replace(/^\{.*?"msg"\s*:\s*"?|"?\s*\}$/g, '')
+      .replace(/^["'""''「『\s]+|["'""''」』\s]+$/g, '')
       .split(/\n{2,}/)[0]
       .trim()
       .slice(0, 120);
   }
 
-  // ── 只拦截真正的废输出（空或纯指令泄漏），不拦自然短句 ──
+  // ── 只拦截空输出和纯英文指令泄漏 ──
   function isBadOutput(t) {
     if (!t || t.replace(/\s/g, '').length < 2) return true;
-    // 纯 ASCII 无中文 → 指令泄漏
     if (/^[\x00-\x7F\s]+$/.test(t) && !/[\u4e00-\u9fff]/.test(t)) return true;
-    // 以典型指令词开头
-    if (/^(字数|max\s*token|only output|只输出|不要|禁止|角色设定|风格要求)/i.test(t)) return true;
     return false;
   }
 
   let text = '';
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const raw = await callAI();
-      const cleaned = postProcess(raw);
-      if (!isBadOutput(cleaned)) {
-        text = cleaned;
-        break;
-      }
-      console.warn(`[proactive] attempt ${attempt + 1} bad: "${cleaned.slice(0, 50)}"`);
+      const raw  = await callAI();
+      const msg  = extractMsg(raw);
+      if (!isBadOutput(msg)) { text = msg; break; }
+      console.warn(`[proactive] attempt ${attempt + 1} bad: "${raw.slice(0, 60)}"`);
     } catch (e) {
       if (attempt === 2) throw e;
     }
