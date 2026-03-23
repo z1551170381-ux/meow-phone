@@ -136,7 +136,7 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
 
   const ctxLines = [
     '现在是' + ctx.timeLabel + '。',
-    ctx.npcState    && ('你当前：' + ctx.npcState),
+    ctx.npcState    && ('你当前状态：' + ctx.npcState),
     ctx.scene       && ('场景：' + ctx.scene),
     ctx.location    && ('地点：' + ctx.location),
     ctx.userState   && ('对方现在：' + ctx.userState),
@@ -147,6 +147,7 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     ctx.relation    && ('关系备注：' + ctx.relation),
   ].filter(Boolean).join('\n');
 
+  // ★ 把"完整句子"约束放进 system prompt，模型更听话
   const systemPrompt = [
     '你正在扮演「' + npc.npc_name + '」，用第一人称生活着，不要跳出角色。',
     npc.npc_profile && cleanText(npc.npc_profile, 900),
@@ -155,6 +156,11 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     '【你和对方的关系】',
     bondVibe,
     ctxLines ? ('\n【此刻的状态和背景】\n' + ctxLines) : '',
+    '',
+    '【输出格式】',
+    '你的输出就是你发给对方的一条聊天消息，只有消息本身，没有任何前缀/编号/引号/解释。',
+    '这条消息必须是完整的一句话——有开头有结尾，能让对方读懂并回复。',
+    '绝对不要在逗号处断开只说半截。控制在15到50个字。',
   ].filter(Boolean).join('\n');
 
   const historyMessages = (ctx.chatHistory || []).map(function(t) {
@@ -164,30 +170,22 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     };
   });
 
-  // user prompt：纯文本输出，不用 JSON，彻底避免 JSON 截断问题
   const trigger = kind === 'daily'
     ? '你今天在忙自己的事，忽然想起对方——可能是看到了什么、经历了什么、或者这个时段让你想聊聊。找个符合你当下状态的真实理由，自然地发条消息给 ta。'
     : '你某个瞬间想到了对方，顺手发条消息，就像正常人刷手机时忽然想说句话一样。';
 
-  const userPrompt = trigger + '\n\n'
-    + '直接输出你要发的那一条消息本身，不要加前缀、编号、标题、引号、解释，也不要给多个版本，就只给我那条消息。'
-    + '这条消息必须是语义完整的一整句话，有头有尾，别在逗号处断掉只说半截。'
-    + '比如不要写"刚在便利店买冰美式，看到货架"这种没说完的，'
-    + '要写成"刚在便利店买冰美式，看到个新口味想到你了，要不要帮你带一杯？"这样完整的。'
-    + '控制在15到50个字左右就好。';
+  const userPrompt = trigger
+    + '\n直接输出那条消息。记住：一句完整的话，别只说半截。';
 
-  async function callAI() {
+  // ─── AI 调用 ───
+  async function callAI(messages) {
     const resp = await fetch(base_url + '/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + api_key },
       body: JSON.stringify({
         model: model,
-        messages: [
-          { role: 'system', content: systemPrompt },
-        ].concat(historyMessages).concat([
-          { role: 'user', content: userPrompt }
-        ]),
-        temperature: 0.9,
+        messages: messages,
+        temperature: 0.85,
         presence_penalty: 0.3,
         frequency_penalty: 0.3,
         max_tokens: 300,
@@ -201,10 +199,11 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     ).trim();
   }
 
+  // ─── 清洗 ───
   function postProcess(raw) {
-    let s = raw.trim();
-    // ★ 如果模型给了多行/多段（多个草稿），按换行拆开，取第一段有中文的
-    const lines = s.split(/[\n\r]+/).map(function(l) { return l.trim(); }).filter(Boolean);
+    var s = raw.trim();
+    // 多行 → 取第一段有中文的
+    var lines = s.split(/[\n\r]+/).map(function(l) { return l.trim(); }).filter(Boolean);
     if (lines.length > 1) {
       s = '';
       for (var i = 0; i < lines.length; i++) {
@@ -212,54 +211,115 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
       }
       if (!s) s = lines[0];
     }
-    // ★ 去掉英文前缀：Draft 1 (Food): / Option A: / Version 1: 等
-    s = s.replace(/^(draft|option|version|choice|message)\s*\d*\s*(\([^)]*\))?\s*[:\uff1a\-\*]\s*/i, '');
-    // ★ 去掉编号前缀：1. / 1) / (1) / - / * 等
+    // 去英文前缀 Draft 1 (Food): 等
+    s = s.replace(/^(draft|option|version|choice|message|note)\s*\d*\s*(\([^)]*\))?\s*[:\uff1a\-\*]\s*/i, '');
+    // 去编号 1. / 1) / - / * 等
     s = s.replace(/^[\(\uff08]?\d+[\)\uff09.\uff0e]?\s*/, '');
     s = s.replace(/^[-\*\u2022\u25cf]\s*/, '');
-    // 去掉中文系统前缀（"消息："/"回复："等）
-    s = s.replace(/^(消息|回复|内容|正文|发送|我说|我发|我的消息|草稿)\s*\d*\s*[\uff1a:]\s*/, '');
-    // 去掉首尾引号/空白/星号
+    // 去中文前缀
+    s = s.replace(/^(消息|回复|内容|正文|发送|我说|我发|我的消息|草稿|备选)\s*\d*\s*[\uff1a:]\s*/, '');
+    // 去首尾引号/星号/空白
     s = s.replace(/^[\*"'\u201c\u201d\u2018\u2019\u300c\u300e\s]+|[\*"'\u201c\u201d\u2018\u2019\u300d\u300f\s]+$/g, '');
-    // 合并多余空白
-    s = s.replace(/\s{2,}/g, ' ').trim();
+    // 合并空白
+    s = s.replace(/[\n\r]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
     return s.slice(0, 200);
   }
 
-
+  // ─── 质量检测（宽松版：只拦截明确的垃圾） ───
   function isBadOutput(t) {
-    if (!t || t.replace(/\s/g, '').length < 2) return true;
-    // 无中文 → 指令泄漏或英文垃圾
+    if (!t || t.replace(/\s/g, '').length < 4) return true;
+    // 无中文
     if (!/[\u4e00-\u9fff]/.test(t)) return true;
-    // 包含英文结构性前缀残留 → 清洗没干净
+    // 英文前缀残留
     if (/^(draft|option|version)/i.test(t.trim())) return true;
-    // ★ 以逗号、顿号等非终止标点结尾 → 明显没说完
-    if (/[，、：；—…·,;:\-]$/.test(t.trim())) return true;
-    // ★ 核心检测：完整的中文聊天消息通常以这些方式结尾：
-    //   - 标点：。！？~ 等
-    //   - 语气词/常见结尾字：了/吧/啊/呢/吗/呀/哦/嘛/哈/的/噢/嗯/啦/喔/耶/诶/咯
-    //   - 颜文字/表情：哈哈/嘿嘿/233 等（已被"哈/嘿"覆盖）
-    //   如果都不满足 → 大概率是半截话（如"看到货架""翻到一张"）
-    var s = t.trim();
-    var terminalPunct = /[。！？!?~～)）」』"'》\u3002\uff01\uff1f]$/.test(s);
-    var naturalEnding = /[了吧啊呢吗呀哦嘛哈嗯噢啦喔耶诶咯捏滴]$/.test(s);
-    if (!terminalPunct && !naturalEnding) return true;
+    // 以逗号、省略号等明确的"未完待续"标点结尾
+    if (/[\uff0c\u3001\uff1a\uff1b,;:]$/.test(t.trim())) return true;
     return false;
   }
 
-  let text = '';
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // ─── 半句检测（用于触发补全而非直接拒绝） ───
+  function looksIncomplete(t) {
+    var s = t.trim();
+    // ★ 先排除：如果以语气词/标点自然结尾，不可能是半截话
+    if (/[了吧啊呢吗呀哦嘛哈嗯噢啦喔耶诶咯捏滴。！？!?~～)）」』]$/.test(s)) return false;
+    // 以"看到""翻到""听到""发现""想到"等动词结尾 → 缺宾语
+    if (/[\u770b\u542c\u7ffb\u53d1\u60f3\u627e\u5230]$/.test(s)) return true;
+    // 以"一个""一张""一种""一些""那个"等量词短语结尾
+    if (/[\u4e00\u90a3\u8fd9][\u4e2a\u5f20\u79cd\u4e9b\u53ea\u5757\u676f\u7247]$/.test(s)) return true;
+    // 以"的""在"结尾且较短
+    if (/[\u7684\u5728]$/.test(s) && s.length < 20) return true;
+    // ★ 感知动词 + 1~3字短名词结尾（如"看到货架""看到路边""翻到照片"）
+    if (/(看到|听到|翻到|碰到|遇到|发现|注意到|路过|经过).{1,3}$/.test(s)) return true;
+    return false;
+  }
+
+  // ─── 补全半句话：把半截话喂回模型让它说完 ───
+  async function repairIncomplete(halfText) {
     try {
-      const raw     = await callAI();
-      const cleaned = postProcess(raw);
-      if (!isBadOutput(cleaned)) { text = cleaned; break; }
-      console.warn('[proactive] attempt ' + (attempt + 1) + ' bad: ' + raw.slice(0, 80));
+      var raw = await callAI([
+        { role: 'system', content: systemPrompt },
+        { role: 'assistant', content: halfText },
+        { role: 'user', content: '你这句话没说完，请把这条消息说完整。直接输出完整的那条消息，不要加其他内容。' }
+      ]);
+      var cleaned = postProcess(raw);
+      // 补全结果仍然要过基础检查
+      if (cleaned && cleaned.replace(/\s/g, '').length >= 4 && /[\u4e00-\u9fff]/.test(cleaned)) {
+        return cleaned;
+      }
+    } catch (_) {}
+    return '';
+  }
+
+  // ─── 主流程：生成 → 检测 → 补全 → 兜底 ───
+  var candidates = [];
+  var mainMessages = [
+    { role: 'system', content: systemPrompt }
+  ].concat(historyMessages).concat([
+    { role: 'user', content: userPrompt }
+  ]);
+
+  for (var attempt = 0; attempt < 3; attempt++) {
+    try {
+      var raw = await callAI(mainMessages);
+      var cleaned = postProcess(raw);
+      console.log('[proactive] attempt ' + (attempt + 1) + ': "' + cleaned.slice(0, 60) + '"');
+
+      // 明确的垃圾 → 跳过
+      if (isBadOutput(cleaned)) {
+        console.warn('[proactive] attempt ' + (attempt + 1) + ' rejected (bad): ' + raw.slice(0, 80));
+        continue;
+      }
+
+      // 看起来不完整 → 尝试补全
+      if (looksIncomplete(cleaned)) {
+        console.log('[proactive] attempt ' + (attempt + 1) + ' incomplete, repairing...');
+        var repaired = await repairIncomplete(cleaned);
+        if (repaired && !isBadOutput(repaired)) {
+          console.log('[proactive] repaired: "' + repaired.slice(0, 60) + '"');
+          return repaired;
+        }
+        // 补全失败，存为候选
+        candidates.push(cleaned);
+        continue;
+      }
+
+      // 通过全部检查 → 直接返回
+      return cleaned;
     } catch (e) {
+      console.error('[proactive] attempt ' + (attempt + 1) + ' error:', e.message);
       if (attempt === 2) throw e;
     }
   }
 
-  return text;
+  // ★ 兜底：如果有候选（半截话），取最长的那条而不是返回空
+  // 因为半截话虽然不完美，但总比完全不推送好
+  if (candidates.length > 0) {
+    candidates.sort(function(a, b) { return b.length - a.length; });
+    console.log('[proactive] fallback to best candidate: "' + candidates[0].slice(0, 60) + '"');
+    return candidates[0];
+  }
+
+  return '';
 }
 
 
