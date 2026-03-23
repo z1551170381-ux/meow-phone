@@ -190,6 +190,45 @@ function looksIncompleteMessage(text) {
   return false;
 }
 
+function fallbackComposeMessage(npc, ctx) {
+  function short(v, n) {
+    return String(v || '').replace(/\s+/g, ' ').trim().slice(0, n || 24);
+  }
+
+  const name = short(npc && npc.npc_name, 12);
+  const location = short(ctx && ctx.location, 20);
+  const scene = short(ctx && ctx.scene, 24);
+  const npcState = short(ctx && ctx.npcState, 24);
+  const memory = short(ctx && ctx.memory, 30);
+  const summary = short(ctx && ctx.summary, 30);
+
+  if (location) {
+    return `刚路过${location}，忽然想和你说句话。`;
+  }
+
+  if (scene) {
+    return `刚在${scene}待了一会儿，就想起你了。`;
+  }
+
+  if (memory) {
+    return `刚想到${memory}，就顺手来找你了。`;
+  }
+
+  if (npcState) {
+    return `${npcState}的时候，忽然很想和你说句话。`;
+  }
+
+  if (summary) {
+    return `刚想到我们前阵子聊的那些事，就来找你了。`;
+  }
+
+  if (name) {
+    return `刚空下来一点，就想来和你说句话。`;
+  }
+
+  return `刚空下来一点，就想来找你说句话。`;
+}
+
 // ========== AI ==========
 async function generateMessage(npc, kind, apiCfg, ctx) {
   const { base_url, api_key, model } = apiCfg;
@@ -244,6 +283,21 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     '不要写成半句。'
   ].join('\n');
 
+  function sanitizeOutput(raw) {
+    let text = cleanText(raw || '', 120);
+
+    if (!text) return '';
+
+    text = text
+      .replace(/^(["'“”‘’「『【]+)|(["'“”‘’」』】]+)$/g, '')
+      .replace(/^(阿文|对方|角色|NPC)\s*[:：]\s*/i, '')
+      .replace(/^(在忙吗|你在干嘛|你在干什么|刚忙完|突然想起你|顺便问你)[，。！？、\s]*/i, '')
+      .trim()
+      .slice(0, 120);
+
+    return text;
+  }
+
   async function runOnce(extraUserHint) {
     const resp = await fetch(`${base_url}/chat/completions`, {
       method: 'POST',
@@ -270,20 +324,30 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     }
 
     const data = await resp.json();
-    return cleanText(data?.choices?.[0]?.message?.content || '', 120)
-      .replace(/^(["'“”‘’「『【]+)|(["'“”‘’」』】]+)$/g, '')
-      .replace(/^(在忙吗|你在干嘛|你在干什么|刚忙完|突然想起你|顺便问你)[，。！？、\s]*/i, '')
-      .trim()
-      .slice(0, 120);
+    return sanitizeOutput(data?.choices?.[0]?.message?.content || '');
   }
 
-  let text = await runOnce('');
+  let text = '';
 
-  if (looksIncompleteMessage(text)) {
-    text = await runOnce('重写一次：必须是一句完整短句，不能残句，不能逗号结尾，读起来要像正常聊天通知。');
+  try {
+    text = await runOnce('');
+  } catch (err) {
+    text = '';
   }
 
-  return text;
+  if (!text || looksIncompleteMessage(text)) {
+    try {
+      text = await runOnce('重写一次：必须是一句完整短句，不能残句，不能逗号结尾，读起来要像正常聊天通知。');
+    } catch (err) {
+      text = '';
+    }
+  }
+
+  if (!text || looksIncompleteMessage(text)) {
+    text = fallbackComposeMessage(npc, ctx);
+  }
+
+  return sanitizeOutput(text) || fallbackComposeMessage(npc, ctx);
 }
 
 // ========== Web Push utils ==========
