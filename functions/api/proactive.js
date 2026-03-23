@@ -1,54 +1,45 @@
 // functions/api/proactive.js  —  Cloudflare Pages Functions
-// 用法：/api/proactive?secret=你的CRON_SECRET&force=1
-//
-// ★ v3 修复：
-//   - RFC 8291 aes128gcm 加密两处 bug：
-//       1) PRK 推导的 HKDF salt 必须是 authSecret，不是随机 salt
-//       2) record size 字节序：4096 大端序 = [0x00, 0x00, 0x10, 0x00]（上版写反了）
-//   - AI 上下文：对话历史作为 messages 多轮注入；从 meow_chat_history 读真实记录
+// /api/proactive?secret=CRON_SECRET&force=1
 
 // ─────────── 时间工具 ───────────
 function isDailyWindow(now)  { const h = new Date(now).getHours(); return h >= 10 && h <= 22; }
 function isRandomWindow(now) { const h = new Date(now).getHours(); return h >= 8  && h <= 23; }
-
 function todayKey(now) {
   const d = new Date(now);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
-
 function normalizeTimeLabel(now) {
   const h = new Date(now).getHours();
-  if (h < 5)  return '深夜';
-  if (h < 8)  return '清晨';
-  if (h < 11) return '上午';
-  if (h < 14) return '中午';
-  if (h < 18) return '下午';
-  if (h < 21) return '晚上';
-  return '夜里';
+  if (h < 5)  return '\u6df1\u591c';
+  if (h < 8)  return '\u6e05\u6668';
+  if (h < 11) return '\u4e0a\u5348';
+  if (h < 14) return '\u4e2d\u5348';
+  if (h < 18) return '\u4e0b\u5348';
+  if (h < 21) return '\u665a\u4e0a';
+  return '\u591c\u91cc';
 }
 
-// ─────────── 文本工具 ───────────
-function cleanText(v, max = 400) {
+function cleanText(v, max) {
   return String(v || '')
     .replace(/```[\s\S]*?```/g, ' ')
     .replace(/[\r\n]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, max);
+    .slice(0, max || 400);
 }
 
-function pickFirst(obj, keys, max = 400) {
+function pickFirst(obj, keys, max) {
   for (const k of keys) {
     if (obj && obj[k] != null && String(obj[k]).trim())
-      return cleanText(obj[k], max);
+      return cleanText(obj[k], max || 400);
   }
   return '';
 }
 
 // ─────────── NPC 过滤 ───────────
 function looksLikeReservedNpc(npc) {
-  const rawId   = String(npc?.npc_id   || '').trim().toLowerCase();
-  const rawName = String(npc?.npc_name || '').trim().toLowerCase();
+  const rawId   = String(npc && npc.npc_id   || '').trim().toLowerCase();
+  const rawName = String(npc && npc.npc_name || '').trim().toLowerCase();
   if (!rawId || !rawName) return true;
   const reserved = new Set([
     'player','chatdetail','chat','contacts','discover','me','settings',
@@ -58,15 +49,14 @@ function looksLikeReservedNpc(npc) {
   if (reserved.has(rawId) || reserved.has(rawName)) return true;
   if (/^(chat|app|page|tab|view|screen)[-_:/]?[a-z0-9]*$/i.test(rawId))   return true;
   if (/^(chat|app|page|tab|view|screen)[-_:/]?[a-z0-9]*$/i.test(rawName)) return true;
-  if (/开发中|construction|coming soon/i.test(String(npc?.npc_name || ''))) return true;
   return false;
 }
 
 // ─────────── Supabase REST ───────────
-async function sbSelect(env, table, filters, extra = '') {
+async function sbSelect(env, table, filters, extra) {
   let url = `${env.SUPABASE_URL}/rest/v1/${table}?select=*`;
-  for (const [k, v] of Object.entries(filters || {}))
-    url += `&${k}=eq.${encodeURIComponent(v)}`;
+  for (const k of Object.keys(filters || {}))
+    url += `&${k}=eq.${encodeURIComponent(filters[k])}`;
   if (extra) url += extra;
   const r = await fetch(url, {
     headers: { apikey: env.SUPABASE_SERVICE_KEY, Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}` }
@@ -78,7 +68,8 @@ async function sbSelect(env, table, filters, extra = '') {
 async function sbInsert(env, table, data) {
   const r = await fetch(`${env.SUPABASE_URL}/rest/v1/${table}`, {
     method: 'POST',
-    headers: { 'Content-Type':'application/json', apikey:env.SUPABASE_SERVICE_KEY, Authorization:`Bearer ${env.SUPABASE_SERVICE_KEY}`, Prefer:'return=minimal' },
+    headers: { 'Content-Type':'application/json', apikey:env.SUPABASE_SERVICE_KEY,
+               Authorization:`Bearer ${env.SUPABASE_SERVICE_KEY}`, Prefer:'return=minimal' },
     body: JSON.stringify(data)
   });
   if (!r.ok) throw new Error(`sbInsert ${table} ${r.status}: ${(await r.text()).slice(0,200)}`);
@@ -87,7 +78,8 @@ async function sbInsert(env, table, data) {
 async function sbUpsert(env, table, data, onConflict) {
   const r = await fetch(`${env.SUPABASE_URL}/rest/v1/${table}?on_conflict=${encodeURIComponent(onConflict)}`, {
     method: 'POST',
-    headers: { 'Content-Type':'application/json', apikey:env.SUPABASE_SERVICE_KEY, Authorization:`Bearer ${env.SUPABASE_SERVICE_KEY}`, Prefer:'resolution=merge-duplicates' },
+    headers: { 'Content-Type':'application/json', apikey:env.SUPABASE_SERVICE_KEY,
+               Authorization:`Bearer ${env.SUPABASE_SERVICE_KEY}`, Prefer:'resolution=merge-duplicates' },
     body: JSON.stringify(data)
   });
   if (!r.ok) throw new Error(`sbUpsert ${table} ${r.status}: ${(await r.text()).slice(0,200)}`);
@@ -95,7 +87,7 @@ async function sbUpsert(env, table, data, onConflict) {
 
 async function sbDelete(env, table, filters) {
   let url = `${env.SUPABASE_URL}/rest/v1/${table}?`;
-  for (const [k, v] of Object.entries(filters || {})) url += `${k}=eq.${encodeURIComponent(v)}&`;
+  for (const k of Object.keys(filters || {})) url += `${k}=eq.${encodeURIComponent(filters[k])}&`;
   const r = await fetch(url, {
     method: 'DELETE',
     headers: { apikey:env.SUPABASE_SERVICE_KEY, Authorization:`Bearer ${env.SUPABASE_SERVICE_KEY}` }
@@ -103,18 +95,17 @@ async function sbDelete(env, table, filters) {
   if (!r.ok) throw new Error(`sbDelete ${table} ${r.status}: ${(await r.text()).slice(0,200)}`);
 }
 
-// ─────────── 真实对话历史 ───────────
-async function fetchRecentChatHistory(env, uid, npcId, limit = 14) {
+async function fetchRecentChatHistory(env, uid, npcId, limit) {
   try {
-    const rows = await sbSelect(env, 'meow_chat_history', { uid, npc_id: npcId }, `&order=ts.desc&limit=${limit}`);
-    if (!Array.isArray(rows) || rows.length === 0) return [];
+    const rows = await sbSelect(env, 'meow_chat_history', { uid, npc_id: npcId },
+      `&order=ts.desc&limit=${limit || 14}`);
+    if (!Array.isArray(rows) || !rows.length) return [];
     return rows.reverse()
       .map(r => ({ role: String(r.role || 'npc'), text: cleanText(r.text || r.content || '', 120) }))
       .filter(r => r.text);
   } catch (_) { return []; }
 }
 
-// ─────────── 上下文构建 ───────────
 function buildMessageContext(npc, chatHistory, now) {
   return {
     timeLabel:   normalizeTimeLabel(now),
@@ -136,92 +127,112 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
   const { base_url, api_key, model } = apiCfg;
   if (!base_url || !api_key || !model) throw new Error('用户未配置 API');
 
-  // ── 上下文（纯信息，不夹规则）──
+  // 关系亲密度 → 自然语气描述
+  const bond = npc.bond || '普通';
+  const bondVibe =
+    bond === '亲近' ? '你们关系很好，像老朋友，说话随意，偶尔会吐槽或撒娇，不会客气。' :
+    bond === '暧昧' ? '你们之间有点说不清楚，有时候会特意找借口聊天，说话带一点隐隐的在意，但不会太明显。' :
+    bond === '疏远' ? '你们不算很熟，偶尔联系，不会太热络，语气比较平。' :
+                     '你们是普通朋友，正常聊天，不生硬也不过热。';
+
+  // 上下文（只写信息，不写指令）
   const ctxLines = [
     `现在是${ctx.timeLabel}。`,
-    ctx.npcState    && `你当前的状态：${ctx.npcState}`,
-    ctx.scene       && `当前场景：${ctx.scene}`,
+    ctx.npcState    && `你当前：${ctx.npcState}`,
+    ctx.scene       && `场景：${ctx.scene}`,
     ctx.location    && `地点：${ctx.location}`,
-    ctx.userState   && `对方状态：${ctx.userState}`,
-    ctx.memory      && `最近聊过：${ctx.memory}`,
-    ctx.summary     && `聊天摘要：${ctx.summary}`,
+    ctx.userState   && `对方现在：${ctx.userState}`,
+    ctx.memory      && `你们最近聊过：${ctx.memory}`,
+    ctx.summary     && `聊天记录要点：${ctx.summary}`,
     ctx.world       && `世界背景：${ctx.world}`,
-    ctx.userProfile && `对方设定：${ctx.userProfile}`,
-    ctx.relation    && `你们的关系：${ctx.relation}`,
+    ctx.userProfile && `关于对方：${ctx.userProfile}`,
+    ctx.relation    && `关系备注：${ctx.relation}`,
   ].filter(Boolean).join('\n');
 
-  const bond = npc.bond || '普通';
-  const bondDesc =
-    bond === '亲近' ? '你们关系熟，说话随意自然，像朋友发消息。' :
-    bond === '暧昧' ? '你们之间有些暧昧，说话带一点在意，但不刻意。' :
-    bond === '疏远' ? '你们不算特别熟，语气平和，不过热。' :
-                     '你们是普通朋友，正常说话。';
-
-  // ── system：纯角色身份 + 上下文 ──
+  // system：沉浸式角色身份，给当下处境，让角色有动机主动说话
   const systemPrompt = [
-    `你是「${npc.npc_name}」。`,
-    npc.npc_profile       && cleanText(npc.npc_profile, 800),
+    `你正在扮演「${npc.npc_name}」，用第一人称生活着，不要跳出角色。`,
+    npc.npc_profile && cleanText(npc.npc_profile, 900),
     npc.online_chat_prompt && cleanText(npc.online_chat_prompt, 400),
-    bondDesc,
-    ctxLines,
-  ].filter(Boolean).join('\n\n');
+    '',
+    `【你和对方的关系】\n${bondVibe}`,
+    ctxLines ? `\n【此刻的状态和背景】\n${ctxLines}` : '',
+  ].filter(Boolean).join('\n');
 
-  // ── 对话历史 ──
-  const historyMessages = (ctx.chatHistory || []).map(turn => ({
-    role: (turn.role === 'me' || turn.role === 'user') ? 'user' : 'assistant',
-    content: turn.text
+  // 对话历史
+  const historyMessages = (ctx.chatHistory || []).map(t => ({
+    role: (t.role === 'me' || t.role === 'user') ? 'user' : 'assistant',
+    content: t.text
   }));
 
-  // ── user prompt：要求输出 JSON，强制完整句子、避免截断 ──
-  const nudge = kind === 'daily'
-    ? '今天某个时刻你想起对方了，想发条消息。'
-    : '某个瞬间你想跟对方说句话。';
+  // user prompt：正向触发，JSON 输出防截断
+  // 给角色一个"此刻触发点"——不是凭空发，是有原因的
+  const trigger = kind === 'daily'
+    ? '你今天在忙自己的事，忽然想起对方——可能是看到了什么、经历了什么、或者这个时段让你想聊聊。找个符合你当下状态的真实理由，自然地发条消息过去。'
+    : '你某个瞬间想到了对方，顺手发条消息，就像正常人刷手机时忽然想说句话一样。';
 
   const userPrompt =
-    `${nudge}` +
-    `\n\n以 JSON 格式回复，只输出这一行，不加任何其他内容：` +
-    `\n{"msg": "你想发的那条消息"}` +
-    `\n\n消息要像真人发的，口语自然，一句或两句，说完整。`;
+    trigger + '\n\n' +
+    '请只输出下面这一行 JSON，不要加任何其他文字：\n' +
+    '{"msg": "你要发给对方的消息"}\n\n' +
+    'msg 里写你真正想发的那条消息，要口语、自然、完整，符合你的性格和你们的关系。';
 
   async function callAI() {
     const resp = await fetch(`${base_url}/chat/completions`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${api_key}` },
+      headers: { 'Content-Type':'application/json', Authorization:`Bearer ${api_key}` },
       body: JSON.stringify({
         model,
         messages: [
           { role: 'system', content: systemPrompt },
           ...historyMessages,
-          { role: 'user',   content: userPrompt },
+          { role: 'user',   content: userPrompt }
         ],
         temperature: 0.9,
         presence_penalty: 0.3,
         frequency_penalty: 0.3,
-        max_tokens: 120,
+        // ★ 关键：给足够 token 让 JSON 完整闭合
+        // JSON 壳约 15 token + 消息本体约 60-80 token + 余量 = 200
+        max_tokens: 200
       })
     });
     if (!resp.ok) throw new Error(`AI ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
     const data = await resp.json();
-    return (data?.choices?.[0]?.message?.content || '').trim();
+    return String(data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '').trim();
   }
 
-  // ── 解析 JSON，失败时直接用原文 ──
+  // 解析 JSON → 取 msg；三级降级保证一定能拿到内容
   function extractMsg(raw) {
-    // 优先解析 JSON
+    // 1. 标准 JSON.parse
     try {
-      const m = raw.match(/\{[\s\S]*?"msg"\s*:\s*"([\s\S]*?)"\s*\}/);
-      if (m) return m[1].replace(/\\n/g, ' ').trim();
+      const obj = JSON.parse(raw);
+      if (obj && obj.msg) return String(obj.msg).trim();
     } catch (_) {}
-    // 降级：去掉可能的 JSON 壳，取纯文本
+
+    // 2. 去掉可能的 markdown 代码块再试
+    try {
+      const stripped = raw.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+      const obj = JSON.parse(stripped);
+      if (obj && obj.msg) return String(obj.msg).trim();
+    } catch (_) {}
+
+    // 3. 正则从不完整 JSON 里抠 msg 值
+    const m = raw.match(/"msg"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (m) {
+      try { return JSON.parse('"' + m[1] + '"').trim(); } catch (_) { return m[1].trim(); }
+    }
+
+    // 4. 最终降级：去掉 JSON 壳，把第一段文本作为消息
     return raw
-      .replace(/^\{.*?"msg"\s*:\s*"?|"?\s*\}$/g, '')
-      .replace(/^["'""''「『\s]+|["'""''」』\s]+$/g, '')
+      .replace(/```[\s\S]*?```/g, '')
+      .replace(/\{[^}]*"msg"\s*:\s*/g, '')
+      .replace(/^["'\u201c\u201d\u2018\u2019\s]+|["'\u201c\u201d\u2018\u2019\s]+$/g, '')
       .split(/\n{2,}/)[0]
       .trim()
-      .slice(0, 120);
+      .slice(0, 150);
   }
 
-  // ── 只拦截空输出和纯英文指令泄漏 ──
+  // 只拦截真正的废输出：空值 或 纯英文无中文（指令泄漏）
   function isBadOutput(t) {
     if (!t || t.replace(/\s/g, '').length < 2) return true;
     if (/^[\x00-\x7F\s]+$/.test(t) && !/[\u4e00-\u9fff]/.test(t)) return true;
@@ -231,10 +242,10 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
   let text = '';
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const raw  = await callAI();
-      const msg  = extractMsg(raw);
-      if (!isBadOutput(msg)) { text = msg; break; }
-      console.warn(`[proactive] attempt ${attempt + 1} bad: "${raw.slice(0, 60)}"`);
+      const raw = await callAI();
+      const msg = extractMsg(raw);
+      if (!isBadOutput(msg)) { text = msg.slice(0, 150); break; }
+      console.warn('[proactive] attempt ' + (attempt+1) + ' bad output: ' + raw.slice(0,80));
     } catch (e) {
       if (attempt === 2) throw e;
     }
@@ -243,133 +254,110 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
   return text;
 }
 
-
 // ─────────── Web Push 工具 ───────────
 function b64u(buf) {
-  return btoa(String.fromCharCode(...new Uint8Array(buf)))
-    .replace(/\+/g,'-').replace(/\//g,'_').replace(/=/g,'');
+  return btoa(String.fromCharCode.apply(null, new Uint8Array(buf)))
+    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
 }
 function b64uDec(s) {
-  return Uint8Array.from(atob(String(s).replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0));
+  const str = atob(String(s).replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(str.length);
+  for (let i = 0; i < str.length; i++) out[i] = str.charCodeAt(i);
+  return out;
 }
-function concatU8(...arrays) {
-  const out = new Uint8Array(arrays.reduce((s,a)=>s+a.length, 0));
-  let off = 0; for (const a of arrays) { out.set(a, off); off += a.length; }
+function concatU8() {
+  const arrays = Array.prototype.slice.call(arguments);
+  let total = 0;
+  for (let i = 0; i < arrays.length; i++) total += arrays[i].length;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (let i = 0; i < arrays.length; i++) { out.set(arrays[i], off); off += arrays[i].length; }
   return out;
 }
 
 async function makeVapidJWT(env, audience) {
-  const now = Math.floor(Date.now() / 1000);
-  const header = b64u(new TextEncoder().encode(JSON.stringify({ alg:'ES256', typ:'JWT' })));
-  const claims = b64u(new TextEncoder().encode(JSON.stringify({ aud:audience, exp:now+43200, sub:`mailto:${env.VAPID_EMAIL}` })));
-  const input  = `${header}.${claims}`;
-  const d   = b64uDec(env.VAPID_PRIVATE_KEY);
-  const pub = b64uDec(env.VAPID_PUBLIC_KEY);
-  if (d.length !== 32)                      throw new Error(`Bad VAPID private key length: ${d.length}`);
-  if (pub.length !== 65 || pub[0] !== 0x04) throw new Error(`Bad VAPID public key format`);
+  const now    = Math.floor(Date.now() / 1000);
+  const enc    = new TextEncoder();
+  const header = b64u(enc.encode(JSON.stringify({ alg:'ES256', typ:'JWT' })));
+  const claims = b64u(enc.encode(JSON.stringify({ aud:audience, exp:now+43200, sub:`mailto:${env.VAPID_EMAIL}` })));
+  const input  = header + '.' + claims;
+  const d      = b64uDec(env.VAPID_PRIVATE_KEY);
+  const pub    = b64uDec(env.VAPID_PUBLIC_KEY);
+  if (d.length !== 32)                      throw new Error('Bad VAPID private key length: ' + d.length);
+  if (pub.length !== 65 || pub[0] !== 0x04) throw new Error('Bad VAPID public key format');
   const key = await crypto.subtle.importKey(
-    'jwk', { kty:'EC', crv:'P-256', d:b64u(d), x:b64u(pub.slice(1,33)), y:b64u(pub.slice(33,65)), ext:true },
+    'jwk',
+    { kty:'EC', crv:'P-256', d:b64u(d), x:b64u(pub.slice(1,33)), y:b64u(pub.slice(33,65)), ext:true },
     { name:'ECDSA', namedCurve:'P-256' }, false, ['sign']
   );
-  const sig = await crypto.subtle.sign({ name:'ECDSA', hash:'SHA-256' }, key, new TextEncoder().encode(input));
-  return `${input}.${b64u(sig)}`;
+  const sig = await crypto.subtle.sign({ name:'ECDSA', hash:'SHA-256' }, key, enc.encode(input));
+  return input + '.' + b64u(sig);
 }
 
-// ★ RFC 8291 aes128gcm 正确实现
-// 修复两处 bug（相较于 v2）：
-//   1) PRK 的 HKDF salt = authSecret（不是随机 salt）
-//   2) record size = 4096 = [0x00, 0x00, 0x10, 0x00]（大端序，v2 写成了 [0x00,0x10,0x00,0x00]）
+// RFC 8291 aes128gcm 加密（Apple Web Push 强制要求）
 async function encryptPayload(plaintextStr, p256dhB64u, authB64u) {
   const enc        = new TextEncoder();
-  const clientPub  = b64uDec(p256dhB64u); // 65 bytes uncompressed P-256 public key
-  const authSecret = b64uDec(authB64u);   // 16 bytes auth secret
+  const clientPub  = b64uDec(p256dhB64u);
+  const authSecret = b64uDec(authB64u);
 
-  // 1. 生成服务端临时 ECDH 密钥对
-  const serverKP = await crypto.subtle.generateKey({ name:'ECDH', namedCurve:'P-256' }, true, ['deriveBits']);
-
-  // 2. 导入客户端公钥
-  const clientKey = await crypto.subtle.importKey('raw', clientPub, { name:'ECDH', namedCurve:'P-256' }, false, []);
-
-  // 3. ECDH 共享密钥
+  const serverKP   = await crypto.subtle.generateKey({ name:'ECDH', namedCurve:'P-256' }, true, ['deriveBits']);
+  const clientKey  = await crypto.subtle.importKey('raw', clientPub, { name:'ECDH', namedCurve:'P-256' }, false, []);
   const sharedBits = new Uint8Array(await crypto.subtle.deriveBits({ name:'ECDH', public:clientKey }, serverKP.privateKey, 256));
+  const serverPub  = new Uint8Array(await crypto.subtle.exportKey('raw', serverKP.publicKey));
+  const salt       = crypto.getRandomValues(new Uint8Array(16));
 
-  // 4. 导出服务端公钥（raw, 65 bytes）
-  const serverPubRaw = new Uint8Array(await crypto.subtle.exportKey('raw', serverKP.publicKey));
-
-  // 5. 随机 16 字节 salt（用于 aes128gcm record header 和 CEK/Nonce 的 HKDF）
-  const salt = crypto.getRandomValues(new Uint8Array(16));
-
-  // ── HKDF 辅助（注意：salt 参数按调用方传入，不共用） ──
-  async function hkdf(ikmBytes, saltBytes, infoBytes, lengthBytes) {
-    const k = await crypto.subtle.importKey('raw', ikmBytes, { name:'HKDF' }, false, ['deriveBits']);
+  async function hkdf(ikm, saltBytes, info, len) {
+    const k = await crypto.subtle.importKey('raw', ikm, { name:'HKDF' }, false, ['deriveBits']);
     return new Uint8Array(await crypto.subtle.deriveBits(
-      { name:'HKDF', hash:'SHA-256', salt:saltBytes, info:infoBytes },
-      k, lengthBytes * 8
+      { name:'HKDF', hash:'SHA-256', salt:saltBytes, info: info }, k, len * 8
     ));
   }
 
-  // 6. ★ PRK_key: HKDF(salt=authSecret, IKM=sharedSecret, info="WebPush: info\0"||clientPub||serverPub)
-  const prk = await hkdf(
-    sharedBits,
-    authSecret,  // ← salt = authSecret（v2 的 bug：用了随机 salt）
-    concatU8(enc.encode('WebPush: info\x00'), clientPub, serverPubRaw),
-    32
-  );
-
-  // 7. CEK: HKDF(salt=randomSalt, IKM=prk, info="Content-Encoding: aes128gcm\0", 16 bytes)
-  const cek = await hkdf(prk, salt, enc.encode('Content-Encoding: aes128gcm\x00'), 16);
-
-  // 8. Nonce: HKDF(salt=randomSalt, IKM=prk, info="Content-Encoding: nonce\0", 12 bytes)
+  const prk   = await hkdf(sharedBits, authSecret,
+    concatU8(enc.encode('WebPush: info\x00'), clientPub, serverPub), 32);
+  const cek   = await hkdf(prk, salt, enc.encode('Content-Encoding: aes128gcm\x00'), 16);
   const nonce = await hkdf(prk, salt, enc.encode('Content-Encoding: nonce\x00'), 12);
 
-  // 9. AES-GCM 加密（plaintext + 0x02 padding delimiter）
-  const aesKey    = await crypto.subtle.importKey('raw', cek, { name:'AES-GCM' }, false, ['encrypt']);
-  const plainPad  = concatU8(enc.encode(plaintextStr), new Uint8Array([2]));
-  const ciphertext = new Uint8Array(await crypto.subtle.encrypt({ name:'AES-GCM', iv:nonce }, aesKey, plainPad));
+  const aesKey     = await crypto.subtle.importKey('raw', cek, { name:'AES-GCM' }, false, ['encrypt']);
+  const ciphertext = new Uint8Array(await crypto.subtle.encrypt(
+    { name:'AES-GCM', iv:nonce }, aesKey,
+    concatU8(enc.encode(plaintextStr), new Uint8Array([2]))
+  ));
 
-  // 10. 组装 RFC 8291 aes128gcm record：
-  //   salt(16) + record_size(4, big-endian=4096) + keyid_len(1) + keyid(serverPub,65) + ciphertext
-  // ★ 4096 大端序 = [0x00, 0x00, 0x10, 0x00]（v2 的 bug：写成了 [0x00,0x10,0x00,0x00] = 1048576）
   const rs = new Uint8Array(4);
-  new DataView(rs.buffer).setUint32(0, 4096, false); // big-endian
+  new DataView(rs.buffer).setUint32(0, 4096, false); // big-endian 4096
 
-  return concatU8(salt, rs, new Uint8Array([serverPubRaw.length]), serverPubRaw, ciphertext);
+  return concatU8(salt, rs, new Uint8Array([serverPub.length]), serverPub, ciphertext);
 }
 
 async function sendWebPush(device, npcName, npcId, text, env) {
   try {
     const url      = new URL(device.endpoint);
-    const audience = `${url.protocol}//${url.host}`;
+    const audience = url.protocol + '//' + url.host;
     const jwt      = await makeVapidJWT(env, audience);
-
-    const payloadJson = JSON.stringify({ type:'chat_message', npcId, npcName, title:npcName, body:text, text, ts:Date.now() });
+    const payload  = JSON.stringify({ type:'chat_message', npcId, npcName, title:npcName, body:text, text, ts:Date.now() });
 
     const headers = {
-      Authorization: `vapid t=${jwt},k=${env.VAPID_PUBLIC_KEY}`,
+      Authorization: 'vapid t=' + jwt + ',k=' + env.VAPID_PUBLIC_KEY,
       TTL: '86400',
-      Urgency: 'normal',
+      Urgency: 'normal'
     };
 
     let body;
     if (device.p256dh && device.auth) {
-      body = await encryptPayload(payloadJson, device.p256dh, device.auth);
+      body = await encryptPayload(payload, device.p256dh, device.auth);
       headers['Content-Type']     = 'application/octet-stream';
       headers['Content-Encoding'] = 'aes128gcm';
     } else {
-      // 无加密密钥时发空 body ping，触发 SW 主动 pull
       headers['Content-Length'] = '0';
     }
 
     const resp = await fetch(device.endpoint, { method:'POST', headers, body: body || undefined });
-
     if (resp.status === 410 || resp.status === 404) return { result:'expired', status:resp.status, text:'' };
     if (resp.ok || resp.status === 201)             return { result:'ok',      status:resp.status, text:'' };
-
-    const errText = await resp.text();
-    console.warn('[push] status:', resp.status, errText.slice(0,200));
-    return { result:'fail', status:resp.status, text:errText.slice(0,200) };
+    const err = await resp.text();
+    return { result:'fail', status:resp.status, text:err.slice(0,200) };
   } catch (err) {
-    console.warn('[push] error:', err.message);
     return { result:'fail', status:0, text:String(err.message || err) };
   }
 }
@@ -387,7 +375,7 @@ export async function onRequestGet(context) {
 
   try {
     const npcs = await sbSelect(env, 'meow_npc_push_config', { enable_push: true });
-    if (!npcs || npcs.length === 0) {
+    if (!npcs || !npcs.length) {
       return new Response(JSON.stringify({ ok:true, msg:'暂无角色配置' }), { headers:{'Content-Type':'application/json'} });
     }
 
@@ -401,8 +389,7 @@ export async function onRequestGet(context) {
 
       for (const npc of byUid[uid]) {
         const { npc_id } = npc;
-
-        if (looksLikeReservedNpc(npc)) { results.push({ npc_id, skipped:true, reason:'reserved-or-invalid-npc' }); continue; }
+        if (looksLikeReservedNpc(npc)) { results.push({ npc_id, skipped:true, reason:'reserved' }); continue; }
 
         const cdList = await sbSelect(env, 'meow_push_cooldown', { uid, npc_id });
         const cd = (cdList && cdList[0]) || {};
@@ -417,7 +404,7 @@ export async function onRequestGet(context) {
             if (!sentToday && !recentlyTried) kind = 'daily';
           }
           if (!kind && isRandomWindow(now)) {
-            if (now - Number(cd.last_random_push_at||0) > 2*60*60*1000 && Math.random() < 0.3) kind = 'random';
+            if (now - Number(cd.last_random_push_at || 0) > 2*60*60*1000 && Math.random() < 0.3) kind = 'random';
           }
         }
 
@@ -425,7 +412,7 @@ export async function onRequestGet(context) {
 
         await sbUpsert(env, 'meow_push_cooldown', {
           uid, npc_id,
-          last_daily_try_at:    kind==='daily'  ? now : (cd.last_daily_try_at||0),
+          last_daily_try_at:    kind === 'daily'  ? now : (cd.last_daily_try_at || 0),
           last_daily_push_date: cd.last_daily_push_date || '',
           last_random_push_at:  cd.last_random_push_at  || 0,
           updated_at: new Date().toISOString()
@@ -435,17 +422,19 @@ export async function onRequestGet(context) {
         try {
           const chatHistory = await fetchRecentChatHistory(env, uid, npc_id, 14);
           text = await generateMessage(npc, kind, apiCfg, buildMessageContext(npc, chatHistory, now));
-        } catch (aiErr) { results.push({ npc_id, error:aiErr.message }); continue; }
+        } catch (aiErr) { results.push({ npc_id, error: aiErr.message }); continue; }
 
-        if (!text) { results.push({ npc_id, error:'AI返回空' }); continue; }
+        if (!text) { results.push({ npc_id, error: 'AI返回空' }); continue; }
 
-        await sbInsert(env, 'meow_pending_messages', { uid, npc_id, npc_name:npc.npc_name, text, kind, ts:now, is_pulled:false });
+        await sbInsert(env, 'meow_pending_messages', {
+          uid, npc_id, npc_name: npc.npc_name, text, kind, ts: now, is_pulled: false
+        });
 
         await sbUpsert(env, 'meow_push_cooldown', {
           uid, npc_id,
-          last_daily_push_date: kind==='daily'  ? today : (cd.last_daily_push_date||''),
-          last_daily_try_at:    kind==='daily'  ? now   : (cd.last_daily_try_at   ||0),
-          last_random_push_at:  kind==='random' ? now   : (cd.last_random_push_at ||0),
+          last_daily_push_date: kind === 'daily'  ? today : (cd.last_daily_push_date || ''),
+          last_daily_try_at:    kind === 'daily'  ? now   : (cd.last_daily_try_at    || 0),
+          last_random_push_at:  kind === 'random' ? now   : (cd.last_random_push_at  || 0),
           updated_at: new Date().toISOString()
         }, 'uid,npc_id');
 
@@ -454,22 +443,26 @@ export async function onRequestGet(context) {
         const pushDebug = [];
 
         for (const dev of (devices || [])) {
-          const host    = (() => { try { return new URL(dev.endpoint).host; } catch { return 'bad-endpoint'; } })();
-          const pushRes = await sendWebPush(dev, npc.npc_name, npc_id, text, env);
-          pushDebug.push({ host, result:pushRes.result, status:pushRes.status, text:pushRes.text,
-            endpoint: String(dev.endpoint||'').slice(0,80), encrypted:!!(dev.p256dh && dev.auth) });
-          if (pushRes.result === 'expired') await sbDelete(env, 'meow_devices', { endpoint:dev.endpoint });
-          else if (pushRes.result === 'ok') pushed++;
+          const host = (function() { try { return new URL(dev.endpoint).host; } catch(_) { return 'bad-endpoint'; } })();
+          const res  = await sendWebPush(dev, npc.npc_name, npc_id, text, env);
+          pushDebug.push({ host, result:res.result, status:res.status, text:res.text,
+            endpoint: String(dev.endpoint || '').slice(0, 80), encrypted: !!(dev.p256dh && dev.auth) });
+          if (res.result === 'expired') await sbDelete(env, 'meow_devices', { endpoint: dev.endpoint });
+          else if (res.result === 'ok') pushed++;
         }
 
-        results.push({ npc_id, kind, pushed, preview:text.slice(0,20), pushDebug });
+        results.push({ npc_id, kind, pushed, preview: text.slice(0, 20), pushDebug });
       }
     }
 
-    return new Response(JSON.stringify({ ok:true, total:results.length, results }), { headers:{'Content-Type':'application/json'} });
+    return new Response(JSON.stringify({ ok:true, total:results.length, results }), {
+      headers: { 'Content-Type':'application/json' }
+    });
 
   } catch (err) {
     console.error('[proactive] fatal:', err);
-    return new Response(JSON.stringify({ ok:false, error:String(err.message||err) }), { status:500, headers:{'Content-Type':'application/json'} });
+    return new Response(JSON.stringify({ ok:false, error:String(err.message || err) }), {
+      status:500, headers:{'Content-Type':'application/json'}
+    });
   }
 }
