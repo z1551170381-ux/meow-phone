@@ -170,12 +170,11 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     : '你某个瞬间想到了对方，顺手发条消息，就像正常人刷手机时忽然想说句话一样。';
 
   const userPrompt = trigger + '\n\n'
-    + '【输出要求——必须严格遵守】\n'
-    + '1. 直接输出你要发的那条消息，不要加任何前缀、解释或引号。\n'
-    + '2. 消息必须是一句完整的话，有头有尾，能独立读懂。绝对不能在逗号处断开、不能只说半句留悬念。\n'
-    + '3. 错误示范："刚在便利店买冰美式，看到货架"（半句话，没说完）\n'
-    + '4. 正确示范："刚在便利店买冰美式，看到一个新口味想到你了，要不要帮你带一杯？"\n'
-    + '5. 消息应该简短自然（15-50字），但必须是语义完整的一整句。';
+    + '直接输出你要发的那一条消息本身，不要加前缀、编号、标题、引号、解释，也不要给多个版本，就只给我那条消息。'
+    + '这条消息必须是语义完整的一整句话，有头有尾，别在逗号处断掉只说半截。'
+    + '比如不要写"刚在便利店买冰美式，看到货架"这种没说完的，'
+    + '要写成"刚在便利店买冰美式，看到个新口味想到你了，要不要帮你带一杯？"这样完整的。'
+    + '控制在15到50个字左右就好。';
 
   async function callAI() {
     const resp = await fetch(base_url + '/chat/completions', {
@@ -204,28 +203,47 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
 
   function postProcess(raw) {
     let s = raw.trim();
-    // 去掉明确的系统前缀（"消息："/"回复："等）
-    s = s.replace(/^(消息|回复|内容|正文|发送|我说|我发|我的消息)\s*[\uff1a:]\s*/, '');
-    // 去掉首尾引号/空白
-    s = s.replace(/^["'\u201c\u201d\u2018\u2019\u300c\u300e\s]+|["'\u201c\u201d\u2018\u2019\u300d\u300f\s]+$/g, '');
-    // ★ 把所有换行（包括单个\n）替换成空格，彻底消灭隐藏的断行
-    //   这样"刚刚在健身房\n照片想起你了"→"刚刚在健身房 照片想起你了"，手机完整显示
-    s = s.replace(/[\n\r]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
-    // 如果模型输出了多条消息用空行分隔，只取第一条（已被上面合并成一行，此步保险）
-    s = s.split(/\s{4,}/)[0].trim();
+    // ★ 如果模型给了多行/多段（多个草稿），按换行拆开，取第一段有中文的
+    const lines = s.split(/[\n\r]+/).map(function(l) { return l.trim(); }).filter(Boolean);
+    if (lines.length > 1) {
+      s = '';
+      for (var i = 0; i < lines.length; i++) {
+        if (/[\u4e00-\u9fff]/.test(lines[i])) { s = lines[i]; break; }
+      }
+      if (!s) s = lines[0];
+    }
+    // ★ 去掉英文前缀：Draft 1 (Food): / Option A: / Version 1: 等
+    s = s.replace(/^(draft|option|version|choice|message)\s*\d*\s*(\([^)]*\))?\s*[:\uff1a\-\*]\s*/i, '');
+    // ★ 去掉编号前缀：1. / 1) / (1) / - / * 等
+    s = s.replace(/^[\(\uff08]?\d+[\)\uff09.\uff0e]?\s*/, '');
+    s = s.replace(/^[-\*\u2022\u25cf]\s*/, '');
+    // 去掉中文系统前缀（"消息："/"回复："等）
+    s = s.replace(/^(消息|回复|内容|正文|发送|我说|我发|我的消息|草稿)\s*\d*\s*[\uff1a:]\s*/, '');
+    // 去掉首尾引号/空白/星号
+    s = s.replace(/^[\*"'\u201c\u201d\u2018\u2019\u300c\u300e\s]+|[\*"'\u201c\u201d\u2018\u2019\u300d\u300f\s]+$/g, '');
+    // 合并多余空白
+    s = s.replace(/\s{2,}/g, ' ').trim();
     return s.slice(0, 200);
   }
 
 
   function isBadOutput(t) {
     if (!t || t.replace(/\s/g, '').length < 2) return true;
-    // 纯 ASCII 无中文 → 指令泄漏
+    // 无中文 → 指令泄漏或英文垃圾
     if (!/[\u4e00-\u9fff]/.test(t)) return true;
-    // ★ 检测半句话：以逗号、顿号、冒号等非终止标点结尾 → 不完整
+    // 包含英文结构性前缀残留 → 清洗没干净
+    if (/^(draft|option|version)/i.test(t.trim())) return true;
+    // ★ 以逗号、顿号等非终止标点结尾 → 明显没说完
     if (/[，、：；—…·,;:\-]$/.test(t.trim())) return true;
-    // ★ 太短且没有终止标点 → 大概率也是半句
-    var endOk = /[。！？~～）)」』""'!?]$/.test(t.trim());
-    if (t.trim().length < 8 && !endOk) return true;
+    // ★ 核心检测：完整的中文聊天消息通常以这些方式结尾：
+    //   - 标点：。！？~ 等
+    //   - 语气词/常见结尾字：了/吧/啊/呢/吗/呀/哦/嘛/哈/的/噢/嗯/啦/喔/耶/诶/咯
+    //   - 颜文字/表情：哈哈/嘿嘿/233 等（已被"哈/嘿"覆盖）
+    //   如果都不满足 → 大概率是半截话（如"看到货架""翻到一张"）
+    var s = t.trim();
+    var terminalPunct = /[。！？!?~～)）」』"'》\u3002\uff01\uff1f]$/.test(s);
+    var naturalEnding = /[了吧啊呢吗呀哦嘛哈嗯噢啦喔耶诶咯捏滴]$/.test(s);
+    if (!terminalPunct && !naturalEnding) return true;
     return false;
   }
 
