@@ -197,15 +197,15 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
   }
 
   function postProcess(raw) {
-    return raw
-      // 去掉模型可能加的"我发的消息是："之类前缀
-      .replace(/^[^：:]*[：:]\s*/, '')
-      // 去掉首尾引号
-      .replace(/^["'“”‘’「『\s]+|["'“”‘’」』\s]+$/g, '')
-      // 只取第一段（防止模型输出多条）
-      .split(/\n{2,}/)[0]
-      .trim()
-      .slice(0, 200);
+    let s = raw.trim();
+    // 只去掉非常明确的系统前缀（"消息："/"回复："等），绝不用宽泛的 /^[^:]*:/ 
+    // 宽泛正则会把消息正文里第一个冒号之前的内容全砍掉
+    s = s.replace(/^(消息|回复|内容|正文|发送|我说|我发|我的消息)\s*[：:]\s*/, '');
+    // 去掉首尾引号/空白
+    s = s.replace(/^["'“”‘’「『\s]+|["'“”‘’」』\s]+$/g, '');
+    // 只取第一段
+    s = s.split(/[\n]{2,}/)[0].trim();
+    return s.slice(0, 200);
   }
 
   function isBadOutput(t) {
