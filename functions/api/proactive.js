@@ -123,16 +123,17 @@ function buildMessageContext(npc, chatHistory, now) {
 }
 
 // ─────────── AI 生成 ───────────
+// ─────────── AI 生成 ───────────
 async function generateMessage(npc, kind, apiCfg, ctx) {
   const { base_url, api_key, model } = apiCfg;
   if (!base_url || !api_key || !model) throw new Error('用户未配置 API');
 
   const bond = npc.bond || '普通';
   const bondVibe =
-    bond === '亲近' ? '你们关系很好，像老朋友，说话随意，偶尔会吐槽或撒娇，不会客气。' :
-    bond === '暧昧' ? '你们之间有点说不清楚，有时候会特意找借口聊天，说话带一点隐隐的在意，但不会太明显。' :
-    bond === '疏远' ? '你们不算很熟，偶尔联系，不会太热络，语气比较平。' :
-                     '你们是普通朋友，正常聊天，不生硬也不过热。';
+    bond === '亲近' ? '你们关系亲近，说话自然熟稔，可以带一点关心和生活感，但不要油腻。' :
+    bond === '暧昧' ? '你们之间有点特别的在意，说话可以柔和一点、留一点试探，但不要越界表白。' :
+    bond === '疏远' ? '你们不算熟，偶尔联系，语气克制，不要突然过热。' :
+                     '你们是正常来往的关系，说话自然、有分寸，不生硬也不过热。';
 
   const ctxLines = [
     '现在是' + ctx.timeLabel + '。',
@@ -141,54 +142,83 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     ctx.location    && ('地点：' + ctx.location),
     ctx.userState   && ('对方现在：' + ctx.userState),
     ctx.memory      && ('你们最近聊过：' + ctx.memory),
-    ctx.summary     && ('聊天记录要点：' + ctx.summary),
-    ctx.world       && ('世界背景：' + ctx.world),
+    ctx.summary     && ('聊天要点：' + ctx.summary),
+    ctx.world       && ('背景：' + ctx.world),
     ctx.userProfile && ('关于对方：' + ctx.userProfile),
     ctx.relation    && ('关系备注：' + ctx.relation),
   ].filter(Boolean).join('\n');
 
   const systemPrompt = [
-    '你正在扮演「' + npc.npc_name + '」，用第一人称生活着，不要ooc,不要跳出角色。',
-    npc.npc_profile && cleanText(npc.npc_profile, 900),
-    npc.online_chat_prompt && cleanText(npc.online_chat_prompt, 400),
+    '你正在扮演「' + npc.npc_name + '」，此刻要主动给对方发一条即时聊天消息。',
+    npc.npc_profile ? cleanText(npc.npc_profile, 900) : '',
+    npc.online_chat_prompt ? cleanText(npc.online_chat_prompt, 500) : '',
     '',
     '【你和对方的关系】',
     bondVibe,
     ctxLines ? ('\n【此刻的状态和背景】\n' + ctxLines) : '',
+    '',
+    '【任务】',
+    '基于你现在的状态、你们最近的聊天内容、关系远近、世界背景与眼前具体情境，发一句自然找对方说话的话。',
+    '',
+    '【硬性要求】',
+    '1. 只输出一条消息正文，不要解释，不要编号，不要草稿标签，不要 Scene / Draft / Option / Tone / Setting 这类英文提示词。',
+    '2. 必须是一句完整的话，像真实聊天，不要只停在“看到”“想到”“路过”“发现”这种半截动作上。',
+    '3. 字数尽量控制在 15 到 25 个中文字符左右，最多不超过 32 个中文字符。',
+    '4. 这句话必须像“在找对方说话”，而不是只描写一个画面或物品。',
+    '5. 优先从具体细节切入：眼前看到的东西、刚发生的事、此刻的状态、最近聊过的话题。',
+    '6. 不要用模板句：如“在忙吗”“突然想起你”“顺手问问你”“刚空下来一点”。',
+    '7. 关系普通或疏远时，不要说得过分亲密；关系亲近或暧昧时，也不要油腻。',
+    '8. 如果写不出自然完整的一句话，就只输出：__SKIP__'
   ].filter(Boolean).join('\n');
 
   const historyMessages = (ctx.chatHistory || []).map(function(t) {
     return {
       role: (t.role === 'me' || t.role === 'user') ? 'user' : 'assistant',
-      content: t.text
+      content: String(t.text || '')
     };
-  });
+  }).filter(function(x) {
+    return x.content.trim();
+  }).slice(-8);
 
-  // user prompt：纯文本输出，不用 JSON，彻底避免 JSON 截断问题
   const trigger = kind === 'daily'
-    ? '你今天在忙自己的事，忽然想起对方——可能是看到了什么、经历了什么、或者这个时段让你想聊聊。找个符合你当下状态的真实理由，自然地发条消息给 ta。'
-    : '你某个瞬间想到了对方，顺手发条消息，就像正常人刷手机时忽然想说句话一样，自然断句，字数在15-30字左右。';
+    ? '你今天一直在忙自己的事，此刻因为一个具体的小事或眼前的细节，想起了对方，于是自然地发一句。'
+    : '你在某个瞬间被一个具体细节触发，想到对方，于是顺手发一句。';
 
-  const userPrompt = trigger + '\n\n直接输出你要发的那条消息，不要加任何前缀、解释或引号。就是那条消息本身。';
+  const userPrompt = [
+    trigger,
+    '',
+    '直接输出你要发的那一句消息。',
+    '这句话必须是完整句。',
+    '这句话要像在主动找对方说话。',
+    '这句话不要只剩半句，也不要变成英文标签或草稿标题。',
+    '如果只能写出半句、模板句、提示词片段，就输出 __SKIP__ 。'
+  ].join('\n');
 
-  async function callAI() {
+  async function callAI(extraHint) {
     const resp = await fetch(base_url + '/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + api_key },
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + api_key
+      },
       body: JSON.stringify({
         model: model,
         messages: [
-          { role: 'system', content: systemPrompt },
+          { role: 'system', content: systemPrompt }
         ].concat(historyMessages).concat([
-          { role: 'user', content: userPrompt }
+          { role: 'user', content: userPrompt + (extraHint ? ('\n' + extraHint) : '') }
         ]),
-        temperature: 0.9,
-        presence_penalty: 0.3,
-        frequency_penalty: 0.3,
-        max_tokens: 35,
+        temperature: 0.82,
+        presence_penalty: 0.28,
+        frequency_penalty: 0.22,
+        max_tokens: 180
       })
     });
-    if (!resp.ok) throw new Error('AI ' + resp.status + ': ' + (await resp.text()).slice(0, 200));
+
+    if (!resp.ok) {
+      throw new Error('AI ' + resp.status + ': ' + (await resp.text()).slice(0, 200));
+    }
+
     const data = await resp.json();
     return String(
       data && data.choices && data.choices[0] &&
@@ -196,29 +226,101 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     ).trim();
   }
 
+  function postProcess(raw) {
+    let s = String(raw || '').trim();
 
-  function isBadOutput(t) {
-    if (!t || t.replace(/\s/g, '').length < 2) return true;
-    // 纯 ASCII 无中文 → 指令泄漏
-    if (/^[ -\s]+$/.test(t) && !/[一-鿿]/.test(t)) return true;
+    // 多行时优先取第一条像聊天正文的内容
+    const lines = s.split(/[\r\n]+/).map(function(l) { return l.trim(); }).filter(Boolean);
+    if (lines.length > 1) {
+      s = '';
+      for (var i = 0; i < lines.length; i++) {
+        if (/[\u4e00-\u9fff]/.test(lines[i])) {
+          s = lines[i];
+          break;
+        }
+      }
+      if (!s) s = lines[0];
+    }
+
+    s = s
+      .replace(/^(draft|option|version|choice|message|scene|tone|setting)\s*\d*\s*(\([^)]*\))?\s*[:：\-*]\s*/i, '')
+      .replace(/^[\(\uff08]?\d+[\)\uff09.\uff0e]?\s*/, '')
+      .replace(/^[-*•●]\s*/, '')
+      .replace(/^(消息|回复|内容|正文|发送|我说|我发|草稿)\s*[\d一二三四五六七八九十]*\s*[:：]\s*/, '')
+      .replace(/^[\*"'\u201c\u201d\u2018\u2019\u300c\u300e\s]+|[\*"'\u201c\u201d\u2018\u2019\u300d\u300f\s]+$/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    return s.slice(0, 80);
+  }
+
+  function hasChinese(t) {
+    return /[\u4e00-\u9fff]/.test(String(t || ''));
+  }
+
+  function looksIncomplete(t) {
+    var s = String(t || '').trim();
+    if (!s) return true;
+    if (s.length < 8) return true;
+
+    // 这些结尾明显没说完
+    if (/(看到|想到|发现|路过|经过|翻到|闻到|买到|看见|刚在|刚从|刚路过|然后|结果)$/.test(s)) return true;
+    if (/[，、：；—…·,;:\-]$/.test(s)) return true;
+
+    // 没有正常句尾，而且又很短
+    var terminalPunct = /[。！？!?~～」』”’》）)]$/.test(s);
+    var naturalEnding = /[了吧啊呢吗呀哦嘛哈啦喔哇诶耶噢的呀呀]$/.test(s);
+    if (!terminalPunct && !naturalEnding && s.length < 18) return true;
+
     return false;
   }
 
-  let text = '';
-  for (let attempt = 0; attempt < 3; attempt++) {
+  function looksTemplate(t) {
+    var s = String(t || '').trim();
+
+    if (/^(在忙吗|你在干嘛|突然想起你|顺手问问你|刚空下来一点)/.test(s)) return true;
+    if (/^(Scene|Draft|Option|Tone|Setting)\b/i.test(s)) return true;
+    if (/^(刚刚|刚才|刚在|刚从|刚路过).{0,10}(看到|想到|发现)$/.test(s)) return true;
+
+    return false;
+  }
+
+  function lengthOK(t) {
+    var s = String(t || '').replace(/\s/g, '');
+    return s.length >= 10 && s.length <= 36;
+  }
+
+  async function tryOnce(extraHint) {
+    var raw = await callAI(extraHint);
+    var cleaned = postProcess(raw);
+
+    if (!cleaned) return '';
+    if (cleaned === '__SKIP__') return '';
+    if (!hasChinese(cleaned)) return '';
+    if (looksTemplate(cleaned)) return '';
+    if (looksIncomplete(cleaned)) return '';
+    if (!lengthOK(cleaned)) return '';
+
+    return cleaned;
+  }
+
+  const retryHints = [
+    '',
+    '重写一次：只写一句完整的话，15到25字左右，像在主动找对方说话，不要停在“看到”“想到”“路过”上。',
+    '再重写一次：必须是一句能直接发给对方的完整聊天句子，别写画面碎片，别写英文标签。'
+  ];
+
+  for (let i = 0; i < retryHints.length; i++) {
     try {
-      const raw     = await callAI();
-      const cleaned = postProcess(raw);
-      if (!isBadOutput(cleaned)) { text = cleaned; break; }
-      console.warn('[proactive] attempt ' + (attempt + 1) + ' bad: ' + raw.slice(0, 80));
+      const text = await tryOnce(retryHints[i]);
+      if (text) return text;
     } catch (e) {
-      if (attempt === 2) throw e;
+      if (i === retryHints.length - 1) throw e;
     }
   }
 
-  return text;
+  return '';
 }
-
 
 // ─────────── Web Push 工具 ───────────
 function b64u(buf) {
@@ -390,7 +492,10 @@ export async function onRequestGet(context) {
           text = await generateMessage(npc, kind, apiCfg, buildMessageContext(npc, chatHistory, now));
         } catch (aiErr) { results.push({ npc_id, error: aiErr.message }); continue; }
 
-        if (!text) { results.push({ npc_id, error: 'AI返回空' }); continue; }
+        if (!text) {
+  results.push({ npc_id, skipped: true, reason: 'no-complete-message' });
+  continue;
+}
 
         await sbInsert(env, 'meow_pending_messages', {
           uid, npc_id, npc_name: npc.npc_name, text, kind, ts: now, is_pulled: false
