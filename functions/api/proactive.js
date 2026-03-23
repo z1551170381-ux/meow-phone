@@ -198,15 +198,18 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
 
   function postProcess(raw) {
     let s = raw.trim();
-    // 只去掉非常明确的系统前缀（"消息："/"回复："等），绝不用宽泛的 /^[^:]*:/ 
-    // 宽泛正则会把消息正文里第一个冒号之前的内容全砍掉
-    s = s.replace(/^(消息|回复|内容|正文|发送|我说|我发|我的消息)\s*[：:]\s*/, '');
+    // 去掉明确的系统前缀（"消息："/"回复："等）
+    s = s.replace(/^(消息|回复|内容|正文|发送|我说|我发|我的消息)\s*[\uff1a:]\s*/, '');
     // 去掉首尾引号/空白
-    s = s.replace(/^["'“”‘’「『\s]+|["'“”‘’」』\s]+$/g, '');
-    // 只取第一段
-    s = s.split(/[\n]{2,}/)[0].trim();
+    s = s.replace(/^["'\u201c\u201d\u2018\u2019\u300c\u300e\s]+|["'\u201c\u201d\u2018\u2019\u300d\u300f\s]+$/g, '');
+    // ★ 把所有换行（包括单个\n）替换成空格，彻底消灭隐藏的断行
+    //   这样"刚刚在健身房\n照片想起你了"→"刚刚在健身房 照片想起你了"，手机完整显示
+    s = s.replace(/[\n\r]+/g, ' ').replace(/\s{2,}/g, ' ').trim();
+    // 如果模型输出了多条消息用空行分隔，只取第一条（已被上面合并成一行，此步保险）
+    s = s.split(/\s{4,}/)[0].trim();
     return s.slice(0, 200);
   }
+
 
   function isBadOutput(t) {
     if (!t || t.replace(/\s/g, '').length < 2) return true;
