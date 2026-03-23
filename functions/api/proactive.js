@@ -127,7 +127,6 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
   const { base_url, api_key, model } = apiCfg;
   if (!base_url || !api_key || !model) throw new Error('用户未配置 API');
 
-  // 关系亲密度 → 自然语气描述
   const bond = npc.bond || '普通';
   const bondVibe =
     bond === '亲近' ? '你们关系很好，像老朋友，说话随意，偶尔会吐槽或撒娇，不会客气。' :
@@ -135,117 +134,101 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     bond === '疏远' ? '你们不算很熟，偶尔联系，不会太热络，语气比较平。' :
                      '你们是普通朋友，正常聊天，不生硬也不过热。';
 
-  // 上下文（只写信息，不写指令）
   const ctxLines = [
-    `现在是${ctx.timeLabel}。`,
-    ctx.npcState    && `你当前：${ctx.npcState}`,
-    ctx.scene       && `场景：${ctx.scene}`,
-    ctx.location    && `地点：${ctx.location}`,
-    ctx.userState   && `对方现在：${ctx.userState}`,
-    ctx.memory      && `你们最近聊过：${ctx.memory}`,
-    ctx.summary     && `聊天记录要点：${ctx.summary}`,
-    ctx.world       && `世界背景：${ctx.world}`,
-    ctx.userProfile && `关于对方：${ctx.userProfile}`,
-    ctx.relation    && `关系备注：${ctx.relation}`,
-  ].filter(Boolean).join('\n');
+    '现在是' + ctx.timeLabel + '。',
+    ctx.npcState    && ('你当前：' + ctx.npcState),
+    ctx.scene       && ('场景：' + ctx.scene),
+    ctx.location    && ('地点：' + ctx.location),
+    ctx.userState   && ('对方现在：' + ctx.userState),
+    ctx.memory      && ('你们最近聊过：' + ctx.memory),
+    ctx.summary     && ('聊天记录要点：' + ctx.summary),
+    ctx.world       && ('世界背景：' + ctx.world),
+    ctx.userProfile && ('关于对方：' + ctx.userProfile),
+    ctx.relation    && ('关系备注：' + ctx.relation),
+  ].filter(Boolean).join('
+');
 
-  // system：沉浸式角色身份，给当下处境，让角色有动机主动说话
   const systemPrompt = [
-    `你正在扮演「${npc.npc_name}」，用第一人称生活着，不要跳出角色。`,
+    '你正在扮演「' + npc.npc_name + '」，用第一人称生活着，不要跳出角色。',
     npc.npc_profile && cleanText(npc.npc_profile, 900),
     npc.online_chat_prompt && cleanText(npc.online_chat_prompt, 400),
     '',
-    `【你和对方的关系】\n${bondVibe}`,
-    ctxLines ? `\n【此刻的状态和背景】\n${ctxLines}` : '',
-  ].filter(Boolean).join('\n');
+    '【你和对方的关系】',
+    bondVibe,
+    ctxLines ? ('
+【此刻的状态和背景】
+' + ctxLines) : '',
+  ].filter(Boolean).join('
+');
 
-  // 对话历史
-  const historyMessages = (ctx.chatHistory || []).map(t => ({
-    role: (t.role === 'me' || t.role === 'user') ? 'user' : 'assistant',
-    content: t.text
-  }));
+  const historyMessages = (ctx.chatHistory || []).map(function(t) {
+    return {
+      role: (t.role === 'me' || t.role === 'user') ? 'user' : 'assistant',
+      content: t.text
+    };
+  });
 
-  // user prompt：正向触发，JSON 输出防截断
-  // 给角色一个"此刻触发点"——不是凭空发，是有原因的
+  // user prompt：纯文本输出，不用 JSON，彻底避免 JSON 截断问题
   const trigger = kind === 'daily'
-    ? '你今天在忙自己的事，忽然想起对方——可能是看到了什么、经历了什么、或者这个时段让你想聊聊。找个符合你当下状态的真实理由，自然地发条消息过去。'
+    ? '你今天在忙自己的事，忽然想起对方——可能是看到了什么、经历了什么、或者这个时段让你想聊聊。找个符合你当下状态的真实理由，自然地发条消息给 ta。'
     : '你某个瞬间想到了对方，顺手发条消息，就像正常人刷手机时忽然想说句话一样。';
 
-  const userPrompt =
-    trigger + '\n\n' +
-    '请只输出下面这一行 JSON，不要加任何其他文字：\n' +
-    '{"msg": "你要发给对方的消息"}\n\n' +
-    'msg 里写你真正想发的那条消息，要口语、自然、完整，符合你的性格和你们的关系。';
+  const userPrompt = trigger + '
+
+直接输出你要发的那条消息，不要加任何前缀、解释或引号。就是那条消息本身。';
 
   async function callAI() {
-    const resp = await fetch(`${base_url}/chat/completions`, {
+    const resp = await fetch(base_url + '/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type':'application/json', Authorization:`Bearer ${api_key}` },
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + api_key },
       body: JSON.stringify({
-        model,
+        model: model,
         messages: [
           { role: 'system', content: systemPrompt },
-          ...historyMessages,
-          { role: 'user',   content: userPrompt }
-        ],
+        ].concat(historyMessages).concat([
+          { role: 'user', content: userPrompt }
+        ]),
         temperature: 0.9,
         presence_penalty: 0.3,
         frequency_penalty: 0.3,
-        // ★ 关键：给足够 token 让 JSON 完整闭合
-        // JSON 壳约 15 token + 消息本体约 60-80 token + 余量 = 200
-        max_tokens: 200
+        max_tokens: 300,
       })
     });
-    if (!resp.ok) throw new Error(`AI ${resp.status}: ${(await resp.text()).slice(0, 200)}`);
+    if (!resp.ok) throw new Error('AI ' + resp.status + ': ' + (await resp.text()).slice(0, 200));
     const data = await resp.json();
-    return String(data && data.choices && data.choices[0] && data.choices[0].message && data.choices[0].message.content || '').trim();
+    return String(
+      data && data.choices && data.choices[0] &&
+      data.choices[0].message && data.choices[0].message.content || ''
+    ).trim();
   }
 
-  // 解析 JSON → 取 msg；三级降级保证一定能拿到内容
-  function extractMsg(raw) {
-    // 1. 标准 JSON.parse
-    try {
-      const obj = JSON.parse(raw);
-      if (obj && obj.msg) return String(obj.msg).trim();
-    } catch (_) {}
-
-    // 2. 去掉可能的 markdown 代码块再试
-    try {
-      const stripped = raw.replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
-      const obj = JSON.parse(stripped);
-      if (obj && obj.msg) return String(obj.msg).trim();
-    } catch (_) {}
-
-    // 3. 正则从不完整 JSON 里抠 msg 值
-    const m = raw.match(/"msg"\s*:\s*"((?:[^"\\]|\\.)*)"/);
-    if (m) {
-      try { return JSON.parse('"' + m[1] + '"').trim(); } catch (_) { return m[1].trim(); }
-    }
-
-    // 4. 最终降级：去掉 JSON 壳，把第一段文本作为消息
+  function postProcess(raw) {
     return raw
-      .replace(/```[\s\S]*?```/g, '')
-      .replace(/\{[^}]*"msg"\s*:\s*/g, '')
-      .replace(/^["'\u201c\u201d\u2018\u2019\s]+|["'\u201c\u201d\u2018\u2019\s]+$/g, '')
-      .split(/\n{2,}/)[0]
+      // 去掉模型可能加的"我发的消息是："之类前缀
+      .replace(/^[^：:]*[：:]\s*/, '')
+      // 去掉首尾引号
+      .replace(/^["'“”‘’「『\s]+|["'“”‘’」』\s]+$/g, '')
+      // 只取第一段（防止模型输出多条）
+      .split(/
+{2,}/)[0]
       .trim()
-      .slice(0, 150);
+      .slice(0, 200);
   }
 
-  // 只拦截真正的废输出：空值 或 纯英文无中文（指令泄漏）
   function isBadOutput(t) {
     if (!t || t.replace(/\s/g, '').length < 2) return true;
-    if (/^[\x00-\x7F\s]+$/.test(t) && !/[\u4e00-\u9fff]/.test(t)) return true;
+    // 纯 ASCII 无中文 → 指令泄漏
+    if (/^[ -\s]+$/.test(t) && !/[一-鿿]/.test(t)) return true;
     return false;
   }
 
   let text = '';
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      const raw = await callAI();
-      const msg = extractMsg(raw);
-      if (!isBadOutput(msg)) { text = msg.slice(0, 150); break; }
-      console.warn('[proactive] attempt ' + (attempt+1) + ' bad output: ' + raw.slice(0,80));
+      const raw     = await callAI();
+      const cleaned = postProcess(raw);
+      if (!isBadOutput(cleaned)) { text = cleaned; break; }
+      console.warn('[proactive] attempt ' + (attempt + 1) + ' bad: ' + raw.slice(0, 80));
     } catch (e) {
       if (attempt === 2) throw e;
     }
@@ -253,6 +236,7 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
 
   return text;
 }
+
 
 // ─────────── Web Push 工具 ───────────
 function b64u(buf) {
