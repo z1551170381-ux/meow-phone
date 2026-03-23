@@ -1988,13 +1988,13 @@ function ensureTuneStyle(){
     lpSt.id = 'meow-lifepush-style-v1';
     lpSt.textContent = `
 .meowLifePushToast{
-  position:fixed; top:calc(env(safe-area-inset-top, 0px) + 14px); left:50%; transform:translateX(-50%) translateY(-18px);
-  min-width:260px; width:min(92vw, 360px); max-width:360px;
-  background:rgba(22,22,28,.90); backdrop-filter:blur(22px); -webkit-backdrop-filter:blur(22px);
-  border:1px solid rgba(255,255,255,.14); border-radius:18px;
+  position:fixed; bottom:80px; left:50%; transform:translateX(-50%) translateY(20px);
+  min-width:240px; max-width:320px;
+  background:rgba(20,20,28,.92); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border:1px solid rgba(255,255,255,.12); border-radius:16px;
   padding:12px 14px; display:flex; align-items:flex-start; gap:10px;
-  box-shadow:0 12px 36px rgba(0,0,0,.34);
-  opacity:0; transition:opacity .28s,transform .28s; pointer-events:none; z-index:2147483646;
+  box-shadow:0 8px 32px rgba(0,0,0,.45);
+  opacity:0; transition:opacity .3s,transform .3s; pointer-events:none; z-index:99999;
   cursor:pointer;
 }
 .meowLifePushToast.show{ opacity:1; transform:translateX(-50%) translateY(0); pointer-events:auto; }
@@ -9754,16 +9754,6 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
       var _triggerIncomingCall = null;
 
       function openChat(contactId){
-        if (_isReservedGhostChatId(contactId)){
-          try{
-            var _thx = loadThreads();
-            _thx.list = _thx.list.filter(function(x){ return String(x.id) !== String(contactId); });
-            saveThreads(_thx);
-          }catch(e){}
-          try{ toast('已拦截异常会话并自动清理'); }catch(e){}
-          try{ _wxRefreshChatsUI(); }catch(e){}
-          return;
-        }
         state._innerStack = [];
         try{ PhoneAI.abort(); _hideTypingIndicator(); _hideBubbleMenu(); _hideQuoteBar(); root.querySelectorAll('.wxEditMsgOverlay').forEach(function(o){o.remove();}); }catch(e){}
 
@@ -10627,90 +10617,16 @@ function getNPCCandidatesFromRecentMainChat(){
 }
 
       // ====== Threads / Logs（私聊）======
-      function _isReservedGhostChatId(npcId){
-        var id = String(npcId || '').trim();
-        if (!id) return true;
-        var reserved = {
-          player:1, self:1, me:1, system:1,
-          home:1, chats:1, chatDetail:1, calendar:1, forum:1, weather:1,
-          sms:1, browser:1, photos:1, settings:1, map:1, news:1,
-          shop:1, inventory:1, work:1
-        };
-        return !!reserved[id];
-      }
-      function _isKnownChatEntityId(npcId){
-        var id = String(npcId || '').trim();
-        if (!id || _isReservedGhostChatId(id)) return false;
-        if (/^group_/.test(id)){
-          try{
-            var gs = _phLoad('groups_v1', {}) || {};
-            return !!gs[id];
-          }catch(e){ return false; }
-        }
-        try{
-          var db = loadContactsDB();
-          return !!findContactById(db, id);
-        }catch(e){ return false; }
-      }
-      function _sanitizeGhostChatArtifacts(){
-        try{
-          var th = _phLoad(PHONE_IM_KEYS.threads, null);
-          if (th && typeof th === 'object' && Array.isArray(th.list)){
-            var nextList = th.list.filter(function(it){
-              return it && !_isReservedGhostChatId(it.id);
-            });
-            if (nextList.length !== th.list.length){
-              th.list = nextList;
-              th.updatedAt = _now();
-              _phSave(PHONE_IM_KEYS.threads, th);
-            }
-          }
-        }catch(e){}
-        try{
-          var lg = _phLoad(PHONE_IM_KEYS.logs, null);
-          if (lg && typeof lg === 'object' && lg.map){
-            var dirty = false;
-            Object.keys(lg.map).forEach(function(k){
-              if (_isReservedGhostChatId(k)){
-                delete lg.map[k];
-                dirty = true;
-              }
-            });
-            if (dirty){
-              lg.updatedAt = _now();
-              _phSave(PHONE_IM_KEYS.logs, lg);
-            }
-          }
-        }catch(e){}
-      }
       function loadThreads(){
         const db = _phLoad(PHONE_IM_KEYS.threads, null);
-        if (db && typeof db === 'object' && Array.isArray(db.list)){
-          db.list = db.list.filter(function(it){ return it && !_isReservedGhostChatId(it.id); });
-          return db;
-        }
+        if (db && typeof db === 'object' && Array.isArray(db.list)) return db;
         return { v:1, list:[], updatedAt:0 };
       }
       function saveThreads(db){
         db.updatedAt = _now();
         _phSave(PHONE_IM_KEYS.threads, db);
       }
-      function _isChatVisibleForNpc(npcId){
-        try{
-          if (state.app !== 'chatDetail') return false;
-          return String(state.chatTarget || '') === String(npcId || '');
-        }catch(e){ return false; }
-      }
-      function _getIncomingUnreadValue(npcId){
-        if (_isChatVisibleForNpc(npcId)) return 0;
-        try{
-          var th = loadThreads();
-          var item = th.list.find(function(x){ return String(x.id) === String(npcId); });
-          return Math.max(1, Number(item && item.unread || 0) + 1);
-        }catch(e){ return 1; }
-      }
       function ensureThread(npcId, name, avatar){
-        if (_isReservedGhostChatId(npcId)) return null;
         const th = loadThreads();
         let it = th.list.find(x => String(x.id) === String(npcId));
         if (!it){
@@ -11147,7 +11063,7 @@ ${lines}
       // 群聊 id 规则：group_xxx，元数据在 _phLoad('groups_v1', {})
       function _wxGetChatTargetMeta(id){
         const cid = String(id || '').trim();
-        if (!cid || _isReservedGhostChatId(cid)) return { id:'', name:'', avatar:'👤', profile:'' };
+        if (!cid) return { id:'', name:'', avatar:'👤', profile:'' };
 
         // 1) 群聊
         if (/^group_/.test(cid)){
@@ -15868,7 +15784,7 @@ function _buildFallbackAIFriendCandidate(){
 
         h+='<button data-act="afRunSingle" data-afapp="news" style="width:100%;padding:10px;border:0;border-radius:10px;background:var(--ph-accent-grad);color:#fff;font-size:13px;font-weight:600;cursor:pointer;margin:8px 0;">📡 立即刷新资讯</button>';
         h+='<div style="font-weight:600;font-size:13px;color:var(--ph-text);margin:8px 0;">高级</div>';
-        h+='<textarea data-afm-ta="customPrompt" placeholder="全局自定义提示词补充（留空使用默认）\n例如：多生成与当前通讯录角色相关的内容…" style="width:100%;min-height:60px;padding:8px;border-radius:10px;border:1px solid var(--ph-glass-border);background:var(--ph-glass);color:var(--ph-text);font-size:12px;resize:vertical;box-sizing:border-box;">'+(newsCfg.customPrompt||'')+'</textarea>';
+        h+='<textarea data-afm-ta="customPrompt" placeholder="全局自定义提示词补充（留空使用默认）\n例如：多生成与阿文相关的内容…" style="width:100%;min-height:60px;padding:8px;border-radius:10px;border:1px solid var(--ph-glass-border);background:var(--ph-glass);color:var(--ph-text);font-size:12px;resize:vertical;box-sizing:border-box;">'+(newsCfg.customPrompt||'')+'</textarea>';
         h+='<div style="margin-top:16px;border-top:1px solid var(--ph-glass-border);padding-top:12px;"><button data-act="phClearAppData" data-appkey="news" style="width:100%;padding:10px;border:0;border-radius:10px;background:rgba(231,76,60,.1);color:#e74c3c;font-size:13px;font-weight:600;cursor:pointer;">🗑 清空资讯缓存</button></div>';
 
         var mask = _afModal('资讯设置',h);
@@ -19686,8 +19602,7 @@ const npc = _wxGetChatTargetMeta(npcId);
             };
             var _msgsLoc = root.querySelector('[data-ph="chatMsgs"]');
             pushLog(npcId, 'them', '[地标] '+parsed.sendLocation, { t: ts });
-            bumpThread(npcId, { lastMsg:'📍 '+parsed.sendLocation, lastTime:ts, unread:_getIncomingUnreadValue(npcId) });
-            _maybeShowIncomingBanner(npcId, '📍 ' + parsed.sendLocation);
+            bumpThread(npcId, { lastMsg:'📍 '+parsed.sendLocation, lastTime:ts, unread:0 });
             if(_msgsLoc){ _wxAppendBubble(_msgsLoc, npc, 'them', '[地标] '+parsed.sendLocation, ts, _lmMetaL); requestAnimationFrame(function(){ _msgsLoc.scrollTop = _msgsLoc.scrollHeight; }); }
           }catch(e){}
           if (!cleanText || cleanText === '…') return;
@@ -19701,8 +19616,7 @@ const npc = _wxGetChatTargetMeta(npcId);
             var _msgsPhoto = root.querySelector('[data-ph="chatMsgs"]');
             var _photoLogText = '📷 ' + (parsed.sendPhoto.caption || '照片');
             pushLog(npcId, 'them', _photoLogText, { t: ts });
-            bumpThread(npcId, { lastMsg: _photoLogText, lastTime: ts, unread: _getIncomingUnreadValue(npcId) });
-            _maybeShowIncomingBanner(npcId, _photoLogText);
+            bumpThread(npcId, { lastMsg: _photoLogText, lastTime: ts, unread: 0 });
             if (_msgsPhoto){
               _wxAppendBubble(_msgsPhoto, npc, 'them', _photoLogText, ts, _photoMeta);
               requestAnimationFrame(function(){ _msgsPhoto.scrollTop = _msgsPhoto.scrollHeight; });
@@ -19719,8 +19633,7 @@ const npc = _wxGetChatTargetMeta(npcId);
             var _msgsShare = root.querySelector('[data-ph="chatMsgs"]');
             var _shareLogText = '🔗 ' + (parsed.sendShare.title || '分享');
             pushLog(npcId, 'them', _shareLogText, { t: ts });
-            bumpThread(npcId, { lastMsg: _shareLogText, lastTime: ts, unread: _getIncomingUnreadValue(npcId) });
-            _maybeShowIncomingBanner(npcId, _shareLogText);
+            bumpThread(npcId, { lastMsg: _shareLogText, lastTime: ts, unread: 0 });
             if (_msgsShare){
               _wxAppendBubble(_msgsShare, npc, 'them', _shareLogText, ts, _shareMeta);
               requestAnimationFrame(function(){ _msgsShare.scrollTop = _msgsShare.scrollHeight; });
@@ -19732,8 +19645,7 @@ const npc = _wxGetChatTargetMeta(npcId);
 
         // 写消息日志（传入 ts 确保和气泡 data-msgts 完全一致，否则删除时匹配不上）
         pushLog(npcId, 'them', cleanText, { t: ts });
-        bumpThread(npcId, { lastMsg: cleanText, lastTime: ts, unread: _getIncomingUnreadValue(npcId) });
-        _maybeShowIncomingBanner(npcId, cleanText);
+        bumpThread(npcId, { lastMsg: cleanText, lastTime: ts, unread: 0 });
 
         var msgsEl = root.querySelector('[data-ph="chatMsgs"]');
         if (!msgsEl) return;
@@ -19804,8 +19716,7 @@ const npc = _wxGetChatTargetMeta(npcId);
                 if (!msgs2) return;
                 var stkTs = _now();
                 pushLog(npcId, 'them', '[表情包]');
-                bumpThread(npcId, { lastMsg:'[表情包]', lastTime:stkTs, unread:_getIncomingUnreadValue(npcId) });
-                _maybeShowIncomingBanner(npcId, '发来了一张表情包');
+                bumpThread(npcId, { lastMsg:'[表情包]', lastTime:stkTs, unread:0 });
                 _wxAppendBubble(msgs2, npc, 'them', '[表情包]', stkTs, { type:'image', src:stk.data, _logText:'[表情包]' });
                 requestAnimationFrame(function(){ msgs2.scrollTop = msgs2.scrollHeight; });
               }, 400 + Math.random()*300);
@@ -22389,37 +22300,6 @@ const npc = _wxGetChatTargetMeta(npcId);
         }
 
         // ---- 主动消息队列（延迟发送，行为做完才告诉你） ----
-        function _buildProactiveGroundingBlock(npcId, targetMode, atTs){
-          var parts = [];
-          try{ var sb = _buildStatePromptBlock(npcId); if (sb) parts.push(sb); }catch(e){}
-          try{ var bb = _buildBehaviorPromptBlock(npcId); if (bb) parts.push(bb); }catch(e){}
-          try{ var tb = _buildTemporalPromptBlock(npcId, targetMode || 'online', atTs || Date.now()); if (tb) parts.push(tb); }catch(e){}
-          try{ var mb = _buildMapPromptBlock(npcId); if (mb) parts.push(mb); }catch(e){}
-          try{
-            var dbG = loadContactsDB();
-            var npcG = findContactById(dbG, npcId) || null;
-            var exG = _loadCharExtra(npcId);
-            var pf = String((npcG && npcG.profile) || exG.profile || '').trim();
-            if (pf) parts.push('【角色设定】\n' + pf.slice(0, 800));
-          }catch(e){}
-          try{
-            var cc = _readCurrentCharCardDesc();
-            if (cc) parts.push('【角色卡原始描述】\n' + String(cc).trim().slice(0, 800));
-          }catch(e){}
-          try{
-            var onlineSum = getChatSummary(npcId, 'online');
-            if (onlineSum && onlineSum.summaryText) parts.push('【线上关系摘要】\n' + String(onlineSum.summaryText).trim().slice(0, 700));
-          }catch(e){}
-          try{
-            var offlineSum = getChatSummary(npcId, 'offline');
-            if (offlineSum && offlineSum.summaryText) parts.push('【线下经历摘要】\n' + String(offlineSum.summaryText).trim().slice(0, 500));
-          }catch(e){}
-          try{
-            var ctxG = meowGetSTCtx();
-            if (ctxG && ctxG.persona_description) parts.push('【用户身份】\n' + String(ctxG.persona_description).trim().slice(0, 300));
-          }catch(e){}
-          return parts.filter(Boolean).join('\n\n').slice(0, 3200);
-        }
         // ---- AI 生成主动消息内容 ----
         async function _generateAIMsg(npcId, behaviorKey, behaviorLabel, s, opts){
   try{
@@ -22453,7 +22333,6 @@ const npc = _wxGetChatTargetMeta(npcId);
     stateDesc += '心情' + (s.moodText || '平静');
 
     var temporalBlock = _buildTemporalPromptBlock(npcId, targetMode, promptTs);
-    var groundingBlock = _buildProactiveGroundingBlock(npcId, targetMode, promptTs);
     var summaryBlocks = [];
     try{
       var sumOnline = getChatSummary(npcId, 'online');
@@ -22466,12 +22345,11 @@ const npc = _wxGetChatTargetMeta(npcId);
 
     var smartRule = [
       '【主动消息生成规则】',
-      '- 先根据关系阶段、最近对话、聊天总结、当前时间、当前场景与状态，再决定发什么。',
-      '- 不要写成固定模板式的生活播报，不要像系统通知，也不要总用“突然想起你了 / 刚忙完 / 顺手来找你”这类高频套话开头。',
+      '- 先根据关系阶段、最近对话、聊天总结、当前时间，再决定发什么。',
+      '- 不要写成固定模板式的生活播报，不要像系统通知。',
       '- 如果最近用户在生气、受伤、冷淡，优先修复关系、回应情绪，不要突然转去聊无关日常。',
-      '- 如果最近对话里有未接住的话题、问题或情绪尾巴，优先自然续上那个上下文。',
       '- 如果关系较近（亲近/暧昧），可以更柔和、更贴近生活；如果关系普通或疏远，要克制有分寸。',
-      '- 内容要像这个角色自己会发的话，而不是万能模板；允许有停顿、口癖、半句、追问、转折。'
+      '- 内容要像这个角色自己会发的话，而不是万能模板。'
     ].join('\n');
     var relationRule = '【关系阶段】当前你和用户的关系：' + relationStage + '。' +
       (relationStage === '暧昧' ? '可以带一点试探和在意。' :
@@ -22493,10 +22371,9 @@ const npc = _wxGetChatTargetMeta(npcId);
       '【性格】' +
         (socialDrive > 65 ? '比较主动爱聊天。' : socialDrive < 35 ? '平时话不多，这次难得主动。' : '') +
         (emotionDisplay > 65 ? '情绪外放。' : emotionDisplay < 35 ? '情绪内敛。' : ''),
-      groundingBlock || '',
       summaryBlocks.join('\n\n'),
       (targetMode === 'online' && charEx.onlineChatPrompt ? ('【线上聊天附加要求】\n' + String(charEx.onlineChatPrompt).trim()) : ''),
-      '【输出要求】只发 1 条主动消息，像真实聊天软件里会发出的那种。可以是 1-3 句，但总长度尽量控制在 60 字内。优先写“此刻真的会发出来的话”，而不是概括式播报。若当前时段在工作/休息中，要让消息带一点忙里偷闲、稍后看到或刚空下来的感觉。不要用引号，不要解释自己在执行规则，不要自我总结。' + (recentLogs.length ? ('\n【最近对话】\n' + recentLogs.join('\n')) : '')
+      '【输出要求】只发 1 条主动消息，像真实聊天软件里会发出的那种。可以是 1-3 句，但总长度尽量控制在 60 字内。若当前时段在工作/休息中，要让消息带一点忙里偷闲、稍后看到或刚空下来的感觉。不要用引号，不要解释自己在执行规则。' + (recentLogs.length ? ('\n【最近对话】\n' + recentLogs.join('\n')) : '')
     ].filter(Boolean).join('\n\n');
 
     var result = await PhoneAI.chat({
@@ -24835,8 +24712,7 @@ const npc = _wxGetChatTargetMeta(npcId);
               var msgsE = root.querySelector('[data-ph="chatMsgs"]');
               if (msgsE){
                 pushLog(npcId, 'them', breakMsg);
-                bumpThread(npcId, { lastMsg:breakMsg, lastTime:_now(), unread:_getIncomingUnreadValue(npcId) });
-                _maybeShowIncomingBanner(npcId, breakMsg);
+                bumpThread(npcId, { lastMsg:breakMsg, lastTime:_now(), unread:0 });
                 _wxAppendBubble(msgsE, npc, 'them', breakMsg, _now());
                 requestAnimationFrame(function(){ msgsE.scrollTop = msgsE.scrollHeight; });
               }
@@ -29658,7 +29534,6 @@ function bindPageScroll(){
 // 说明：模块常驻，不随弹窗销毁；所以这里必须“幂等”
       function initOnce(){
         ensureRoot();
-        try{ _sanitizeGhostChatArtifacts(); }catch(e){}
         loadTheme();
         // ✅ 加载设置（壁纸 + 字体 + 时间模式）
         try{
@@ -29758,7 +29633,7 @@ function bindPageScroll(){
               Object.keys(localStorage).forEach(function(k){
                 if (k.indexOf(prefix) === 0){
                   var npcId = k.slice(prefix.length);
-                  if (npcId && !_isReservedGhostChatId(npcId) && _isKnownChatEntityId(npcId)) LifeEngine.tick(npcId);
+                  if (npcId) LifeEngine.tick(npcId);
                 }
               });
             }catch(e){ console.warn('[LifeEngine] global tick error:', e); }
@@ -29770,7 +29645,6 @@ function bindPageScroll(){
 
         // ★ 前台实时推送：每2.5分钟检查，触发条件满足时 AI 生成消息 + 弹窗
         try{
-
 
           function _showLifePushToast(npcId, npcName, avatarHint, text, onTap){
             try{
@@ -29805,27 +29679,6 @@ function bindPageScroll(){
             }catch(e){ console.warn('[LifePush] toast error:', e); }
           }
 
-          var _lastIncomingBannerKey = '';
-          function _maybeShowIncomingBanner(npcId, text){
-            try{
-              if (!npcId || _isReservedGhostChatId(npcId) || !_isKnownChatEntityId(npcId)) return;
-              var _docB = (typeof D !== 'undefined' && D) ? D : document;
-              if (_docB && _docB.visibilityState && _docB.visibilityState !== 'visible') return;
-              if (_isChatVisibleForNpc(npcId)) return;
-              var msg = String(text || '').trim();
-              if (!msg) return;
-              var key = String(npcId) + '::' + msg.slice(0, 48);
-              if (_lastIncomingBannerKey === key) return;
-              _lastIncomingBannerKey = key;
-              setTimeout(function(){ if (_lastIncomingBannerKey === key) _lastIncomingBannerKey = ''; }, 1800);
-              var _dbN = loadContactsDB();
-              var _npcN = findContactById(_dbN, npcId) || { id:npcId, name:String(npcId), avatar:(String(npcId).charAt(0)||'?') };
-              _showLifePushToast(npcId, _npcN.name || npcId, (_npcN.avatar || String(_npcN.name||npcId).charAt(0)), msg, function(){
-                try{ openChat(npcId); }catch(e){}
-              });
-            }catch(e){}
-          }
-
           var _lastFgPushCheck = {}; // npcId → timestamp，防止同一角色连续推
 
           var _fgPushTimer = setInterval(function(){
@@ -29834,7 +29687,7 @@ function bindPageScroll(){
               Object.keys(localStorage).forEach(function(k){
                 if (k.indexOf(prefix2) !== 0) return;
                 var npcId = k.slice(prefix2.length);
-                if (!npcId || _isReservedGhostChatId(npcId) || !_isKnownChatEntityId(npcId)) return;
+                if (!npcId) return;
 
                 // 检查开关
                 try{
@@ -29971,7 +29824,7 @@ function bindPageScroll(){
                 })(npcId, s3);
               });
             }catch(e){ console.warn('[LifePush] interval error:', e); }
-          }, 55 * 1000); // 每55秒检查一次，前台提示更及时
+          }, 2.5 * 60 * 1000); // 每2.5分钟检查
 
           if (MEOW.core?.timers) MEOW.core.timers.addInterval(_fgPushTimer);
         }catch(e){ console.warn('[LifePush] init error:', e); }
@@ -30255,10 +30108,7 @@ function _schedulePendingProactiveRecovery(source, delayMs, npcId){
 function _getTrackedLifeNpcIds(){
   try{
     var prefix = _phUID() + '_charstate_';
-    return Object.keys(localStorage)
-      .filter(function(k){ return k.indexOf(prefix) === 0; })
-      .map(function(k){ return k.slice(prefix.length); })
-      .filter(function(id){ return !!id && !_isReservedGhostChatId(id) && _isKnownChatEntityId(id); });
+    return Object.keys(localStorage).filter(function(k){ return k.indexOf(prefix) === 0; }).map(function(k){ return k.slice(prefix.length); }).filter(Boolean);
   }catch(e){ return []; }
 }
 function _getActiveApiPresetInfo(){
@@ -30351,12 +30201,11 @@ function _insertOnlineProactiveMessage(npcId, text, opts){
     var th = loadThreads();
     var thr = th.list.find(function(x){ return String(x.id) === String(npcId); });
     if (thr){
-      thr.unread = _getIncomingUnreadValue(npcId);
+      thr.unread = (thr.unread || 0) + 1;
       thr.lastMsg = finalText.slice(0,30) + (finalText.length > 30 ? '…' : '');
       thr.lastTime = Math.max(Number(thr.lastTime || 0), Number(ts || 0));
       saveThreads(th);
     }
-    _maybeShowIncomingBanner(npcId, finalText);
     try{ _writeLifeLog(npcId, { time:ts, icon:'💬', label: kind === 'daily' ? '今天主动来找你' : '主动找你说话', key:'social' }); }catch(e){}
     try{
       var meta = _loadProactiveMeta(npcId);
@@ -41587,10 +41436,10 @@ function _meowUrlBase64ToUint8Array(base64String) {
 
   function _fallbackNews(tabId) {
     return [
-      { id:'f1', type:'chance', title:'咖啡馆招募兼职', summary:'暖阳咖啡正在招募周末兼职服务员，时薪不错。', detail:'薪资$120/次，需要2小时，体力消耗中等。可以和熟悉的人一起去试试？', urgent:false, reward:'+$120 体力-20', landmark:'暖阳咖啡', action:{ label:'前往查看', type:'move', value:'暖阳咖啡' } },
+      { id:'f1', type:'chance', title:'咖啡馆招募兼职', summary:'暖阳咖啡正在招募周末兼职服务员，时薪不错。', detail:'薪资$120/次，需要2小时，体力消耗中等。可以和阿文一起去试试？', urgent:false, reward:'+$120 体力-20', landmark:'暖阳咖啡', action:{ label:'前往查看', type:'move', value:'暖阳咖啡' } },
       { id:'f2', type:'trade', title:'旧书阁特卖会', summary:'旧书阁今日全场5折，据说有珍藏版孤本。', detail:'限时一天，库存不多，心情低落时读书效果加倍。', urgent:true, reward:'好书入手', landmark:'旧书阁', action:{ label:'立即前往', type:'move', value:'旧书阁' } },
       { id:'f3', type:'event', title:'星月公园摄影展', summary:'本周末公园举办年度摄影展，免费入场。', detail:'心情+15，有机会遇见新朋友，说不定还能认识有趣的角色。', urgent:false, reward:'心情+15', landmark:'星月公园', action:{ label:'去看看', type:'move', value:'星月公园' } },
-      { id:'f4', type:'intel', title:'听说有人最近很忙', summary:'有人频繁出入市政厅，不知道在忙什么。', detail:'可以直接去联系当事人，也许正好能接上新的互动。', urgent:false, reward:'好感+', action:{ label:'打开聊天', type:'chat', value:'通讯录角色' } },
+      { id:'f4', type:'intel', title:'听说阿文最近很忙', summary:'有人看到阿文频繁出入市政厅，不知道在做什么。', detail:'可以直接找阿文聊聊，或许他有需要帮忙的地方，关系也能进一步。', urgent:false, reward:'好感+', action:{ label:'联系阿文', type:'chat', value:'阿文' } },
       { id:'f5', type:'world', title:'今日天气晴好', summary:'气温舒适，适合户外活动，体力恢复速度+10%。', detail:'难得好天气，在户外进行工作或活动时状态消耗减少。', urgent:false, reward:'体力恢复+10%', action:{ label:'查看地图', type:'move', value:'' } },
       { id:'f6', type:'chance', title:'健身房助理教练招募', summary:'铁人训练营需要一名周末助理教练，要求体力80以上。', detail:'工资$180/次，3小时，健康+5。如果你体力充足可以去试试。', urgent:false, reward:'+$180 健康+5', landmark:'铁人训练营', action:{ label:'前往报名', type:'move', value:'铁人训练营' } },
       { id:'f7', type:'chance', title:'岛民求助：寻找丢失的猫', summary:'住在海边的邻居丢了一只橘猫，悬赏$150寻找。', detail:'据说橘猫最后在公园附近出没，去那里找找看？完成后奖励$150。', urgent:true, reward:'+$150', landmark:'星月公园', action:{ label:'接取任务', type:'quest', value:'星月公园', quest:{ title:'寻找走失的橘猫', desc:'去星月公园附近寻找一只走失的橘猫，找到后送回海边邻居家。', cost:{energy:15}, reward:{money:150, mood:8} } } },
