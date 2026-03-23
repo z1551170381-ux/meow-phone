@@ -37933,6 +37933,166 @@ function _meowGetActiveApiConfig() {
 // ========== 收集角色配置 ==========
 function _meowCollectNpcs() {
   try {
+    function safeParse(raw, fallback) {
+      try { return JSON.parse(raw); } catch(e) { return fallback; }
+    }
+    function compactText(v, max) {
+      return String(v == null ? '' : v)
+        .replace(/```[\s\S]*?```/g, ' ')
+        .replace(/[\r\n\t]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, max || 1000);
+    }
+    function joinNonEmpty(arr, sep) {
+      return arr.filter(function(x){ return !!String(x || '').trim(); }).join(sep || '｜');
+    }
+    function pickFirst(obj, keys, max) {
+      if (!obj || typeof obj !== 'object') return '';
+      for (var i = 0; i < keys.length; i++) {
+        var k = keys[i];
+        if (obj[k] != null && String(obj[k]).trim()) {
+          return compactText(obj[k], max || 1000);
+        }
+      }
+      return '';
+    }
+    function getSummaryForNpc(summaryStore, npcId) {
+      try {
+        var byChat = (summaryStore && summaryStore.byChat) || {};
+        var entry = byChat[String(npcId)] || null;
+        if (!entry) return '';
+        var modes = entry.modes || {};
+        var mode = modes.online || modes.offline || Object.values(modes)[0];
+        if (!mode) return '';
+        return compactText(mode.lastSummary || mode.summary || '', 1600);
+      } catch(e) {
+        return '';
+      }
+    }
+    function getGlobalSummary(summaryStore) {
+      try {
+        var out = [];
+        var byChat = (summaryStore && summaryStore.byChat) || {};
+        Object.keys(byChat).forEach(function(id){
+          try {
+            var entry = byChat[id];
+            var modes = entry.modes || {};
+            var mode = modes.online || modes.offline || Object.values(modes)[0];
+            var txt = mode ? (mode.lastSummary || mode.summary || '') : '';
+            txt = compactText(txt, 100);
+            if (txt) out.push(txt);
+          } catch(e2) {}
+        });
+        return out.slice(0, 3).join(' | ');
+      } catch(e) {
+        return '';
+      }
+    }
+    function getRecentMemory(logsMap, npcId) {
+      try {
+        var arr = (logsMap && logsMap[String(npcId)]) || [];
+        if (!Array.isArray(arr) || !arr.length) return '';
+        arr = arr.slice(-6).map(function(m){
+          var role = String(m && m.role || '') === 'me' ? '用户' : '角色';
+          var txt = compactText(m && m.text || '', 40);
+          return txt ? (role + '：' + txt) : '';
+        }).filter(Boolean);
+        return compactText(arr.join('｜'), 1000);
+      } catch(e) {
+        return '';
+      }
+    }
+    function findMapData() {
+      try {
+        for (var i = 0; i < localStorage.length; i++) {
+          var k = localStorage.key(i);
+          if (k && (k.indexOf('meow_map') !== -1 || k.indexOf('meow_island') !== -1)) {
+            var d = safeParse(localStorage.getItem(k) || 'null', null);
+            if (d && d.name) return d;
+          }
+        }
+      } catch(e) {}
+      return null;
+    }
+    function getWorldBookSnippet() {
+      try {
+        if (!window.MEOW_WB_API || typeof window.MEOW_WB_API.getEntries !== 'function') return '';
+        var entries = window.MEOW_WB_API.getEntries() || [];
+        return entries.slice(0, 5).map(function(e){
+          var head = e && (e.comment || e.key || e.title || '');
+          var body = e && (e.content || e.text || '');
+          return compactText(joinNonEmpty([head, body], ': '), 80);
+        }).filter(Boolean).join(' / ');
+      } catch(e) {
+        return '';
+      }
+    }
+    function formatNpcState(state) {
+      try {
+        if (!state || typeof state !== 'object') return '';
+        var parts = [];
+        if (state.moodText) parts.push('心情：' + state.moodText);
+        if (state.bond) parts.push('关系：' + state.bond);
+        if (state.currentBehavior && state.currentBehavior.label) {
+          parts.push('当前在：' + state.currentBehavior.label);
+        }
+        if (state.schedule) {
+          if (typeof state.schedule === 'string') parts.push('日程：' + compactText(state.schedule, 80));
+          else if (Array.isArray(state.schedule) && state.schedule.length) parts.push('日程已设置');
+        }
+        if (state.attrs && typeof state.attrs === 'object') {
+          var attrs = [];
+          ['energy','mood','hunger','health'].forEach(function(k){
+            if (state.attrs[k] != null) attrs.push(k + ':' + state.attrs[k]);
+          });
+          if (attrs.length) parts.push('属性：' + attrs.join(' / '));
+        }
+        return compactText(parts.join('；'), 500);
+      } catch(e) {
+        return '';
+      }
+    }
+    function formatUserState(userState, worldPlayer) {
+      try {
+        var parts = [];
+        if (worldPlayer && typeof worldPlayer === 'object') {
+          if (worldPlayer.location) parts.push('位置：' + worldPlayer.location);
+          ['energy','mood','hunger','health','money'].forEach(function(k){
+            if (worldPlayer[k] != null) parts.push(k + ':' + worldPlayer[k]);
+          });
+        }
+        if (userState && userState.attrs) {
+          var attrs = [];
+          ['energy','mood','hunger','health'].forEach(function(k){
+            if (userState.attrs[k] != null) attrs.push(k + ':' + userState.attrs[k]);
+          });
+          if (attrs.length) parts.push('用户属性：' + attrs.join(' / '));
+        }
+        return compactText(parts.join('；'), 500);
+      } catch(e) {
+        return '';
+      }
+    }
+    function formatUserProfile(userState, worldPlayer) {
+      try {
+        var parts = [];
+        if (worldPlayer && typeof worldPlayer === 'object') {
+          if (worldPlayer.location) parts.push('当前常驻地点：' + worldPlayer.location);
+          if (worldPlayer.money != null) parts.push('当前资金：' + worldPlayer.money);
+        }
+        if (userState && Array.isArray(userState.customAttrs) && userState.customAttrs.length) {
+          var labels = userState.customAttrs.slice(0, 6).map(function(x){
+            return x && x.label ? x.label : '';
+          }).filter(Boolean);
+          if (labels.length) parts.push('用户自定义属性：' + labels.join('、'));
+        }
+        return compactText(parts.join('；'), 1000);
+      } catch(e) {
+        return '';
+      }
+    }
+
     // 自动扫描真实存在的联系人 key，不再写死 standalone_main
     var uid = 'standalone_main';
     var raw = localStorage.getItem('meow_phone_c_' + uid + '_contacts_v1');
@@ -37960,19 +38120,81 @@ function _meowCollectNpcs() {
     var db = JSON.parse(raw);
     var list = (db && db.list) || [];
 
-    return list.filter(function(c){ return c && c.id; }).map(function(c) {
-      var extraRaw = localStorage.getItem('meow_phone_c_' + uid + '_char_extra_' + String(c.id));
-      var extra = {};
-      try { extra = JSON.parse(extraRaw || '{}'); } catch(e) {}
+    var summaryStore = safeParse(localStorage.getItem('meow_phone_chat_summary_v1') || '{}', {});
+    var logsDb = safeParse(localStorage.getItem('meow_phone_c_' + uid + '_im_logs_v1') || '{}', {});
+    var logsMap = (logsDb && logsDb.map) || {};
+    var mapData = findMapData();
+    var wbSnippet = getWorldBookSnippet();
+    var globalSummary = getGlobalSummary(summaryStore);
 
-      var stateRaw = localStorage.getItem(uid + '_charstate_' + String(c.id));
-      var state = {};
-      try { state = JSON.parse(stateRaw || '{}'); } catch(e) {}
+    var userState = safeParse(localStorage.getItem('meow_phone_g_userstate_v1') || 'null', null);
+    var worldPlayer = null;
+    try {
+      if (window.WorldState && window.WorldState.player) worldPlayer = window.WorldState.player;
+    } catch(e) {}
+
+    return list.filter(function(c){ return c && c.id; }).map(function(c) {
+      var npcId = String(c.id);
+
+      var extraRaw = localStorage.getItem('meow_phone_c_' + uid + '_char_extra_' + npcId);
+      var extra = safeParse(extraRaw || '{}', {});
+
+      var stateRaw = localStorage.getItem('meow_phone_c_' + uid + '_charstate_' + npcId);
+      var state = safeParse(stateRaw || '{}', {});
+
+      var sceneRaw = localStorage.getItem('meow_phone_c_' + uid + '_scene_' + npcId);
+      var scene = safeParse(sceneRaw || '{}', {});
+
+      var summary = getSummaryForNpc(summaryStore, npcId);
+      var recentMemory = getRecentMemory(logsMap, npcId);
+
+      var currentScene = compactText(joinNonEmpty([
+        scene.name || '',
+        scene.description || '',
+        scene.customPrompt || ''
+      ], '｜'), 300);
+
+      var location = compactText(scene.location || scene.name || (worldPlayer && worldPlayer.location) || '', 150);
+
+      var worldContext = compactText(joinNonEmpty([
+        mapData && mapData.name ? ('世界/地图：' + mapData.name) : '',
+        mapData && Array.isArray(mapData.landmarks) && mapData.landmarks.length
+          ? ('地标：' + mapData.landmarks.slice(0, 8).map(function(l){ return l.customName || l.name; }).filter(Boolean).join('、'))
+          : '',
+        currentScene ? ('当前场景：' + currentScene) : '',
+        wbSnippet ? ('世界书：' + wbSnippet) : '',
+        globalSummary ? ('近期事件：' + globalSummary) : ''
+      ], '\n'), 1600);
+
+      var profile = compactText(joinNonEmpty([
+        c.profile || '',
+        c.identity ? ('身份：' + c.identity) : '',
+        c.occupation ? ('职业：' + c.occupation) : '',
+        c.personality ? ('性格：' + c.personality) : '',
+        c.status ? ('状态：' + c.status) : '',
+        c.relations ? ('关系：' + c.relations) : '',
+        c.bio ? ('简介：' + c.bio) : '',
+        extra.profile || '',
+        extra.bio ? ('补充：' + extra.bio) : ''
+      ], '\n'), 1200);
 
       return {
-        id: String(c.id),
+        id: npcId,
         name: String(c.name || c.id),
-        enableLifePush: extra.enableLifePush !== false
+        enableLifePush: extra.enableLifePush !== false,
+
+        profile: profile,
+        bond: String((state && state.bond) || extra.bond || '普通'),
+        onlineChatPrompt: compactText(extra.onlineChatPrompt || '', 1200),
+
+        summary: summary,
+        world_context: worldContext,
+        recent_memory: recentMemory,
+        npc_state: formatNpcState(state),
+        user_state: formatUserState(userState, worldPlayer),
+        current_scene: currentScene,
+        location: location,
+        user_profile: formatUserProfile(userState, worldPlayer)
       };
     });
   } catch(e) {
@@ -37997,14 +38219,27 @@ async function _meowSyncSubscription() {
       });
     }
 
-    var uid = 'standalone_main';
-    var npcs = _meowCollectNpcs().map(function(n){
-      return {
-        id: String(n.id || ''),
-        name: String(n.name || n.id || ''),
-        enableLifePush: n.enableLifePush !== false
-      };
-    });
+var uid = 'standalone_main';
+var npcs = _meowCollectNpcs().map(function(n){
+  return {
+    id: String(n.id || ''),
+    name: String(n.name || n.id || ''),
+    enableLifePush: n.enableLifePush !== false,
+
+    profile: String(n.profile || ''),
+    bond: String(n.bond || '普通'),
+    onlineChatPrompt: String(n.onlineChatPrompt || ''),
+
+    summary: String(n.summary || ''),
+    world_context: String(n.world_context || ''),
+    recent_memory: String(n.recent_memory || ''),
+    npc_state: String(n.npc_state || ''),
+    user_state: String(n.user_state || ''),
+    current_scene: String(n.current_scene || ''),
+    location: String(n.location || ''),
+    user_profile: String(n.user_profile || '')
+  };
+});
 
     var enableBgPush = localStorage.getItem('meow_bg_push_enabled') === '1';
     var apiConfig = enableBgPush ? _meowGetActiveApiConfig() : null;
