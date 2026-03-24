@@ -14674,6 +14674,65 @@ function _buildFallbackAIFriendCandidate(){
               btn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor" style="width:13px;height:13px;"><path d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>拉取恢复';
             }
           });
+
+          // ===== 自动同步开关 =====
+          (function(){
+            var AUTO_KEY = 'meow_gist_autosync';
+            var isOn = localStorage.getItem(AUTO_KEY) === '1';
+
+            var anchor = container.querySelector('#gistLastSync');
+            if (!anchor) return;
+
+            var row = document.createElement('div');
+            row.id = 'gistAutoSyncRow';
+            row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0 2px;border-top:1px solid rgba(0,0,0,.05);margin-top:6px;';
+
+            row.innerHTML =
+              '<div style="display:flex;flex-direction:column;gap:2px;">' +
+                '<span style="font-size:12px;font-weight:600;color:var(--ph-text);">自动同步</span>' +
+                '<span id="gistAutoSyncLabel" style="font-size:10px;color:var(--ph-text-dim);line-height:1.4;"></span>' +
+              '</div>' +
+              '<label style="position:relative;width:42px;height:24px;flex-shrink:0;cursor:pointer;">' +
+                '<input id="gistAutoSyncToggle" type="checkbox"' + (isOn ? ' checked' : '') +
+                  ' style="position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;margin:0;z-index:2;">' +
+                '<span id="gistAutoSyncTrack" style="position:absolute;inset:0;border-radius:12px;transition:background .2s;background:' +
+                  (isOn ? 'rgba(7,193,96,.85)' : 'rgba(0,0,0,.12)') + ';"></span>' +
+                '<span id="gistAutoSyncThumb" style="position:absolute;top:2px;left:' + (isOn ? '20px' : '2px') +
+                  ';width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .2s;"></span>' +
+              '</label>';
+
+            anchor.parentNode.insertBefore(row, anchor.nextSibling);
+
+            function updateLabel(){
+              var el = container.querySelector('#gistAutoSyncLabel');
+              if (!el) return;
+              var on2 = localStorage.getItem(AUTO_KEY) === '1';
+              var cfg2 = loadGistCfg();
+              if (on2 && cfg2.lastSync) {
+                el.textContent = '上次自动同步：' + new Date(cfg2.lastSync).toLocaleString('zh-CN', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
+              } else if (on2) {
+                el.textContent = '已开启，数据变化时自动备份';
+              } else {
+                el.textContent = '关闭时需手动点击按钮备份';
+              }
+            }
+            updateLabel();
+
+            var toggle = container.querySelector('#gistAutoSyncToggle');
+            if (toggle) {
+              toggle.addEventListener('change', function() {
+                var checked = this.checked;
+                localStorage.setItem(AUTO_KEY, checked ? '1' : '0');
+                var track = container.querySelector('#gistAutoSyncTrack');
+                var thumb = container.querySelector('#gistAutoSyncThumb');
+                if (track) track.style.background = checked ? 'rgba(7,193,96,.85)' : 'rgba(0,0,0,.12)';
+                if (thumb) thumb.style.left = checked ? '20px' : '2px';
+                updateLabel();
+                try { toast(checked ? '自动同步已开启' : '自动同步已关闭'); } catch(e) {}
+              });
+            }
+          })();
+
         })();
 
         // ===== 存储分析：显示 top 15 最大 key =====
@@ -43713,248 +43772,71 @@ function _meowUrlBase64ToUint8Array(base64String) {
   console.log('[BgPush] 后台推送模块已加载');
 })();
 <script>
-// ====== meow-gist-autosync.js — Gist 自动同步（含 UI 开关）======
-//
-// 功能：
-//   - 设置页增加"自动同步"开关（在推送/拉取按钮下方）
-//   - 开启后：切走/关页面时自动推送，每 10 分钟检查一次
-//   - 关闭时：只能手动点按钮
-//   - 数据没变化不会白跑，两次同步至少间隔 5 分钟
-//
-// ★ 粘贴到 index.html 最末尾的 <script> 块中（</body> 之前）
-
+// ====== Gist 自动同步后台逻辑 ======
 (function() {
   'use strict';
-
   var GIST_CFG_KEY = 'meow_gist_cfg';
   var AUTO_SYNC_KEY = 'meow_gist_autosync';
   var MIN_SYNC_INTERVAL = 5 * 60 * 1000;
-  var AUTO_CHECK_INTERVAL = 10 * 60 * 1000;
   var _isDirty = false;
   var _isSyncing = false;
 
-  // ─── 配置读写 ───
-
   function loadGistCfg() {
-    try { return JSON.parse(localStorage.getItem(GIST_CFG_KEY) || '{}'); }
-    catch(e) { return {}; }
+    try { return JSON.parse(localStorage.getItem(GIST_CFG_KEY) || '{}'); } catch(e) { return {}; }
   }
-  function saveGistCfg(d) {
-    localStorage.setItem(GIST_CFG_KEY, JSON.stringify(d));
-  }
-  function isAutoSync() {
-    return localStorage.getItem(AUTO_SYNC_KEY) === '1';
-  }
-  function setAutoSync(on) {
-    localStorage.setItem(AUTO_SYNC_KEY, on ? '1' : '0');
-  }
-  function isConfigured() {
-    return !!(loadGistCfg().token);
-  }
-  function timeSinceLastSync() {
-    var cfg = loadGistCfg();
-    return cfg.lastSync ? Date.now() - cfg.lastSync : Infinity;
-  }
-
-  // ─── 自动推送 ───
+  function saveGistCfg(d) { localStorage.setItem(GIST_CFG_KEY, JSON.stringify(d)); }
+  function isAutoSync() { return localStorage.getItem(AUTO_SYNC_KEY) === '1'; }
+  function isConfigured() { return !!(loadGistCfg().token); }
+  function timeSinceLastSync() { var c = loadGistCfg(); return c.lastSync ? Date.now() - c.lastSync : Infinity; }
 
   async function autoPush() {
-    if (_isSyncing) return;
-    if (!isConfigured()) return;
+    if (_isSyncing || !isConfigured()) return;
     if (!_isDirty && timeSinceLastSync() < MIN_SYNC_INTERVAL) return;
-
-    var cfg = loadGistCfg();
-    if (!cfg.token) return;
-
+    var cfg = loadGistCfg(); if (!cfg.token) return;
     _isSyncing = true;
     try {
       var pack = {};
       for (var i = 0; i < localStorage.length; i++) {
         var k = localStorage.key(i);
-        if (k && k.startsWith('meow_') && k !== GIST_CFG_KEY) {
-          pack[k] = localStorage.getItem(k);
-        }
+        if (k && k.startsWith('meow_') && k !== GIST_CFG_KEY) pack[k] = localStorage.getItem(k);
       }
-      var body = {
-        description: '喵喵小手机数据备份',
-        public: false,
-        files: { 'meow_backup.json': { content: JSON.stringify(pack) } }
-      };
       var method = cfg.gistId ? 'PATCH' : 'POST';
-      var url = cfg.gistId
-        ? 'https://api.github.com/gists/' + cfg.gistId
-        : 'https://api.github.com/gists';
+      var url = cfg.gistId ? 'https://api.github.com/gists/' + cfg.gistId : 'https://api.github.com/gists';
       var r = await fetch(url, {
         method: method,
         headers: { 'Authorization': 'token ' + cfg.token, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body)
+        body: JSON.stringify({ description: '喵喵小手机数据备份', public: false, files: { 'meow_backup.json': { content: JSON.stringify(pack) } } })
       });
       if (!r.ok) throw new Error('HTTP ' + r.status);
       var d = await r.json();
-      cfg.gistId = d.id;
-      cfg.lastSync = Date.now();
-      saveGistCfg(cfg);
+      cfg.gistId = d.id; cfg.lastSync = Date.now(); saveGistCfg(cfg);
       _isDirty = false;
       console.log('[GistSync] 自动推送成功');
-      try { _updateAutoSyncLabel(); } catch(e) {}
-    } catch(e) {
-      console.warn('[GistSync] 自动推送失败:', e.message || e);
-    } finally {
-      _isSyncing = false;
-    }
+    } catch(e) { console.warn('[GistSync] 自动推送失败:', e.message || e); }
+    finally { _isSyncing = false; }
   }
 
-  // ─── 监听数据变化 ───
-
-  var _origSetItem = localStorage.setItem;
+  var _origSet = localStorage.setItem;
   localStorage.setItem = function(key, value) {
-    _origSetItem.call(localStorage, key, value);
-    if (key && key.startsWith('meow_') && key !== GIST_CFG_KEY && key !== AUTO_SYNC_KEY) {
-      _isDirty = true;
-    }
+    _origSet.call(localStorage, key, value);
+    if (key && key.startsWith('meow_') && key !== GIST_CFG_KEY && key !== AUTO_SYNC_KEY) _isDirty = true;
   };
-
-  window.addEventListener('storage', function(e) {
-    if (e.key && e.key.startsWith('meow_') && e.key !== GIST_CFG_KEY) {
-      _isDirty = true;
-    }
-  });
-
-  if (timeSinceLastSync() > MIN_SYNC_INTERVAL) {
-    _isDirty = true;
-  }
-
-  // ─── 自动触发 ───
+  if (timeSinceLastSync() > MIN_SYNC_INTERVAL) _isDirty = true;
 
   document.addEventListener('visibilitychange', function() {
-    if (document.visibilityState === 'hidden' && isAutoSync()) {
-      autoPush();
-    }
+    if (document.visibilityState === 'hidden' && isAutoSync()) autoPush();
   });
-
-  window.addEventListener('pagehide', function() {
-    if (_isDirty && isConfigured() && isAutoSync()) {
-      autoPush();
-    }
-  });
-
   setInterval(function() {
-    if (document.visibilityState === 'visible' && _isDirty && isConfigured() && isAutoSync()) {
-      autoPush();
-    }
-  }, AUTO_CHECK_INTERVAL);
-
-
-  // ─── ★ 注入 UI 开关 ───
-
-  function _updateAutoSyncLabel() {
-    var el = document.getElementById('gistAutoSyncLabel');
-    if (!el) return;
-    var cfg = loadGistCfg();
-    if (isAutoSync() && cfg.lastSync) {
-      el.textContent = '上次自动同步：' + new Date(cfg.lastSync).toLocaleString('zh-CN', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
-    } else if (isAutoSync()) {
-      el.textContent = '已开启，数据变化时自动备份';
-    } else {
-      el.textContent = '关闭时需手动点击按钮备份';
-    }
-  }
-
-  function injectToggleUI() {
-    var anchor = document.getElementById('gistLastSync');
-    if (!anchor) return;
-    if (document.getElementById('gistAutoSyncRow')) return;
-
-    var on = isAutoSync();
-
-    var row = document.createElement('div');
-    row.id = 'gistAutoSyncRow';
-    row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0 2px;border-top:1px solid rgba(0,0,0,.05);margin-top:6px;';
-
-    row.innerHTML =
-      '<div style="display:flex;flex-direction:column;gap:2px;">' +
-        '<span style="font-size:12px;font-weight:600;color:var(--ph-text);">自动同步</span>' +
-        '<span id="gistAutoSyncLabel" style="font-size:10px;color:var(--ph-text-dim);line-height:1.4;"></span>' +
-      '</div>' +
-      '<label style="position:relative;width:42px;height:24px;flex-shrink:0;cursor:pointer;">' +
-        '<input id="gistAutoSyncToggle" type="checkbox"' + (on ? ' checked' : '') +
-          ' style="position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;margin:0;z-index:2;">' +
-        '<span id="gistAutoSyncTrack" style="position:absolute;inset:0;border-radius:12px;transition:background .2s;background:' +
-          (on ? 'rgba(7,193,96,.85)' : 'rgba(0,0,0,.12)') + ';"></span>' +
-        '<span id="gistAutoSyncThumb" style="position:absolute;top:2px;left:' + (on ? '20px' : '2px') +
-          ';width:20px;height:20px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:left .2s;"></span>' +
-      '</label>';
-
-    anchor.parentNode.insertBefore(row, anchor.nextSibling);
-
-    var toggle = document.getElementById('gistAutoSyncToggle');
-    if (toggle) {
-      toggle.addEventListener('change', function() {
-        var checked = this.checked;
-        setAutoSync(checked);
-
-        var track = document.getElementById('gistAutoSyncTrack');
-        var thumb = document.getElementById('gistAutoSyncThumb');
-        if (track) track.style.background = checked ? 'rgba(7,193,96,.85)' : 'rgba(0,0,0,.12)';
-        if (thumb) thumb.style.left = checked ? '20px' : '2px';
-
-        _updateAutoSyncLabel();
-
-        if (checked) {
-          try { toast('自动同步已开启'); } catch(e) {}
-          _isDirty = true;
-          autoPush();
-        } else {
-          try { toast('自动同步已关闭'); } catch(e) {}
-        }
-      });
-    }
-
-    _updateAutoSyncLabel();
-  }
-
-  // 设置页动态渲染，用 MutationObserver 监听
-  var _injected = false;
-  function tryInject() {
-    if (_injected && document.getElementById('gistAutoSyncRow')) return;
-    var el = document.getElementById('gistLastSync');
-    if (el) {
-      injectToggleUI();
-      _injected = true;
-    }
-  }
-
-  tryInject();
-
-  var observer = new MutationObserver(function() {
-    tryInject();
-    // 设置页关闭再打开时重新注入
-    if (_injected && !document.getElementById('gistAutoSyncRow')) {
-      _injected = false;
-    }
-  });
-  observer.observe(document.body, { childList: true, subtree: true });
-
-
-  // ─── 暴露接口 ───
+    if (document.visibilityState === 'visible' && _isDirty && isConfigured() && isAutoSync()) autoPush();
+  }, 10 * 60 * 1000);
 
   window._meowGistPush = autoPush;
   window._meowGistStatus = function() {
     var cfg = loadGistCfg();
-    return {
-      configured: !!cfg.token,
-      autoSync: isAutoSync(),
-      gistId: cfg.gistId || null,
-      lastSync: cfg.lastSync ? new Date(cfg.lastSync).toLocaleString() : '从未',
-      isDirty: _isDirty
-    };
+    return { configured: !!cfg.token, autoSync: isAutoSync(), lastSync: cfg.lastSync ? new Date(cfg.lastSync).toLocaleString() : '从未', isDirty: _isDirty };
   };
-
-  console.log('[GistSync] 自动同步模块已加载' +
-    (isConfigured() ? '（已配置' + (isAutoSync() ? '·自动）' : '·手动）') : '（未配置）'));
+  console.log('[GistSync] 后台自动同步已加载');
 })();
-
-</script>
 </script>
 </body>
 </html>
