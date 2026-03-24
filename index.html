@@ -14534,6 +14534,8 @@ function _buildFallbackAIFriendCandidate(){
                   <svg viewBox="0 0 24 24" fill="currentColor" style="width:15px;height:15px;flex-shrink:0;opacity:.55;"><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.338-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0112 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.202 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.019 10.019 0 0022 12.017C22 6.484 17.522 2 12 2z"/></svg>
                   <span style="font-size:13px;font-weight:600;color:var(--ph-text);">GitHub Gist 云同步</span>
                   <span id="gistStatusBadge" style="font-size:10px;padding:2px 7px;border-radius:10px;background:rgba(0,0,0,.05);color:var(--ph-text-dim);">未配置</span>
+                  <span style="flex:1;"></span>
+                  <span id="gistAutoSyncSlot"></span>
                 </div>
                 <div style="font-size:11px;color:var(--ph-text-dim);line-height:1.5;">数据同步到你的私有 Gist，换设备随时拉取</div>
               </div>
@@ -14575,8 +14577,8 @@ function _buildFallbackAIFriendCandidate(){
             if (!badge) return;
             if (cfg.token){
               badge.textContent = cfg.gistId ? '已配置' : '有 Token';
-              badge.style.background = 'rgba(7,193,96,.12)';
-              badge.style.color = 'rgba(7,193,96,.9)';
+              badge.style.background = 'rgba(0,0,0,.06)';
+              badge.style.color = 'var(--ph-text-sub, rgba(20,24,28,.5))';
               if (inp) inp.value = cfg.token;
             }
             var ls = container.querySelector('#gistLastSync');
@@ -14675,52 +14677,32 @@ function _buildFallbackAIFriendCandidate(){
             }
           });
 
-          // ===== 自动同步开关 =====
+          // ===== 自动同步开关（标题行右侧）=====
           (function(){
             var AUTO_KEY = 'meow_gist_autosync';
             var isOn = localStorage.getItem(AUTO_KEY) === '1';
 
-            var anchor = container.querySelector('#gistLastSync');
-            if (!anchor) return;
+            var slot = container.querySelector('#gistAutoSyncSlot');
+            if (!slot) return;
 
-            // 读取当前主题高亮色（跟设置页开关联动）
-            var accentColor = getComputedStyle(document.documentElement).getPropertyValue('--ph-accent').trim() || '#07c160';
-            var accentBg = accentColor.replace(')', ',.18)').replace('rgb(', 'rgba(');
-            // fallback
-            if (accentBg === accentColor) accentBg = 'rgba(7,193,96,.18)';
-
-            var row = document.createElement('div');
-            row.id = 'gistAutoSyncRow';
-            row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 0 0;margin-top:4px;';
-
-            row.innerHTML =
-              '<div style="display:flex;flex-direction:column;gap:1px;">' +
-                '<span style="font-size:12px;font-weight:500;color:var(--ph-text);">自动同步</span>' +
-                '<span id="gistAutoSyncLabel" style="font-size:10px;color:var(--ph-text-dim);line-height:1.4;"></span>' +
-              '</div>' +
-              '<label style="position:relative;width:40px;height:22px;flex-shrink:0;cursor:pointer;">' +
-                '<input id="gistAutoSyncToggle" type="checkbox"' + (isOn ? ' checked' : '') +
-                  ' style="position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;margin:0;z-index:2;">' +
-                '<span id="gistAutoSyncTrack" style="position:absolute;inset:0;border-radius:11px;transition:background .2s;background:' +
-                  (isOn ? 'var(--ph-accent,#07c160)' : 'rgba(0,0,0,.1)') + ';"></span>' +
-                '<span id="gistAutoSyncThumb" style="position:absolute;top:2px;left:' + (isOn ? '20px' : '2px') +
-                  ';width:18px;height:18px;border-radius:50%;background:#fff;box-shadow:0 .5px 2px rgba(0,0,0,.18);transition:left .2s;"></span>' +
+            slot.innerHTML =
+              '<label style="position:relative;display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;">' +
+                '<span id="gistAutoSyncLabel" style="font-size:10px;color:var(--ph-text-dim);white-space:nowrap;"></span>' +
+                '<span style="position:relative;width:36px;height:20px;flex-shrink:0;">' +
+                  '<input id="gistAutoSyncToggle" type="checkbox"' + (isOn ? ' checked' : '') +
+                    ' style="position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;margin:0;z-index:2;">' +
+                  '<span id="gistAutoSyncTrack" style="position:absolute;inset:0;border-radius:10px;transition:background .2s;background:' +
+                    (isOn ? 'var(--ph-accent,#07c160)' : 'rgba(0,0,0,.1)') + ';"></span>' +
+                  '<span id="gistAutoSyncThumb" style="position:absolute;top:2px;left:' + (isOn ? '18px' : '2px') +
+                    ';width:16px;height:16px;border-radius:50%;background:#fff;box-shadow:0 .5px 2px rgba(0,0,0,.15);transition:left .2s;"></span>' +
+                '</span>' +
               '</label>';
-
-            anchor.parentNode.insertBefore(row, anchor.nextSibling);
 
             function updateLabel(){
               var el = container.querySelector('#gistAutoSyncLabel');
               if (!el) return;
               var on2 = localStorage.getItem(AUTO_KEY) === '1';
-              var cfg2 = loadGistCfg();
-              if (on2 && cfg2.lastSync) {
-                el.textContent = '上次：' + new Date(cfg2.lastSync).toLocaleString('zh-CN', { month:'numeric', day:'numeric', hour:'2-digit', minute:'2-digit' });
-              } else if (on2) {
-                el.textContent = '切出时自动备份';
-              } else {
-                el.textContent = '手动备份';
-              }
+              el.textContent = on2 ? '自动' : '手动';
             }
             updateLabel();
 
@@ -14732,7 +14714,7 @@ function _buildFallbackAIFriendCandidate(){
                 var track = container.querySelector('#gistAutoSyncTrack');
                 var thumb = container.querySelector('#gistAutoSyncThumb');
                 if (track) track.style.background = checked ? 'var(--ph-accent,#07c160)' : 'rgba(0,0,0,.1)';
-                if (thumb) thumb.style.left = checked ? '20px' : '2px';
+                if (thumb) thumb.style.left = checked ? '18px' : '2px';
                 updateLabel();
                 try { toast(checked ? '自动同步已开启' : '自动同步已关闭'); } catch(e) {}
               });
