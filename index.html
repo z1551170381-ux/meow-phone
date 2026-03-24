@@ -30510,9 +30510,15 @@ function bindPageScroll(){
                   if (ce2.enableLifePush === false) return;
                 }catch(e){ return; }
 
-                // 冷却：同一角色 30 分钟内不重复推
+                // 冷却：同一角色 12 分钟内不重复推
                 var lastPush = _lastFgPushCheck[npcId] || 0;
                 if (Date.now() - lastPush < 12 * 60 * 1000) return;
+
+                // ★ 检查后端是否最近已经推过（拉回来的消息会更新 meta）
+                try {
+                  var _pmCheck = _loadProactiveMeta(npcId);
+                  if (_pmCheck.lastOnlinePushAt && (Date.now() - Number(_pmCheck.lastOnlinePushAt || 0) < 30 * 60 * 1000)) return;
+                } catch(e) {}
 
                 var s3 = _loadCharState(npcId);
                 if (!s3 || !s3.attrs) return;
@@ -30923,7 +30929,9 @@ function _schedulePendingProactiveRecovery(source, delayMs, npcId){
 function _getTrackedLifeNpcIds(){
   try{
     var prefix = _phUID() + '_charstate_';
-    return Object.keys(localStorage).filter(function(k){ return k.indexOf(prefix) === 0; }).map(function(k){ return k.slice(prefix.length); }).filter(Boolean);
+    // ★ 排除系统/保留 ID，防止给"自己"或系统对象生成主动消息
+    var reserved = {player:1,system:1,user:1,me:1,self:1,chat:1,chatdetail:1,contacts:1,discover:1,settings:1,moments:1,forum:1,browser:1,weather:1,sms:1,calendar:1,shop:1,map:1,home:1,phone:1,app:1,null:1,undefined:1};
+    return Object.keys(localStorage).filter(function(k){ return k.indexOf(prefix) === 0; }).map(function(k){ return k.slice(prefix.length); }).filter(function(id){ return id && !reserved[id.toLowerCase()]; });
   }catch(e){ return []; }
 }
 function _getActiveApiPresetInfo(){
@@ -39054,7 +39062,16 @@ var npcs = _meowCollectNpcs().map(function(n){
 });
 
     var enableBgPush = localStorage.getItem('meow_bg_push_enabled') === '1';
-    var apiConfig = enableBgPush ? _meowGetActiveApiConfig() : null;
+
+    // ★ 始终读取并清洗 API 配置，不再依赖 enableBgPush 开关
+    var apiConfig = _meowGetActiveApiConfig();
+    if (apiConfig && apiConfig.model) {
+      // 清洗模型名：去掉中转站常见的 [按次] [限免] 等前缀
+      apiConfig.model = String(apiConfig.model)
+        .replace(/^\[.*?\]\s*/g, '')  // [按次]gpt-4o → gpt-4o
+        .replace(/^\(.*?\)\s*/g, '')  // (按次)gpt-4o → gpt-4o
+        .trim();
+    }
 
     var res = await fetch('/api/subscribe', {
       method: 'POST',
@@ -39156,6 +39173,13 @@ async function _meowPullOfflineMessages() {
       var kind = String(msg.kind || 'daily');
       if (!npcId || !text) return;
 
+      // ★ 质检：丢弃后端的兜底短句/垃圾消息，避免跟前端活人消息冲突
+      if (typeof _looksLikeGarbage === 'function' && _looksLikeGarbage(text)) {
+        console.log('[MeowPush] 丢弃后端低质量消息:', text.slice(0, 20));
+        if (ts > maxTs) maxTs = ts;
+        return;
+      }
+
       logs.map[npcId] = logs.map[npcId] || [];
 
       // 去重：同 npcId + 同 ts + 同 text 就不再插一次
@@ -39188,6 +39212,24 @@ async function _meowPullOfflineMessages() {
 
       inserted++;
       if (ts > maxTs) maxTs = ts;
+
+      // ★ 关键：同步更新 proactiveMeta，告诉前端"后端已经发过了，别再生成"
+      try {
+        if (typeof _loadProactiveMeta === 'function' && typeof _saveProactiveMeta === 'function') {
+          var pmeta = _loadProactiveMeta(npcId);
+          pmeta.lastOnlinePushAt = ts;
+          pmeta.lastInsertedAt = ts;
+          if (kind === 'daily') {
+            pmeta.lastOnlineDailyDate = (function(){ var d=new Date(ts); return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0'); })();
+            pmeta.lastOnlineDailySuccessAt = ts;
+          }
+          if (kind === 'random') {
+            pmeta.lastOnlineRandomAt = ts;
+            pmeta.lastOnlineRandomSuccessAt = ts;
+          }
+          _saveProactiveMeta(npcId, pmeta);
+        }
+      } catch(e2) {}
     });
 
     // 统一回算每个线程的最后一条消息，避免列表预览停在旧值
