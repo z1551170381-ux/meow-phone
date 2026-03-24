@@ -8817,64 +8817,17 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
           if (act === 'afRunSingle'){
             var appName=t.getAttribute('data-afapp');
             if(appName){
-              // ★ 资讯/购物/工作走独立 AI 生成器，真正调用 API 并写入数据
-              if (appName === 'news') {
+              if(['news','shop','work','map','mapLog'].indexOf(appName) >= 0 && typeof window._meowRunWorldBundleTargets === 'function'){
                 root.querySelectorAll('.afSettingsModal').forEach(function(m){m.remove();});
-                try{ toast('📡 正在刷新资讯…'); }catch(e){}
-                // 清缓存
-                try{ for(var _nk=0;_nk<localStorage.length;_nk++){var _nkey=localStorage.key(_nk);if(_nkey&&_nkey.indexOf('meow.news.cache')===0)localStorage.removeItem(_nkey);} }catch(e){}
-                // 调用 AI 生成并写入缓存
-                if(typeof window._meowGenerateNews === 'function'){
-                  window._meowGenerateNews('all').then(function(items){
-                    if(items && items.length){
-                      try{ localStorage.setItem('meow.news.cache.v1_all', JSON.stringify({items:items,at:Date.now()})); }catch(e){}
-                      try{ toast('✅ 资讯已刷新（'+items.length+'条）'); }catch(e){}
-                    } else {
-                      try{ toast('⚠️ 资讯生成为空，使用默认数据'); }catch(e){}
-                    }
-                    if(state.app==='news') renderApp('news');
-                  }).catch(function(e){ try{ toast('❌ 资讯生成失败: '+e.message); }catch(e2){} });
-                } else {
-                  if(state.app==='news') renderApp('news');
-                }
-                return;
-              }
-              if (appName === 'shop') {
-                root.querySelectorAll('.afSettingsModal').forEach(function(m){m.remove();});
-                try{ toast('🛒 正在刷新商品…'); }catch(e){}
-                // 清除商品缓存并调用 AI 生成
-                try{ localStorage.removeItem('meow.shop.products.v1'); }catch(e){}
-                if(typeof window._meowGenerateShopProducts === 'function'){
-                  window._meowGenerateShopProducts('food').then(function(products){
-                    if(products && products.length){
-                      try{ localStorage.setItem('meow.shop.products.v1', JSON.stringify({food:products,at:Date.now()})); }catch(e){}
-                      try{ toast('✅ 商品已刷新（'+products.length+'件）'); }catch(e){}
-                    } else {
-                      try{ toast('⚠️ 商品生成为空，使用默认数据'); }catch(e){}
-                    }
-                    if(state.app==='shop') renderApp('shop');
-                  }).catch(function(e){ try{ toast('❌ 商品生成失败: '+e.message); }catch(e2){} });
-                } else {
-                  if(state.app==='shop') renderApp('shop');
-                }
-                return;
-              }
-              if (appName === 'work') {
-                root.querySelectorAll('.afSettingsModal').forEach(function(m){m.remove();});
-                try{ toast('💼 正在刷新工作…'); }catch(e){}
-                // 优先用页面内的刷新（会渲染），否则用全局生成器
-                if(typeof window._workRefreshAI === 'function'){
-                  window._workRefreshAI();
-                } else if(typeof window._meowGenerateAIWork === 'function'){
-                  window._meowGenerateAIWork().then(function(items){
-                    if(items && items.length){
-                      try{ toast('✅ 工作已刷新（'+items.length+'项）'); }catch(e){}
-                    } else {
-                      try{ toast('⚠️ 工作生成为空，使用默认工作'); }catch(e){}
-                    }
-                    if(state.app==='work') renderApp('work');
-                  }).catch(function(e){ try{ toast('❌ 工作生成失败: '+e.message); }catch(e2){} });
-                }
+                var labelMap = { news:'📡 正在刷新资讯…', shop:'🛒 正在刷新商品…', work:'💼 正在刷新工作…', map:'🗺️ 正在刷新地图动态…', mapLog:'🗺️ 正在刷新地图动态…' };
+                window._meowRunWorldBundleTargets([appName], { isManual:true, showToast:true, startText:labelMap[appName] || '正在刷新…' }).then(function(r){
+                  try{
+                    if(appName==='news' && state.app==='news'){ renderApp('news'); }
+                    else if(appName==='shop' && state.app==='shop'){ renderApp('shop'); }
+                    else if((appName==='map' || appName==='mapLog') && state.app==='map'){ renderApp('map'); }
+                    else if(appName==='work' && state.app==='work' && typeof window._workRefreshAI==='function'){ window._workRefreshAI(); }
+                  }catch(e){ console.warn('[afRunSingle] re-render error:', e); }
+                });
                 return;
               }
               AutoFeedEngine.runSingle(appName).then(function(r){
@@ -12352,7 +12305,7 @@ function _buildFallbackAIFriendCandidate(){
               _constraintLines.length ? '【必须满足以下约束条件】\n' + _constraintLines.join('\n') : '',
               '请生成 1 个最适合现在加入\"新的朋友\"的候选。',
               '只返回 JSON。'
-            ].filter(Boolean).join('\n');
+            ] .filter(Boolean).join('\n');
 
             const ret = await PhoneAI.chat({
               system: systemPrompt,
@@ -12653,7 +12606,7 @@ function _buildFallbackAIFriendCandidate(){
             var ch = result.characters[idx];
             if (!ch) return;
             // 将角色卡的完整描述作为 profile 和 identity 传入
-            var fullProfile = [ch.description, ch.personality, ch.scenario].filter(Boolean).join('\n');
+            var fullProfile = [ch.description, ch.personality, ch.scenario] .filter(Boolean).join('\n');
             addCandidate(ch.name, 'stcard', {
               profile: fullProfile.slice(0, 3000),
               identity: (ch.description || '').slice(0, 1000)
@@ -13878,7 +13831,7 @@ function _buildFallbackAIFriendCandidate(){
               'hobby(爱好兴趣逗号分隔), bio(生平简介两三句)。'
             ].join('');
             var userP = '请生成一个人设。' + (constraints.length ? '\n约束条件：\n'+constraints.join('\n') : '') + '\n只返回 JSON。';
-            var ret = await PhoneAI.chat({ system:sysP, messages:[{role:'user',content:userP}], temperature:0.9, maxTokens:600, channel:'background' });
+            var ret = await PhoneAI.chat({ system:sysP, messages:[{role:'user',content:userP}], temperature:0.9, maxTokens:600, channel:'proactive' });
             if (ret && ret.ok && ret.data){
               var raw = String(ret.data||'').replace(/```json|```/g,'').trim();
               var parsed = JSON.parse(raw);
@@ -16106,6 +16059,7 @@ function _buildFallbackAIFriendCandidate(){
         var resetBtn = mask.querySelector('#work-reset-data');
         if(resetBtn) resetBtn.addEventListener('click',function(){
           try{ localStorage.removeItem('meow.quests.v1'); }catch(e){}
+          try{ localStorage.removeItem('meow.work.ai.v1'); }catch(e){}
           mask.remove(); try{toast('已清空工作数据');}catch(e){}
         });
       }
@@ -16115,42 +16069,395 @@ function _buildFallbackAIFriendCandidate(){
       window._openShopFeedSettingsGlobal = _openShopFeedSettings;
       window._openWorkFeedSettingsGlobal = _openWorkFeedSettings;
 
+      function _buildWorldBundleContextLite(){
+        var parts = [];
+        try{
+          if(window.WorldState && window.WorldState.player){
+            var p=window.WorldState.player;
+            parts.push('玩家位置：'+(p.location||'家'));
+            parts.push('玩家状态：体力'+Math.round(p.energy||0)+' 心情'+Math.round(p.mood||0)+' 饥饿'+Math.round(p.hunger||0)+' 健康'+Math.round(p.health||0)+' 余额$'+Math.round(p.money||0));
+          }
+        }catch(e){}
+        try{
+          var mapData = (typeof _mapLoad === 'function') ? _mapLoad() : null;
+          if(mapData && mapData.name){
+            parts.push('世界：'+mapData.name);
+            if(mapData.landmarks && mapData.landmarks.length){
+              parts.push('地标：'+mapData.landmarks.slice(0,12).map(function(l){ return l.customName||l.name; }).filter(Boolean).join('、'));
+            }
+          }
+        }catch(e){}
+        try{
+          var logData = (typeof _mapLoadLog === 'function') ? _mapLoadLog() : null;
+          var logs = logData && Array.isArray(logData.logs) ? logData.logs.slice(-5) : [];
+          if(logs.length){
+            parts.push('近期地图动态：'+logs.map(function(l){ return (l.npcName||'某人')+'在'+(l.landmarkName||l.landmark||'某地')+(l.action?('做了'+l.action):'活动'); }).join(' | '));
+          }
+        }catch(e){}
+        try{
+          var sr=localStorage.getItem('meow_phone_chat_summary_v1');
+          if(sr){
+            var ss=JSON.parse(sr);
+            var byChat=ss.byChat||{};
+            var snippets=[];
+            Object.keys(byChat).slice(0,6).forEach(function(id){
+              try{
+                var entry=byChat[id];
+                var modes=entry.modes||{};
+                var mode=modes.online||modes.offline||Object.values(modes)[0];
+                var txt=(mode && (mode.lastSummary||mode.summary))||'';
+                if(txt) snippets.push(String(txt).slice(0,90));
+              }catch(e2){}
+            });
+            if(snippets.length) parts.push('近期剧情：'+snippets.join(' | '));
+          }
+        }catch(e){}
+        try{
+          var cr=localStorage.getItem('meow_phone_c_standalone_main_contacts_v1');
+          if(cr){
+            var cdb=JSON.parse(cr);
+            var names=(cdb.list||[]).slice(0,8).map(function(c){ return c.name + (c.identity ? '('+String(c.identity).slice(0,12)+')' : ''); }).join('、');
+            if(names) parts.push('角色：'+names);
+          }
+        }catch(e){}
+        try{
+          if(window.MEOW_WB_API && typeof window.MEOW_WB_API.getEntries==='function'){
+            var entries=window.MEOW_WB_API.getEntries()||[];
+            if(entries.length){
+              parts.push('世界书：'+entries.slice(0,5).map(function(e){ return (e.comment||e.key||'')+':'+String(e.content||'').slice(0,40); }).join(' / '));
+            }
+          }
+        }catch(e){}
+        try{
+          var gwb = (typeof loadPhoneGlobalWB === 'function') ? loadPhoneGlobalWB() : null;
+          if(gwb && gwb.enabled && gwb.text) parts.push('小手机世界书：'+String(gwb.text).slice(0,260));
+        }catch(e){}
+        return parts.join('；') || '现代都市虚拟世界';
+      }
+      function _meowNormalizeWorldTargets(targets){
+        var list = Array.isArray(targets) ? targets : [];
+        var out = [], seen = {};
+        list.forEach(function(t){
+          t = String(t || '').trim();
+          if(!t) return;
+          if(t === 'mapLog' || t === 'maplog' || t === 'map_log') t = 'map';
+          if(['news','shop','work','map'].indexOf(t) < 0) return;
+          if(!seen[t]){ seen[t] = 1; out.push(t); }
+        });
+        return out;
+      }
+      function _meowReadWorldBundlePlan(targets){
+        targets = _meowNormalizeWorldTargets(targets);
+        var plan = { targets:targets, newsCats:[], shopCats:[], workDifficulties:[], mapCount:3 };
+        try{
+          var newsCfg = lsGet('meow.news.settings', {});
+          var builtins = [
+            { id:'chance', name:'机会', prompt:'市场机会、偶遇、短线收益' },
+            { id:'trade',  name:'商机', prompt:'商品供需、店铺折扣、物价风向' },
+            { id:'event',  name:'活动', prompt:'节庆、公告、演出、招募、城市活动' },
+            { id:'intel',  name:'情报', prompt:'人物动向、坊间消息、线索耳闻' },
+            { id:'world',  name:'动态', prompt:'城市环境、港口、天气余波、区域变化' }
+          ];
+          var newsSettings = newsCfg.categories || {};
+          builtins.forEach(function(cat){
+            var cfg = newsSettings[cat.id] || {};
+            if(cfg.enabled === false) return;
+            var count = Math.max(1, Math.min(8, parseInt(cfg.count, 10) || 2));
+            plan.newsCats.push({ id:cat.id, name:cat.name, count:count, prompt:cat.prompt });
+          });
+          (newsCfg.customCategories || []).forEach(function(cat){
+            var cfg = newsSettings[cat.id] || {};
+            if(cfg.enabled === false) return;
+            var count = Math.max(1, Math.min(8, parseInt(cfg.count, 10) || 2));
+            plan.newsCats.push({ id:String(cat.id), name:String(cat.name||cat.id), count:count, prompt:String(cat.prompt||'') });
+          });
+        }catch(e){}
+        try{
+          var _shopGetter = window._meowShopGetEnabledCategories;
+          var _shopCountGetter = window._meowShopGetCategoryCount;
+          plan.shopCats = (typeof _shopGetter === 'function' ? _shopGetter() : []).map(function(c){
+            return { id:String(c.id), name:String(c.name||c.id), count:(typeof _shopCountGetter==='function' ? _shopCountGetter(c.id) : 6) };
+          });
+        }catch(e){}
+        try{
+          var workCfg = lsGet('meow.work.settings', {});
+          var dist = workCfg.difficulty || { easy:{enabled:true,count:2}, medium:{enabled:true,count:3}, hard:{enabled:true,count:2} };
+          [
+            { id:'easy', name:'轻松', hint:'短时零工、低风险、稳定收入' },
+            { id:'medium', name:'普通', hint:'常规委托、跑腿、协助工作' },
+            { id:'hard', name:'困难', hint:'夜间、体力消耗高、但收益更好' }
+          ].forEach(function(it){
+            var cfg = dist[it.id] || {};
+            if(cfg.enabled === false) return;
+            var count = Math.max(1, Math.min(5, parseInt(cfg.count, 10) || 2));
+            plan.workDifficulties.push({ id:it.id, name:it.name, count:count, hint:it.hint });
+          });
+        }catch(e){}
+        try{
+          var mapCfg = _phLoad('map_settings_v1', { logCount:3 });
+          plan.mapCount = Math.max(1, Math.min(10, parseInt(mapCfg.logCount, 10) || 3));
+        }catch(e){}
+        return plan;
+      }
+      function _meowBuildWorldBundlePrompt(plan){
+        plan = plan || _meowReadWorldBundlePlan(['news','shop','work','map']);
+        var targets = _meowNormalizeWorldTargets(plan.targets || []);
+        var mapData = null; try{ mapData = (typeof _mapLoad === 'function') ? _mapLoad() : null; }catch(e){}
+        var sections = [];
+        sections.push('背景：' + _buildWorldBundleContextLite());
+        sections.push('本次只生成这些 app：' + targets.join('、') + '。必须一次性返回完整结果。');
+        sections.push('硬性规则：1) 只能返回一个 JSON 对象。2) 所有 key 和字符串都必须用双引号。3) 不能写 markdown、代码块、注释。4) 所有内容必须来自同一世界观、同一时间段。5) 所有文本字段里不要出现英文双引号或反斜杠。6) 输出紧凑 JSON，不要写 json 前缀。');
+        if(targets.indexOf('news') >= 0){ sections.push('news 放在 "apps"."news"."items" 数组。每条字段：id,type,title,summary,detail,urgent,reward,landmark,actionText。type 只能是 chance/trade/event/intel/world。按这些分类与数量分配：' + (plan.newsCats.length ? plan.newsCats.map(function(c){ return c.id+'×'+c.count; }).join('；') : 'chance×2；trade×2；event×2') + '。actionText 只能是短字符串或空字符串。'); }
+        if(targets.indexOf('shop') >= 0){ sections.push('shop 放在 "apps"."shop"."categories" 对象。键必须严格等于这些分类 id：' + (plan.shopCats.length ? plan.shopCats.map(function(c){ return c.id+'×'+c.count; }).join('；') : 'food×6') + '。每件商品字段：id,name,emoji,price,desc,story,vendor,place,reason,tags,effectText。effectText 只能写成短字符串，例如 "体力+5 心情+2"，不要返回 effect 对象。商品要写出售卖者、地点、出现原因，并明显贴合当前世界与玩家状态。'); }
+        if(targets.indexOf('work') >= 0){ sections.push('work 放在 "apps"."work"."items" 数组。每条字段：templateId,title,desc,cost,reward,minEnergy,tags,time,place,detail,requirements,risk,rewardNote。按难度生成：' + (plan.workDifficulties.length ? plan.workDifficulties.map(function(d){ return d.id+'×'+d.count; }).join('；') : 'easy×2；medium×3；hard×2') + '。cost 至少含 energy；reward 至少含 money。'); }
+        if(targets.indexOf('map') >= 0){ var lmLine=''; try{ if(mapData && mapData.landmarks && mapData.landmarks.length) lmLine = mapData.landmarks.slice(0,20).map(function(l){ return (l.customName||l.name); }).join('、'); }catch(e){} sections.push('mapLog 放在 "apps"."mapLog"."items" 数组，生成 ' + (plan.mapCount||3) + ' 条。字段：id,npcName,landmark,action,cost,moodDelta,note。landmark 优先从这些地标中选：' + (lmLine || '当前地图已有地标') + '。'); }
+        sections.push('输出壳子必须是：{"meta":{"generatedAt":0,"worldTime":"","location":"","mood":""},"apps":{"news":{"items":[]},"shop":{"categories":{}},"work":{"items":[]},"mapLog":{"items":[]}}}');
+        return sections.join('\n');
+      }
+      function _meowSanitizeJSONish(raw){
+        raw = String(raw || '').trim();
+        raw = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '');
+        raw = raw.replace(/^\s*json\s*[:：]?/i, '').trim();
+        raw = raw.replace(/[\u201C\u201D]/g, '"').replace(/[\u2018\u2019]/g, "'");
+        var out = '', inStr = false, esc = false;
+        for (var i = 0; i < raw.length; i++){
+          var ch = raw[i];
+          if (inStr){
+            if (esc){ out += ch; esc = false; continue; }
+            if (ch === '\\'){ out += ch; esc = true; continue; }
+            if (ch === '"'){ out += ch; inStr = false; continue; }
+            if (ch === '\r'){ continue; }
+            if (ch === '\n'){ out += '\\n'; continue; }
+            out += ch;
+            continue;
+          }
+          if (ch === '"'){ out += ch; inStr = true; continue; }
+          out += ch;
+        }
+        return out.replace(/,\s*([\]}])/g, '$1').trim();
+      }
+      window._meowSanitizeJSONish = _meowSanitizeJSONish;
+      function _meowParseWorldBundleText(text){
+        text = _meowSanitizeJSONish(text);
+        var start = text.indexOf('{');
+        var end = text.lastIndexOf('}');
+        if(start >= 0 && end > start) text = text.slice(start, end + 1).trim();
+        function tryParsers(raw){
+          var cleaned = _meowSanitizeJSONish(raw);
+          var attempts = [raw, cleaned];
+          for(var i=0;i<attempts.length;i++){ try{ return JSON.parse(attempts[i]); }catch(e){} }
+          for(var j=0;j<attempts.length;j++){ try{ return (new Function('return (' + attempts[j] + ');'))(); }catch(e){} }
+          throw new Error('invalid_json');
+        }
+        try{ return tryParsers(text); }catch(err){
+          var best = '', depth = 0, inStr = false, esc = false, begin = -1;
+          for(var i=0;i<text.length;i++){
+            var ch = text[i];
+            if(begin < 0){ if(ch === '{'){ begin = i; depth = 1; } continue; }
+            if(inStr){ if(esc) esc = false; else if(ch === '\\') esc = true; else if(ch === '"') inStr = false; }
+            else { if(ch === '"') inStr = true; else if(ch === '{') depth++; else if(ch === '}'){ depth--; if(depth === 0){ best = text.slice(begin, i + 1); break; } } }
+          }
+          if(best) return tryParsers(best);
+          throw err;
+        }
+      }
+      function _meowCoerceWorldBundle(parsed, targets){
+        parsed = parsed && typeof parsed === 'object' ? parsed : {};
+        var apps = (parsed.apps && typeof parsed.apps === 'object') ? parsed.apps : parsed;
+        function toNewsItem(n, idx){
+          if(!n || typeof n !== 'object') return null;
+          var tp = String(n.type || n.category || 'world').toLowerCase();
+          if(['chance','trade','event','intel','world'].indexOf(tp) < 0){ var map = {'机会':'chance','商机':'trade','活动':'event','情报':'intel','动态':'world'}; tp = map[tp] || 'world'; }
+          return { id:n.id || ('n_' + Date.now().toString(36) + '_' + idx), type:tp, title:String(n.title||'').slice(0,32), summary:String(n.summary||n.desc||'').slice(0,60), detail:String(n.detail||n.story||n.summary||'').slice(0,140), urgent:!!n.urgent, reward:String(n.reward||n.impact||'').slice(0,40), landmark:String(n.landmark||n.place||n.location||'').slice(0,24), action:(n.action&&typeof n.action==='object')?n.action:null };
+        }
+        function toShopItem(p, idx){
+          if(!p || typeof p !== 'object') return null;
+          var effect = {};
+          if(p.effect && typeof p.effect === 'object'){
+            Object.keys(p.effect).forEach(function(k){ var v=Math.round(Number(p.effect[k])||0); if(v) effect[k]=v; });
+          }else if(typeof p.effectText === 'string'){
+            var s = p.effectText;
+            var map = { '体力':'energy', '精力':'energy', '心情':'mood', '饱腹':'hunger', '健康':'health', '金钱':'money' };
+            Object.keys(map).forEach(function(label){
+              var m = s.match(new RegExp(label + '\s*([+-]?\d+)', 'i'));
+              if(m){ effect[map[label]] = parseInt(m[1], 10) || 0; }
+            });
+          }
+          return { id:p.id||('p_'+Date.now().toString(36)+'_'+idx), name:String(p.name||p.title||'').slice(0,16), emoji:String(p.emoji||'').slice(0,4), price:Math.max(1,Math.round(Number(p.price)||1)), desc:String(p.desc||p.summary||'').slice(0,30), story:String(p.story||p.detail||'').slice(0,60), vendor:String(p.vendor||p.seller||'').slice(0,24), place:String(p.place||p.location||'').slice(0,24), reason:String(p.reason||'').slice(0,24), tags:Array.isArray(p.tags)?p.tags.slice(0,4).map(function(t){return String(t).slice(0,8);}):[], effect:effect };
+        }
+        function toWorkItem(w, idx){
+          if(!w || typeof w !== 'object') return null;
+          var energy=Math.max(0,parseInt(w.minEnergy,10)||0), pay=Math.max(0,Math.round(Number(w.pay)||0));
+          var cost=(w.cost&&typeof w.cost==='object')?w.cost:{energy:Math.max(8, energy?Math.round(energy*0.6):15)};
+          if(!('energy' in cost)) cost.energy=Math.max(8, energy?Math.round(energy*0.6):15);
+          var reward=(w.reward&&typeof w.reward==='object')?w.reward:{money:Math.max(30,pay||(cost.energy*8))};
+          if(!('money' in reward)) reward.money=Math.max(30,pay||(cost.energy*8));
+          return { templateId:String(w.templateId||w.id||('w_'+Date.now().toString(36)+'_'+idx)), title:String(w.title||'').slice(0,16), desc:String(w.desc||w.summary||w.detail||'').slice(0,50), cost:cost, reward:reward, minEnergy:Math.max(0,energy||Math.round((cost.energy||0)*0.7)), tags:Array.isArray(w.tags)?w.tags.slice(0,5).map(function(t){return String(t).slice(0,8);}):[], time:String(w.time||'').slice(0,16), place:String(w.place||'').slice(0,24), detail:String(w.detail||'').slice(0,100), requirements:Array.isArray(w.requirements)?w.requirements:[], risk:String(w.risk||'').slice(0,16), rewardNote:String(w.rewardNote||'').slice(0,30) };
+        }
+        function toMapItem(m, idx){
+          if(!m || typeof m !== 'object') return null;
+          return { id:String(m.id||('log_'+Date.now()+'_'+idx)), npcName:String(m.npcName||m.name||'').slice(0,20), landmark:String(m.landmark||m.place||'').slice(0,24), action:String(m.action||m.summary||'').slice(0,40), cost:Math.max(0,parseInt(m.cost,10)||0), moodDelta:parseInt(m.moodDelta,10)||0, note:String(m.note||m.detail||'').slice(0,60) };
+        }
+        var newsItems=[]; if(apps.news&&Array.isArray(apps.news.items)) newsItems=apps.news.items; else if(Array.isArray(parsed.news)) newsItems=parsed.news;
+        var shopCats={}; if(apps.shop&&apps.shop.categories&&typeof apps.shop.categories==='object') shopCats=apps.shop.categories; else if(parsed.shop&&typeof parsed.shop==='object') shopCats=parsed.shop;
+        var workItems=[]; if(apps.work&&Array.isArray(apps.work.items)) workItems=apps.work.items; else if(Array.isArray(parsed.work)) workItems=parsed.work;
+        var mapItems=[]; if(apps.mapLog&&Array.isArray(apps.mapLog.items)) mapItems=apps.mapLog.items; else if(apps.map&&Array.isArray(apps.map.items)) mapItems=apps.map.items; else if(Array.isArray(parsed.mapLog)) mapItems=parsed.mapLog; else if(Array.isArray(parsed.map)) mapItems=parsed.map;
+        var normShop={}; Object.keys(shopCats||{}).forEach(function(catId){ var arr=Array.isArray(shopCats[catId])?shopCats[catId]:[]; var norm=arr.map(function(p, idx){ return toShopItem(p, idx); }).filter(Boolean); if(norm.length) normShop[catId]=norm; });
+        return { meta:(parsed.meta&&typeof parsed.meta==='object')?parsed.meta:{}, news:(Array.isArray(newsItems)?newsItems:[]).map(toNewsItem).filter(Boolean), shop:normShop, work:(Array.isArray(workItems)?workItems:[]).map(toWorkItem).filter(Boolean), map:(Array.isArray(mapItems)?mapItems:[]).map(toMapItem).filter(Boolean) };
+      }
+      function _meowSaveMapLogBundle(items, opts){
+        try{
+          var mapData = (typeof _mapLoad === 'function') ? _mapLoad() : null;
+          if(!mapData || !mapData.generated) return 0;
+          var logData = (typeof _mapLoadLog === 'function') ? _mapLoadLog() : { v:1, lastAutoGen:0, logs:[] };
+          var contacts = [];
+          try{ var db = loadContactsDB(); contacts = _safeArr(db.list); }catch(e){}
+          var now = Date.now();
+          var hour = new Date().getHours();
+          var period = hour < 11 ? 'morning' : (hour < 17 ? 'afternoon' : 'evening');
+          var added = 0;
+          (Array.isArray(items) ? items : []).forEach(function(item, idx){
+            var npcName = String((item && (item.npcName || item.name)) || '').trim();
+            var action = String((item && item.action) || '').trim();
+            if(!npcName || !action) return;
+            var landmarkName = String((item && item.landmark) || '').trim();
+            var contact = contacts.find(function(c){ return String(c.name||'') === npcName; });
+            var lm = (mapData.landmarks||[]).find(function(l){ return String(l.customName||l.name) === landmarkName; });
+            var cost = Math.max(0, parseInt(item && item.cost, 10) || 0);
+            var moodDelta = parseInt(item && item.moodDelta, 10);
+            if(!isFinite(moodDelta)) moodDelta = Math.floor(Math.random()*8)+1;
+            logData.logs.push({
+              id: String((item && item.id) || ('log_'+now+'_'+idx+'_'+Math.random().toString(36).slice(2,6))),
+              npcId: contact ? contact.id : npcName,
+              npcName: npcName,
+              landmarkId: lm ? lm.id : '',
+              landmarkName: landmarkName || (lm ? (lm.customName||lm.name) : ''),
+              time: now + idx * 8000,
+              period: period,
+              action: action,
+              cost: cost,
+              note: String((item && item.note) || ''),
+              statusEffect: { mood: moodDelta, money: -cost },
+              isAuto: !(opts && opts.isManual)
+            });
+            added++;
+          });
+          if(logData.logs.length > 200) logData.logs = logData.logs.slice(-200);
+          logData.lastAutoGen = now;
+          if(typeof _mapSaveLog === 'function') _mapSaveLog(logData);
+          return added;
+        }catch(e){ return 0; }
+      }
+      async function _meowGenerateWorldBundle(targets, opts){
+        var plan = _meowReadWorldBundlePlan(targets);
+        var reqTargets = plan.targets;
+        if (!reqTargets.length) return { meta:{}, news:[], shop:{}, work:[], map:[] };
+        var hasPhoneAI = (typeof window.PhoneAI !== 'undefined' && window.PhoneAI && typeof window.PhoneAI.chat === 'function');
+        var apiCfg = hasPhoneAI ? (PhoneAI._getConfig ? (PhoneAI._getConfig('proactive') || PhoneAI._getConfig('background')) : null) : null;
+        if (!hasPhoneAI || !apiCfg || !apiCfg.endpoint || !apiCfg.key) throw new Error('no_api');
+        var sys = '你是虚拟世界内容调度 AI。根据用户给出的 schema 一次性生成多个 app 的更新数据。只能返回一个合法 JSON 对象，禁止 markdown、禁止解释、禁止省略字段。';
+        var prompt = _meowBuildWorldBundlePrompt(plan), lastErr = null;
+        for(var attempt=0; attempt<2; attempt++){
+          try{
+            var result = await window.PhoneAI.chat({ system: sys, messages:[{ role:'user', content: prompt }], temperature:0.65, maxTokens:4200, channel:'proactive', timeout:90 });
+            if (!result || !result.ok || !result.data) throw new Error(result ? result.error : 'bundle_failed');
+            var parsed = _meowParseWorldBundleText(result.data);
+            return _meowCoerceWorldBundle(parsed, reqTargets);
+          }catch(e){ lastErr = e; if(attempt === 0) prompt += '\n再次强调：只返回一个合法 JSON 对象，不能带解释文字，所有字符串必须用双引号。'; }
+        }
+        throw lastErr || new Error('bundle_failed');
+      }
+      function _meowApplyWorldBundle(bundle, opts){
+        bundle = bundle || {};
+        var summary = { news:0, shop:0, work:0, map:0 };
+        if (Array.isArray(bundle.news) && bundle.news.length) {
+          try{ window._meowSaveNewsCacheBundle(bundle.news); summary.news = bundle.news.length; }catch(e){}
+        }
+        if (bundle.shop && typeof bundle.shop === 'object') {
+          try{
+            var shopKey = 'meow.shop.products.v2';
+            var oldKey = 'meow.shop.products.v1';
+            var raw = null; try{ raw = JSON.parse(localStorage.getItem(shopKey) || 'null'); }catch(e){}
+            if (!raw || typeof raw !== 'object' || !raw.categories) raw = { v:2, categories:{}, at:0 };
+            Object.keys(bundle.shop).forEach(function(catId){
+              if (Array.isArray(bundle.shop[catId]) && bundle.shop[catId].length) {
+                raw.categories[catId] = { items: bundle.shop[catId], at: Date.now() };
+                summary.shop += bundle.shop[catId].length;
+              }
+            });
+            raw.at = Date.now();
+            try{ localStorage.setItem(shopKey, JSON.stringify(raw)); }catch(e){}
+            try{ var legacy = { at: raw.at }; Object.keys(raw.categories||{}).forEach(function(k){ legacy[k] = (raw.categories[k] && raw.categories[k].items) ? raw.categories[k].items : []; }); localStorage.setItem(oldKey, JSON.stringify(legacy)); }catch(e){}
+          }catch(e){}
+        }
+        if (Array.isArray(bundle.work) && bundle.work.length) {
+          try{
+            summary.work = bundle.work.length;
+            if (typeof window._meowSaveWorkAICache === 'function') window._meowSaveWorkAICache(bundle.work);
+            else localStorage.setItem('meow.work.ai.v1', JSON.stringify({ items:bundle.work, at:Date.now() }));
+          }catch(e){}
+        }
+        if (Array.isArray(bundle.map) && bundle.map.length) {
+          try{ summary.map = _meowSaveMapLogBundle(bundle.map, opts); }catch(e){}
+        }
+        return summary;
+      }
+      function _meowRefreshWorldBundleViews(targets){
+        try{
+          var list = _meowNormalizeWorldTargets(targets);
+          if(list.indexOf('news') >= 0 && state.app === 'news') renderApp('news');
+          if(list.indexOf('shop') >= 0 && state.app === 'shop') renderApp('shop');
+          if(list.indexOf('map') >= 0 && state.app === 'map') renderApp('map');
+          if(list.indexOf('work') >= 0){
+            if(state.app === 'work') renderApp('work');
+          }
+        }catch(e){}
+      }
+      async function _meowRunWorldBundleTargets(targets, opts){
+        opts = opts || {};
+        var list = _meowNormalizeWorldTargets(targets);
+        if(!list.length) return { ok:false, error:'no_targets' };
+        if(window.__meowWorldBundleRunning){
+          if(opts.showToast !== false){ try{ toast('世界数据正在生成中…'); }catch(e){} }
+          return { ok:false, error:'running' };
+        }
+        window.__meowWorldBundleRunning = true;
+        try{
+          if(opts.showToast !== false && opts.startText){ try{ toast(opts.startText); }catch(e){} }
+          var bundle = await _meowGenerateWorldBundle(list, opts);
+          var summary = _meowApplyWorldBundle(bundle, opts);
+          _meowRefreshWorldBundleViews(list);
+          if(opts.showToast !== false && !opts.silentDone){
+            var msg = [];
+            if(summary.news) msg.push('资讯'+summary.news+'条');
+            if(summary.shop) msg.push('商品'+summary.shop+'件');
+            if(summary.work) msg.push('工作'+summary.work+'项');
+            if(summary.map) msg.push('地图动态'+summary.map+'条');
+            try{ toast('✅ 已更新：' + (msg.length ? msg.join('、') : list.join('、'))); }catch(e){}
+          }
+          return { ok:true, bundle:bundle, summary:summary };
+        }catch(e){
+          console.warn('[WorldBundle] run failed:', e);
+          _meowRefreshWorldBundleViews(list);
+          if(opts.showToast !== false){ try{ toast('❌ 世界数据生成失败: ' + (e.message||String(e))); }catch(e2){} }
+          return { ok:false, error:e.message||String(e) };
+        }finally{
+          window.__meowWorldBundleRunning = false;
+        }
+      }
+      window._meowGenerateWorldBundle = _meowGenerateWorldBundle;
+      window._meowApplyWorldBundle = _meowApplyWorldBundle;
+      window._meowRunWorldBundleTargets = _meowRunWorldBundleTargets;
+
+
       // ★ 一键刷新全部世界数据
       function _refreshAllWorldData(){
-        try{ toast('🔄 正在刷新全部世界数据…'); }catch(e){}
-        var tasks = [];
-        // 1. 清除资讯缓存并调用 AI 生成
-        try{
-          var keysToRemove = [];
-          for(var i=0;i<localStorage.length;i++){
-            var k=localStorage.key(i);
-            if(k && k.indexOf('meow.news.cache')===0) keysToRemove.push(k);
-          }
-          keysToRemove.forEach(function(k){ localStorage.removeItem(k); });
-        }catch(e){}
-        if(typeof window._meowGenerateNews==='function'){
-          tasks.push(window._meowGenerateNews('all').then(function(items){
-            if(items && items.length){ try{ localStorage.setItem('meow.news.cache.v1_all', JSON.stringify({items:items,at:Date.now()})); }catch(e){} }
-          }).catch(function(e){ console.warn('[RefreshAll] news failed:', e); }));
-        }
-        // 2. AI 生成购物商品
-        try{ localStorage.removeItem('meow.shop.products.v1'); }catch(e){}
-        if(typeof window._meowGenerateShopProducts==='function'){
-          tasks.push(window._meowGenerateShopProducts('food').then(function(products){
-            if(products && products.length){ try{ localStorage.setItem('meow.shop.products.v1', JSON.stringify({food:products,at:Date.now()})); }catch(e){} }
-          }).catch(function(e){ console.warn('[RefreshAll] shop failed:', e); }));
-        }
-        // 3. AI 生成工作
-        if(typeof window._meowGenerateAIWork==='function'){
-          tasks.push(window._meowGenerateAIWork().catch(function(e){ console.warn('[RefreshAll] work failed:', e); }));
-        }
-        // 4. 如果当前在对应页面，刷新 UI
-        try{ if(state.app==='news') renderApp('news'); }catch(e){}
-        try{ if(state.app==='shop') renderApp('shop'); }catch(e){}
-        try{ if(state.app==='work' && typeof window._workRefreshAI==='function') window._workRefreshAI(); }catch(e){}
-        // 等待所有异步任务
-        Promise.allSettled(tasks).then(function(){
-          try{ toast('✅ 世界数据已刷新！打开各App查看'); }catch(e){}
+        _meowRunWorldBundleTargets(['news','shop','work','map'], {
+          isManual:true,
+          showToast:true,
+          startText:'🔄 正在一次性刷新资讯 / 购物 / 工作 / 地图动态…'
+        }).then(function(){
+          try{ toast('✅ 世界数据已刷新！打开各 App 查看'); }catch(e){}
         });
       }
 
@@ -20208,7 +20515,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           var appConfigs= (opts&&opts.appConfigs)||{};
           var retryClean= !!(opts&&opts.retryClean);
 
-          var sysPrompt = '你是 MEOW Phone 的"世界观资讯生成引擎"。\n基于提供的世界观设定、聊天总结、角色信息，为以下 App 生成虚拟资讯内容。\n\n【核心原则】\n1. 所有内容必须基于提供的世界观和角色关系，不允许生成现实世界新闻\n2. 内容要自然、有趣、符合世界观设定\n3. 朋友圈的发帖人只能是通讯录中的角色或"我"，不允许出现"系统公告""系统发帖"\n4. 论坛的发帖人可以是通讯录角色，也可以是 AI 基于世界观生成的合理 NPC\n5. 每条内容要有差异性——语气、长度、话题都要有变化\n\n【你必须返回纯 JSON，不要加任何其他文字、不要加 Markdown 代码块标记】\n';
+          var sysPrompt = '你是 MEOW Phone 的"世界观资讯生成引擎"。\n基于提供的世界观设定、聊天总结、角色信息，为以下 App 生成虚拟资讯内容。\n\n【核心原则】\n1. 所有内容必须基于提供的世界观和角色关系，不允许生成现实世界新闻\n2. 内容要自然、有趣、符合世界观设定\n3. 朋友圈的发帖人只能是通讯录中的角色或"我"，不允许出现"系统公告""系统发帖"\n4. 论坛的发帖人可以是通讯录角色，也可以是 AI 基于世界观生成的合理 NPC\n5. 每条内容要有差异性——语气、长度、话题都要有变化\n6. 所有文本字段里不要出现英文双引号或反斜杠\n\n【你必须返回纯 JSON，不要加任何其他文字、不要加 Markdown 代码块标记】\n';
 
           var reqParts = [];
           if(targets.indexOf('forum')>=0){
@@ -20237,7 +20544,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           if(overrideModel){ var self=this; this._getConfig=function(ch){ var c=origGetConfig.call(self,ch); c.model=overrideModel; return c; }; }
 
           try{
-            var result=await this._request({ system:sysPrompt, messages:[{role:'user',content:context||'（无额外上下文，请基于你的知识生成有趣的世界观资讯内容）'}], temperature:0.9, maxTokens:2048, timeout:90, channel:'background' });
+            var result=await this._request({ system:sysPrompt, messages:[{role:'user',content:context||'（无额外上下文，请基于你的知识生成有趣的世界观资讯内容）'}], temperature:0.9, maxTokens:3200, timeout:90, channel:'background' });
             if(!result.ok) return result;
             void(0)&&console.log('[PhoneAI.generateFeed] 原始返回:', String(result.data||'').substring(0,300));
             var parsed=_parseFeedJSON(result.data);
@@ -23724,11 +24031,28 @@ const npc = _wxGetChatTargetMeta(npcId);
       // ===== _parseFeedJSON：健壮的资讯 JSON 解析 =====
       function _parseFeedJSON(text){
         if(!text) return null;
-        var str=String(text).trim();
-        try{ var d=JSON.parse(str); if(_validateFeedJSON(d)){ _repairFeedSchema(d); return d; } }catch(e){}
-        try{ var m=str.match(/```(?:json)?\s*([\s\S]*?)```/); if(m&&m[1]){ var d2=JSON.parse(m[1].trim()); if(_validateFeedJSON(d2)){ _repairFeedSchema(d2); return d2; } } }catch(e){}
-        try{ var fi=str.indexOf('{'); var li=str.lastIndexOf('}'); if(fi>=0&&li>fi){ var d3=JSON.parse(str.substring(fi,li+1)); if(_validateFeedJSON(d3)){ _repairFeedSchema(d3); return d3; } } }catch(e){}
-        console.error('[_parseFeedJSON] 全部解析失败, 原文前200字:', str.substring(0,200));
+        var str = _meowSanitizeJSONish(text);
+        function _try(raw){
+          raw = _meowSanitizeJSONish(raw);
+          try{ return JSON.parse(raw); }catch(e){}
+          // ★ 尝试修复截断的 JSON
+          try{
+            var fixed = raw, inStr=false, esc2=false;
+            for(var ci=0;ci<fixed.length;ci++){if(inStr){if(esc2){esc2=false;continue;}if(fixed[ci]==='\\'){esc2=true;continue;}if(fixed[ci]==='"')inStr=false;}else{if(fixed[ci]==='"')inStr=true;}}
+            if(inStr) fixed += '"';
+            var opens=0,arrs=0; inStr=false;esc2=false;
+            for(var cj=0;cj<fixed.length;cj++){var cc=fixed[cj];if(inStr){if(esc2){esc2=false;continue;}if(cc==='\\'){esc2=true;continue;}if(cc==='"')inStr=false;continue;}if(cc==='"'){inStr=true;continue;}if(cc==='{')opens++;else if(cc==='}')opens--;if(cc==='[')arrs++;else if(cc===']')arrs--;}
+            fixed = fixed.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, '').replace(/,\s*\{[^}]*$/, '').replace(/,\s*$/, '');
+            while(arrs>0){fixed+=']';arrs--;}while(opens>0){fixed+='}';opens--;}
+            return JSON.parse(fixed);
+          }catch(e2){}
+          try{ return (new Function('return ('+raw+');'))(); }catch(e){}
+          return null;
+        }
+        var d=_try(str); if(d&&_validateFeedJSON(d)){ _repairFeedSchema(d); return d; }
+        try{ var m=str.match(/```(?:json)?\s*([\s\S]*?)```/); if(m&&m[1]){ var d2=_try(m[1].trim()); if(d2&&_validateFeedJSON(d2)){ _repairFeedSchema(d2); return d2; } } }catch(e){}
+        try{ var fi=str.indexOf('{'); var li=str.lastIndexOf('}'); if(fi>=0&&li>fi){ var d3=_try(str.substring(fi,li+1)); if(d3&&_validateFeedJSON(d3)){ _repairFeedSchema(d3); return d3; } } }catch(e){}
+        console.error('[_parseFeedJSON] 全部解析失败, 原文前200字:', String(text).substring(0,200));
         return null;
       }
       function _validateFeedJSON(d){
@@ -24021,12 +24345,11 @@ const npc = _wxGetChatTargetMeta(npcId);
         runOnce: async function(opts){
           var targets=(opts&&opts.targets)||[]; var isManual=!!(opts&&opts.isManual);
 
-          // 手动优先：如果自动正在运行，手动请求可以中断它
           if(this._running){
             if(isManual && !this._isManualRun){
-              void(0)&&console.log('[AutoFeed] 手动优先：中断自动任务');
               this._aborted=true;
               try{ PhoneAI.abort('background'); }catch(e){}
+              try{ PhoneAI.abort('proactive'); }catch(e){}
               await new Promise(function(r){ setTimeout(r, 300); });
               this._running=false;
             } else {
@@ -24039,70 +24362,89 @@ const npc = _wxGetChatTargetMeta(npcId);
           if(!isManual&&cfg.cooldownUntil>Date.now()) return{ok:false,error:'cooldown'};
           var apiCfg=PhoneAI._getConfig('background');
           if(!apiCfg.endpoint||!apiCfg.key){ try{toast('请先在设置中配置 API');}catch(e){} return{ok:false,error:'no_api'}; }
-          if(!targets.length){ var at=cfg.autoTargets||{}; if(at.forum)targets.push('forum'); if(at.browser)targets.push('browser'); if(at.moments)targets.push('moments'); if(at.weather)targets.push('weather'); if(at.calendar)targets.push('calendar'); if(at.sms)targets.push('sms'); if(at.map)targets.push('map'); if(at.news)targets.push('news'); if(at.shop)targets.push('shop'); if(at.work)targets.push('work'); }
+
+          // ★ 从设置开关读取目标
+          if(!targets.length){
+            var at=cfg.autoTargets||{};
+            if(at.forum)targets.push('forum'); if(at.browser)targets.push('browser'); if(at.moments)targets.push('moments');
+            if(at.weather)targets.push('weather'); if(at.calendar)targets.push('calendar'); if(at.sms)targets.push('sms');
+            if(at.map)targets.push('map'); if(at.news)targets.push('news'); if(at.shop)targets.push('shop'); if(at.work)targets.push('work');
+          }
           if(!targets.length){ try{toast('没有已开启的资讯目标');}catch(e){} return{ok:false,error:'no_targets'}; }
 
           this._running=true; this._aborted=false; this._isManualRun=isManual;
-          try{ toast(isManual?'手动更新中，请稍候…':'资讯正在生成中，请稍候…'); }catch(e){}
-          void(0)&&console.log('[AutoFeed] 开始生成, targets:', targets, isManual?'(手动)':'(自动)');
+          console.log('[AutoFeed] 开始生成, 目标:', targets.join(', '), isManual?'(手动)':'(自动)');
+
+          // ★ 智能分组：按类型分成3批，每批内部一次性处理
+          var socialTargets = targets.filter(function(t){ return t==='forum'||t==='browser'||t==='moments'; });
+          var worldTargets  = targets.filter(function(t){ return t==='news'||t==='shop'||t==='work'||t==='map'; });
+          var utilTargets   = targets.filter(function(t){ return t==='weather'||t==='calendar'||t==='sms'; });
+
+          var totalBatches = (socialTargets.length?1:0) + (worldTargets.length?Math.ceil(worldTargets.length/3):0) + utilTargets.length;
+          var doneBatches = 0;
+          function _progress(label){
+            doneBatches++;
+            try{ toast('⏳ (' + doneBatches + '/' + totalBatches + ') ' + label); }catch(e){}
+          }
 
           try{
             var context=this._buildContext(cfg);
-            void(0)&&console.log('[AutoFeed] 上下文长度:', context.length, '字');
             var appCfg=getAutofeedAppCfg();
-            // 通过队列排队，避免被聊天挤掉
-            var self2=this;
-            var result=await _tlApiEnqueue(function(){
-              return PhoneAI.generateFeed({context:context,targets:targets,appConfigs:{forum:appCfg.forum,browser:appCfg.browser,moments:appCfg.moments}});
-            });
-            if(this._aborted) return{ok:false,error:'aborted'};
-            if(!result.ok) throw new Error(result.error||'API 调用失败');
 
-            this._dispatchResults(result.data, targets);
+            // ── 第1批：社交内容（论坛+朋友圈）→ 1次 generateFeed 调用 ──
+            if(socialTargets.length){
+              _progress('社交内容生成中…');
+              try{
+                var result=await _tlApiEnqueue(function(){
+                  return PhoneAI.generateFeed({context:context,targets:socialTargets,appConfigs:{forum:appCfg.forum,browser:appCfg.browser,moments:appCfg.moments}});
+                });
+                if(this._aborted) return{ok:false,error:'aborted'};
+                if(result.ok) this._dispatchResults(result.data, socialTargets);
+                else console.warn('[AutoFeed] 社交内容生成失败:', result.error);
+              }catch(e){ console.warn('[AutoFeed] 社交内容异常:', e); }
+            }
 
-            // 分发天气/日历/短信（独立 API 调用，排队进行）
+            // ── 第2批：世界数据（资讯+购物+工作+地图）→ WorldBundle ──
+            if(worldTargets.length){
+              // ★ 优先一次性全部生成
+              _progress('世界数据生成中…（' + worldTargets.join('+') + '）');
+              try{
+                var bundleResult = await _meowRunWorldBundleTargets(worldTargets, { isManual:false, showToast:false, silentDone:true });
+                if(bundleResult && bundleResult.ok){
+                  console.log('[AutoFeed] ✅ 世界数据一次性生成成功:', worldTargets.join(','));
+                } else if(worldTargets.length > 1) {
+                  // ★ 一次性失败 → 退而求其次，每3个为一组分批
+                  console.log('[AutoFeed] 一次性生成失败，分组重试…');
+                  for(var gi = 0; gi < worldTargets.length; gi += 3){
+                    if(this._aborted) break;
+                    var chunk = worldTargets.slice(gi, gi + 3);
+                    _progress('世界数据分组：' + chunk.join('+'));
+                    try{
+                      await _meowRunWorldBundleTargets(chunk, { isManual:false, showToast:false, silentDone:true });
+                    }catch(e2){ console.warn('[AutoFeed] 分组', chunk.join(','), '失败:', e2); }
+                    // 分组间等300ms避免抢通道
+                    if(gi + 3 < worldTargets.length) await new Promise(function(r){ setTimeout(r, 300); });
+                  }
+                }
+              }catch(e){ console.warn('[AutoFeed] 世界数据异常:', e); }
+            }
+
+            // ── 第3批：工具类（天气+日历+短信）→ 逐个调用 ──
             var worldCtx = context;
-            if(targets.indexOf('weather')>=0){
-              try{ await _generateWeatherData(worldCtx); }catch(e){ console.warn('[AutoFeed] 天气生成失败:', e); }
-            }
-            if(targets.indexOf('calendar')>=0){
-              try{ await _generateCalendarData(worldCtx); }catch(e){ console.warn('[AutoFeed] 日历生成失败:', e); }
-            }
-            if(targets.indexOf('sms')>=0){
-              try{ await _generateSmsData(worldCtx); }catch(e){ console.warn('[AutoFeed] 短信生成失败:', e); }
-            }
-            if(targets.indexOf('map')>=0){
-              try{ await _mapGenerateNpcLogs({isManual:false}); }catch(e){ console.warn('[AutoFeed] 地图日志生成失败:', e); }
-            }
-
-            // 分发资讯/购物/工作（各自有独立 AI 生成器）
-            if(targets.indexOf('news')>=0 && typeof window._meowGenerateNews==='function'){
+            for(var ui = 0; ui < utilTargets.length; ui++){
+              if(this._aborted) break;
+              var ut = utilTargets[ui];
+              var utLabel = {weather:'天气',calendar:'日历',sms:'短信'}[ut] || ut;
+              _progress(utLabel + '生成中…');
               try{
-                var newsItems = await window._meowGenerateNews('all');
-                if(newsItems && newsItems.length){
-                  try{ localStorage.setItem('meow.news.cache.v1_all', JSON.stringify({items:newsItems,at:Date.now()})); }catch(e){}
-                  void(0)&&console.log('[AutoFeed] ✅ 资讯写入', newsItems.length, '条');
-                }
-              }catch(e){ console.warn('[AutoFeed] 资讯生成失败:', e); }
-            }
-            if(targets.indexOf('shop')>=0 && typeof window._meowGenerateShopProducts==='function'){
-              try{
-                var shopItems = await window._meowGenerateShopProducts('food');
-                if(shopItems && shopItems.length){
-                  try{ localStorage.setItem('meow.shop.products.v1', JSON.stringify({food:shopItems,at:Date.now()})); }catch(e){}
-                  void(0)&&console.log('[AutoFeed] ✅ 购物写入', shopItems.length, '件');
-                }
-              }catch(e){ console.warn('[AutoFeed] 购物生成失败:', e); }
-            }
-            if(targets.indexOf('work')>=0 && typeof window._meowGenerateAIWork==='function'){
-              try{
-                var workItems = await window._meowGenerateAIWork();
-                void(0)&&console.log('[AutoFeed] ✅ 工作生成', (workItems||[]).length, '项');
-              }catch(e){ console.warn('[AutoFeed] 工作生成失败:', e); }
+                if(ut==='weather') await _generateWeatherData(worldCtx);
+                else if(ut==='calendar') await _generateCalendarData(worldCtx);
+                else if(ut==='sms') await _generateSmsData(worldCtx);
+              }catch(e){ console.warn('[AutoFeed]', ut, '生成失败:', e); }
             }
 
             cfg=getAutofeedCfg(); cfg.lastRunAt=Date.now(); cfg.lastRunKey=this._dayKey(); cfg.lastError=''; saveAutofeedCfg(cfg);
-            try{toast('✅ 资讯生成完成！');}catch(e){}
+            try{toast('✅ 资讯生成完成！共处理 ' + targets.length + ' 个目标');}catch(e){}
             return{ok:true};
           }catch(e){
             var msg=String((e&&e.message)||e||'未知错误');
@@ -29971,43 +30313,52 @@ function bindPageScroll(){
               var cfg = getAutofeedCfg();
               if (!cfg.enabled) return;
               var targets = cfg.autoTargets || {};
-              // 资讯：过期后主动 AI 生成并写入缓存
+              var stale = [];
               if (targets.news) {
                 try{
-                  var newsKey = 'meow.news.cache.v1_all';
-                  var cached = localStorage.getItem(newsKey);
-                  var needRefresh = !cached;
-                  if (cached) {
-                    var c = JSON.parse(cached);
-                    if (Date.now() - (c.at||0) > 30*60*1000) { localStorage.removeItem(newsKey); needRefresh = true; }
+                  var nraw = localStorage.getItem('meow.news.cache.v1_all');
+                  var needNews = !nraw;
+                  if (nraw) {
+                    var nc = JSON.parse(nraw);
+                    if (Date.now() - (nc.at||0) > 30*60*1000) needNews = true;
                   }
-                  if (needRefresh && typeof window._meowGenerateNews === 'function') {
-                    window._meowGenerateNews('all').then(function(items){
-                      if(items && items.length){ try{ localStorage.setItem(newsKey, JSON.stringify({items:items,at:Date.now()})); }catch(e){} }
-                    }).catch(function(){});
-                  }
-                }catch(e){}
+                  if (needNews) stale.push('news');
+                }catch(e){ stale.push('news'); }
               }
-              // 工作：AI 生成（后台，不阻塞 UI）
-              if (targets.work && typeof window._meowGenerateAIWork === 'function') {
-                window._meowGenerateAIWork().catch(function(){});
-              }
-              // 购物：过期后主动 AI 生成并写入缓存
-              if (targets.shop && typeof window._meowGenerateShopProducts === 'function') {
+              if (targets.shop) {
                 try{
-                  var shopKey = 'meow.shop.products.v1';
-                  var shopCached = localStorage.getItem(shopKey);
-                  var shopNeedRefresh = !shopCached;
-                  if (shopCached) {
-                    var sc = JSON.parse(shopCached);
-                    if (Date.now() - (sc.at||0) > 30*60*1000) { localStorage.removeItem(shopKey); shopNeedRefresh = true; }
-                  }
-                  if (shopNeedRefresh) {
-                    window._meowGenerateShopProducts('food').then(function(products){
-                      if(products && products.length){ try{ localStorage.setItem(shopKey, JSON.stringify({food:products,at:Date.now()})); }catch(e){} }
-                    }).catch(function(){});
-                  }
-                }catch(e){}
+                  var shopCache = null; try{ shopCache = JSON.parse(localStorage.getItem('meow.shop.products.v2') || 'null'); }catch(e){}
+                  if (!shopCache || !shopCache.categories) shopCache = { categories:{} };
+                  var enabledCats = [];
+                  if (typeof window._meowShopGetEnabledCategories === 'function') enabledCats = window._meowShopGetEnabledCategories();
+                  var needShop = !enabledCats.length;
+                  enabledCats.forEach(function(cat){
+                    var node = shopCache.categories && shopCache.categories[cat.id];
+                    if (!node || !node.items || !node.items.length || Date.now() - (node.at||0) > 30*60*1000) needShop = true;
+                  });
+                  if (needShop) stale.push('shop');
+                }catch(e){ stale.push('shop'); }
+              }
+              if (targets.work) {
+                try{
+                  var wraw = lsGet('meow.work.ai.v1', null);
+                  var needWork = !wraw || !Array.isArray(wraw.items) || !wraw.items.length || Date.now() - (wraw.at||0) > 30*60*1000;
+                  if (needWork) stale.push('work');
+                }catch(e){ stale.push('work'); }
+              }
+              if (targets.map) {
+                try{
+                  var mlog = (typeof _mapLoadLog === 'function') ? _mapLoadLog() : null;
+                  var needMap = !mlog || !Array.isArray(mlog.logs) || !mlog.logs.length || Date.now() - (mlog.lastAutoGen||0) > 30*60*1000;
+                  if (needMap) stale.push('map');
+                }catch(e){ stale.push('map'); }
+              }
+              stale = _meowNormalizeWorldTargets(stale);
+              if (!stale.length) return;
+              if (typeof window._meowRunWorldBundleTargets === 'function') {
+                window._meowRunWorldBundleTargets(stale, { isManual:false, showToast:false, silentDone:true }).catch(function(err){
+                  console.warn('[WorldDataTick] bundle failed:', err);
+                });
               }
             }catch(e){ console.warn('[WorldDataTick] error:', e); }
           };
@@ -38120,9 +38471,13 @@ function _openMapFeedSettings(){
 
   // 手动生成日志
   modal.querySelector('[data-act="mapManualGenLogs"]')?.addEventListener('click', function(){
-    _mapGenerateNpcLogs({isManual:true});
     modal.remove();
-    try{ toast('🗺️ 正在生成 NPC 活动日志…'); }catch(e){}
+    if(typeof window._meowRunWorldBundleTargets === 'function'){
+      window._meowRunWorldBundleTargets(['map'], { isManual:true, showToast:true, startText:'🗺️ 正在生成 NPC 活动日志…' });
+    }else{
+      _mapGenerateNpcLogs({isManual:true});
+      try{ toast('🗺️ 正在生成 NPC 活动日志…'); }catch(e){}
+    }
   });
 
   // 清空日志
@@ -38234,6 +38589,8 @@ async function _mapGenerateNpcLogs(opts){
     try{ toast('日志生成失败: '+(e.message||String(e))); }catch(e2){}
   }
 }
+
+window._mapGenerateNpcLogs = _mapGenerateNpcLogs;
 
 function _buildMapPromptBlock(npcId){
   try{
@@ -38739,7 +39096,7 @@ async function _meowRequestPush() {
   }
 }
 
-拉取离线消息 ======
+// 拉取离线消息 ======
 
 // ========== 拉取离线消息 ==========
 async function _meowPullOfflineMessages() {
@@ -40615,6 +40972,105 @@ function _meowUrlBase64ToUint8Array(base64String) {
     { id:'gift',    name:'礼物好物', emoji:'🎁' },
     { id:'fashion', name:'服饰配件', emoji:'👗' },
   ];
+  var K_PRODUCTS = 'meow.shop.products.v2';
+
+  function _getShopSettings(){
+    try{ return lsGet('meow.shop.settings', {}) || {}; }catch(e){ return {}; }
+  }
+  function _getShopAllCategories(){
+    var ss = _getShopSettings();
+    var cc = Array.isArray(ss.customCategories) ? ss.customCategories : [];
+    return _CATEGORIES.concat(cc.filter(function(c){ return c && c.id && c.name; }).map(function(c){
+      return { id:String(c.id), name:String(c.name), emoji:String(c.emoji || '🛍️') };
+    }));
+  }
+  function _getEnabledShopCategories(){
+    var ss = _getShopSettings();
+    var settings = ss.categorySettings || {};
+    return _getShopAllCategories().filter(function(cat){
+      var cs = settings[cat.id] || {};
+      return cs.enabled !== false;
+    });
+  }
+  function _getShopCategoryCount(catId){
+    var ss = _getShopSettings();
+    var settings = ss.categorySettings || {};
+    var cs = settings[catId] || {};
+    var n = parseInt(cs.count, 10);
+    return (isFinite(n) && n > 0) ? Math.max(3, Math.min(12, n)) : 6;
+  }
+  function _normalizeShopCache(raw){
+    var out = { v:2, categories:{}, at:0 };
+    if (!raw || typeof raw !== 'object') return out;
+    if (raw.v === 2 && raw.categories && typeof raw.categories === 'object') return raw;
+    Object.keys(raw).forEach(function(k){
+      if (k === 'at' || k === 'v') return;
+      if (Array.isArray(raw[k])) out.categories[k] = { items: raw[k], at: raw.at || 0 };
+      else if (raw[k] && typeof raw[k] === 'object' && Array.isArray(raw[k].items)) out.categories[k] = { items: raw[k].items, at: raw[k].at || raw.at || 0 };
+    });
+    out.at = raw.at || 0;
+    return out;
+  }
+  function _loadShopCache(){
+    try{
+      var raw = lsGet(K_PRODUCTS, null);
+      if (!raw) raw = lsGet('meow.shop.products.v1', null);
+      return _normalizeShopCache(raw);
+    }catch(e){ return { v:2, categories:{}, at:0 }; }
+  }
+  function _saveShopCache(cache){
+    var norm = _normalizeShopCache(cache);
+    try{ lsSet(K_PRODUCTS, norm); }catch(e){}
+    try{
+      var legacy = { at: norm.at || Date.now() };
+      Object.keys(norm.categories || {}).forEach(function(k){ legacy[k] = (norm.categories[k] && norm.categories[k].items) ? norm.categories[k].items : []; });
+      lsSet('meow.shop.products.v1', legacy);
+    }catch(e){}
+    return norm;
+  }
+  function _readShopProductsFromCache(catId){
+    var cache = _loadShopCache();
+    var node = cache.categories && cache.categories[catId];
+    if (!node || !Array.isArray(node.items) || !node.items.length) return null;
+    if (Date.now() - (node.at || 0) > _PRODUCT_CACHE_TTL) return null;
+    return node.items;
+  }
+  function _cacheShopProducts(catId, items){
+    var cache = _loadShopCache();
+    cache.categories[catId] = { items: Array.isArray(items) ? items : [], at: Date.now() };
+    cache.at = Date.now();
+    _saveShopCache(cache);
+  }
+  function _clearShopProductCache(){
+    try{ localStorage.removeItem(K_PRODUCTS); }catch(e){}
+    try{ localStorage.removeItem('meow.shop.products.v1'); }catch(e){}
+  }
+  function _saveNewsCacheBundle(items){
+    try{
+      var list = Array.isArray(items) ? items : [];
+      var pack = { items:list, at:Date.now() };
+      localStorage.setItem('meow.news.cache.v1_all', JSON.stringify(pack));
+      ['chance','trade','event','intel','world'].forEach(function(tp){
+        localStorage.setItem('meow.news.cache.v1_' + tp, JSON.stringify({ items:list.filter(function(it){ return String(it && it.type || '') === tp; }), at:pack.at }));
+      });
+    }catch(e){}
+  }
+  window._meowSaveNewsCacheBundle = _saveNewsCacheBundle;
+  async function _refreshShopCategoriesAI(catIds, opts){
+    var ids = (Array.isArray(catIds) ? catIds : []).filter(Boolean);
+    if (!ids.length) ids = _getEnabledShopCategories().map(function(c){ return c.id; });
+    var out = {};
+    for (var i = 0; i < ids.length; i++){
+      var catId = ids[i];
+      var items = await generateProducts(catId, { force: !!(opts && opts.force), batchHint: !!(opts && opts.batchHint) });
+      out[catId] = items || [];
+      _cacheShopProducts(catId, out[catId]);
+    }
+    return out;
+  }
+  window._meowRefreshShopAllCategories = _refreshShopCategoriesAI;
+  window._meowShopGetEnabledCategories = _getEnabledShopCategories;
+  window._meowShopGetCategoryCount = _getShopCategoryCount;
 
   /* ─── 收集世界观上下文（世界书 + 地图 + 聊天总结 + 角色状态 + 玩家状态） ─── */
   function _buildShopContext() {
@@ -40711,53 +41167,95 @@ function _meowUrlBase64ToUint8Array(base64String) {
     return ctx;
   }
 
-  async function generateProducts(category) {
+  async function generateProducts(category, opts) {
+    opts = opts || {};
     try {
+      if (!opts.force) {
+        var cachedItems = _readShopProductsFromCache(category);
+        if (cachedItems && cachedItems.length) return cachedItems;
+      }
       var hasPhoneAI = (typeof window.PhoneAI !== 'undefined' && window.PhoneAI && typeof window.PhoneAI.chat === 'function');
       var cfg = (typeof _meowGetActiveApiConfig === 'function') ? _meowGetActiveApiConfig() : null;
       if (!hasPhoneAI && !cfg) return _fallbackProducts(category);
 
-      var catName = (_CATEGORIES.find(function(c){ return c.id === category; }) || {}).name || category;
+      var catObj = (_getShopAllCategories().find(function(c){ return c.id === category; }) || _CATEGORIES.find(function(c){ return c.id === category; }) || { name:category, emoji:'🛍️' });
+      var catName = catObj.name || category;
+      var itemCount = _getShopCategoryCount(category);
       var ctx = _buildShopContext();
       var worldCtxLines = [];
       if (ctx.worldName) worldCtxLines.push('世界：' + ctx.worldName);
       if (ctx.landmarks) worldCtxLines.push('地标：' + ctx.landmarks);
       if (ctx.characters) worldCtxLines.push('角色：' + ctx.characters);
-      if (ctx.worldBookSnippet) worldCtxLines.push('设定：' + ctx.worldBookSnippet.slice(0, 150));
-      if (ctx.playerNeeds && ctx.playerNeeds !== '状态正常') worldCtxLines.push('需求：' + ctx.playerNeeds);
-      if (ctx.playerState) worldCtxLines.push('状态：体力' + ctx.playerState.energy + ' 心情' + ctx.playerState.mood + ' 饥饿' + ctx.playerState.hunger);
+      if (ctx.worldBookSnippet) worldCtxLines.push('设定：' + ctx.worldBookSnippet.slice(0, 180));
+      if (ctx.recentChatSummary) worldCtxLines.push('近期聊天：' + ctx.recentChatSummary.slice(0, 160));
+      if (ctx.playerState) {
+        worldCtxLines.push('玩家位置：' + (ctx.playerState.location || '家'));
+        worldCtxLines.push('玩家状态：体力' + Math.round(ctx.playerState.energy || 0) + ' / 心情' + Math.round(ctx.playerState.mood || 0) + ' / 饥饿' + Math.round(ctx.playerState.hunger || 0) + ' / 健康' + Math.round(ctx.playerState.health || 0) + ' / 余额$' + Math.round(ctx.playerState.money || 0));
+      }
+      if (ctx.playerNeeds && ctx.playerNeeds !== '状态正常') worldCtxLines.push('当前需求：' + ctx.playerNeeds);
       var worldCtx = worldCtxLines.join('；');
 
-      var sysPrompt = '你是虚拟商城选品AI。只返回JSON数组，不加任何其他文字或代码块。';
-      var userPrompt = '背景：' + (worldCtx || '现代都市虚拟世界') + '\n为「' + catName + '」生成5件商品。'
-        + (ctx.playerNeeds && ctx.playerNeeds !== '状态正常' ? '至少2件针对玩家需求。' : '')
-        + (lsGet('meow.shop.settings',{}).customPrompt ? '额外：' + lsGet('meow.shop.settings',{}).customPrompt : '')
-        + '\n格式：[{"id":"p_xx","name":"名称6字内","emoji":"emoji","price":10-300,"desc":"卖点20字内","tags":["标签"],"effect":{"mood":N,"energy":N,"hunger":N,"health":N}}]\neffect只写有效字段(5-25)。';
+      var sysPrompt = '你是虚拟世界购物App的选品与文案AI。只返回JSON数组，不要解释，不要代码块；所有文本字段里不要出现英文双引号或反斜杠。';
+      var userPrompt = [
+        '世界背景：' + (worldCtx || '现代都市虚拟世界'),
+        '请为购物分类「' + catName + '」生成' + itemCount + '件商品。',
+        '要求：商品必须像这个世界里真实会出现的东西，而不是空泛电商词。',
+        '要求：尽量绑定世界地标、人物、近期状态、生活需求。',
+        (ctx.playerNeeds && ctx.playerNeeds !== '状态正常') ? '要求：至少2件明显回应玩家当前需求。' : '',
+        (opts.batchHint ? '要求：这是自动运行批量补货，减少重复，风格稳定。' : ''),
+        (_getShopSettings().customPrompt ? '额外要求：' + _getShopSettings().customPrompt : ''),
+        '字段必须完整：',
+        '[{"id":"p_xx","name":"名称","emoji":"可空","price":数字,"desc":"一句短卖点","story":"更真实的世界内说明/来历","vendor":"售卖者或店名","place":"购买地点/关联地标","reason":"为什么现在会出现/适合谁","tags":["标签1","标签2"],"effect":{"mood":数字,"energy":数字,"hunger":数字,"health":数字}}]',
+        '限制：name 8字内；desc 22字内；story 36字内；vendor/place/reason 16字内；price 合理；emoji 可留空；effect 只写有效字段。'
+      ] .filter(Boolean).join('\n');
 
       for (var attempt = 0; attempt < 2; attempt++) {
         try {
           var text;
           if (hasPhoneAI) {
-            var result = await window.PhoneAI.chat({ system: sysPrompt, messages: [{ role:'user', content: userPrompt }], temperature: 0.85, maxTokens: 800, channel: 'background', timeout: 45 });
-            if (!result || !result.ok || !result.data) throw new Error(result ? result.error : 'PhoneAI failed');
+            var result = await window.PhoneAI.chat({ system: sysPrompt, messages: [{ role:'user', content: userPrompt }], temperature: 0.8, maxTokens: 1400, channel: 'background', timeout: 60 });
+            if (!result || !result.ok || !result.data) {
+              var _shopErr = result ? (result.error||'') : '';
+              if (_shopErr.indexOf('中断')>=0||_shopErr.indexOf('abort')>=0) { console.log('[Shop] 通道中断，用fallback'); return _fallbackProducts(category); }
+              throw new Error(_shopErr || 'PhoneAI failed');
+            }
             text = String(result.data);
           } else {
-            var res = await fetch((cfg.baseUrl.replace(/\/$/, '')) + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey }, body: JSON.stringify({ model: cfg.model || 'gpt-3.5-turbo', max_tokens: 800, temperature: 0.85, messages: [{ role:'system', content:sysPrompt },{ role:'user', content:userPrompt }] }) });
+            var res = await fetch((cfg.baseUrl.replace(/\/$/, '')) + '/chat/completions', { method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + cfg.apiKey }, body: JSON.stringify({ model: cfg.model || 'gpt-3.5-turbo', max_tokens: 1400, temperature: 0.8, messages: [{ role:'system', content:sysPrompt },{ role:'user', content:userPrompt }] }) });
             if (!res.ok) throw new Error('HTTP ' + res.status);
             var data = await res.json();
-            text = (data.choices[0].message.content || '');
+            text = (data && data.choices && data.choices[0] && data.choices[0].message ? data.choices[0].message.content : '') || '';
           }
-          text = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-          var arrMatch = text.match(/\[[\s\S]*\]/); if (arrMatch) text = arrMatch[0];
-          text = text.replace(/,\s*([\]}])/g, '$1');
+          text = _meowSanitizeJSONish(text);
+          var arrMatch = text.match(/\[[\s\S]*\]/);
+          if (arrMatch) text = _meowSanitizeJSONish(arrMatch[0]);
           var products = JSON.parse(text);
           if (!Array.isArray(products) || !products.length) throw new Error('empty');
-          products = products.filter(function(p){ return p && p.name && p.price; });
-          products.forEach(function(p, idx){ if (!p.id) p.id = 'p_' + Date.now().toString(36) + '_' + idx; });
-          if (products.length > 0) { console.log('[Shop] AI 商品生成成功'); return products; }
+          products = products.filter(function(p){ return p && p.name && p.price; }).map(function(p, idx){
+            var fx = (p.effect && typeof p.effect === 'object') ? p.effect : {};
+            var emoji = p.emoji || catObj.emoji || '🛍️';
+            return {
+              id: p.id || ('p_' + Date.now().toString(36) + '_' + idx),
+              name: String(p.name || '').slice(0, 16),
+              emoji: String(emoji || '🛍️'),
+              price: Math.max(1, Math.round(Number(p.price) || 0)),
+              desc: String(p.desc || '').slice(0, 30),
+              story: String(p.story || '').slice(0, 60),
+              vendor: String(p.vendor || '').slice(0, 24),
+              place: String(p.place || '').slice(0, 24),
+              reason: String(p.reason || '').slice(0, 24),
+              tags: Array.isArray(p.tags) ? p.tags.slice(0, 4).map(function(t){ return String(t).slice(0, 8); }) : [],
+              effect: Object.keys(fx).reduce(function(acc, k){ var v = Math.round(Number(fx[k]) || 0); if (v > 0) acc[k] = v; return acc; }, {})
+            };
+          });
+          if (products.length > 0) {
+            _cacheShopProducts(category, products);
+            console.log('[Shop] AI 商品生成成功:', category, products.length);
+            return products;
+          }
         } catch(e) {
           console.warn('[Shop] 第' + (attempt+1) + '次生成失败:', e.message);
-          if (attempt === 0) await new Promise(function(r){ setTimeout(r, 1500); });
+          if (attempt === 0) await new Promise(function(r){ setTimeout(r, 1200); });
         }
       }
       return _fallbackProducts(category);
@@ -40820,7 +41318,8 @@ function _meowUrlBase64ToUint8Array(base64String) {
 
   /* ─────────────────────────────── 购物 App 渲染 ─────────────────────────────── */
   window.renderShopApp = function(container) {
-    var _curCat = 'food';
+    var _shopCats = _getShopAllCategories();
+    var _curCat = (_shopCats[0] || { id:'food' }).id;
     var _products = [];
     var _loading = false;
 
@@ -40832,14 +41331,16 @@ function _meowUrlBase64ToUint8Array(base64String) {
     }
 
     function _catTabs() {
-      return _CATEGORIES.map(function(c) {
+      _shopCats = _getShopAllCategories();
+      if (!_shopCats.find(function(c){ return c.id === _curCat; })) _curCat = (_shopCats[0] || { id:'food' }).id;
+      return _shopCats.map(function(c) {
         var active = _curCat === c.id;
         return '<button onclick="window._shopSetCat(\'' + c.id + '\')" style="'
           + 'white-space:nowrap;padding:5px 12px;border-radius:20px;border:none;cursor:pointer;font-size:12px;font-weight:500;'
           + 'background:' + (active ? 'var(--ph-accent,#07c160)' : 'var(--ph-glass,rgba(255,255,255,.7))') + ';'
           + 'color:' + (active ? '#fff' : 'var(--ph-text,#333)') + ';'
           + 'box-shadow:0 1px 4px rgba(0,0,0,.08);'
-          + '">' + c.emoji + ' ' + c.name + '</button>';
+          + '">' + (c.emoji || '🛍️') + ' ' + c.name + '</button>';
       }).join('');
     }
 
@@ -40851,24 +41352,32 @@ function _meowUrlBase64ToUint8Array(base64String) {
         var inCart = _cart.filter(function(c){ return c.id === p.id; }).length;
         var cartBtnLabel = inCart > 0 ? ('+1(' + inCart + ')') : '加入';
         var fx = _fxStr(p.effect);
+        var meta = [];
+        if (p.vendor) meta.push('商家｜' + p.vendor);
+        if (p.place) meta.push('地点｜' + p.place);
+        if (p.reason) meta.push('缘由｜' + p.reason);
         var tagsHtml = (p.tags && p.tags.length)
-          ? '<div style="display:flex;flex-wrap:wrap;gap:3px;justify-content:center;">'
-            + p.tags.slice(0,3).map(function(t){
+          ? '<div style="display:flex;flex-wrap:wrap;gap:3px;justify-content:flex-start;">'
+            + p.tags.slice(0,4).map(function(t){
                 return '<span style="font-size:9px;padding:1px 5px;border-radius:6px;background:rgba(0,0,0,.05);color:var(--ph-text-sub,#999);">' + t + '</span>';
               }).join('') + '</div>'
           : '';
-        html += '<div class="phCard" style="margin:0;padding:12px;display:flex;flex-direction:column;gap:5px;">'
-          + '<div style="font-size:28px;text-align:center;">' + p.emoji + '</div>'
-          + '<div style="font-size:13px;font-weight:600;color:var(--ph-text,#333);text-align:center;line-height:1.3;">' + p.name + '</div>'
-          + (p.desc ? '<div style="font-size:10px;color:var(--ph-text-sub,#888);text-align:center;line-height:1.4;">' + p.desc + '</div>' : '')
-          + (p.story ? '<div style="font-size:9px;color:rgba(20,24,28,.32);text-align:center;line-height:1.4;font-style:italic;">' + p.story + '</div>' : '')
+        html += '<div class="phCard" style="margin:0;padding:12px;display:flex;flex-direction:column;gap:6px;align-items:stretch;">'
+          + '<div style="display:flex;align-items:flex-start;gap:8px;">'
+          + '<div style="font-size:26px;line-height:1;flex-shrink:0;">' + (p.emoji || '🛍️') + '</div>'
+          + '<div style="flex:1;min-width:0;">'
+          + '<div style="font-size:13px;font-weight:600;color:var(--ph-text,#333);line-height:1.35;">' + p.name + '</div>'
+          + (p.desc ? '<div style="font-size:10px;color:var(--ph-text-sub,#888);line-height:1.45;margin-top:2px;">' + p.desc + '</div>' : '')
+          + '</div></div>'
+          + (p.story ? '<div style="font-size:9px;color:rgba(20,24,28,.42);line-height:1.45;">' + p.story + '</div>' : '')
+          + (meta.length ? '<div style="font-size:9px;color:rgba(20,24,28,.5);line-height:1.5;display:flex;flex-direction:column;gap:2px;">' + meta.map(function(m){ return '<div>' + m + '</div>'; }).join('') + '</div>' : '')
           + tagsHtml
-          + (fx ? '<div style="font-size:10px;color:var(--ph-accent,#07c160);text-align:center;">' + fx + '</div>' : '')
-          + '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:2px;">'
+          + (fx ? '<div style="font-size:10px;color:var(--ph-accent,#07c160);">' + fx + '</div>' : '')
+          + '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:auto;gap:8px;">'
           + '<span style="font-weight:700;color:var(--ph-accent,#07c160);font-size:14px;">$' + p.price + '</span>'
-          + '<button onclick="window._shopAddCart(\'' + encodeURIComponent(JSON.stringify(p)) + '\')" style="'
+          + '<button onclick="window._shopAddCart(decodeURIComponent(this.dataset.item))" data-item="' + encodeURIComponent(JSON.stringify(p)) + '" style="'
           + 'background:var(--ph-accent,#07c160);color:#fff;border:none;border-radius:8px;'
-          + 'padding:4px 10px;font-size:12px;cursor:pointer;">' + cartBtnLabel + '</button>'
+          + 'padding:4px 10px;font-size:12px;cursor:pointer;white-space:nowrap;">' + cartBtnLabel + '</button>'
           + '</div></div>';
       });
       html += '</div>';
@@ -40918,11 +41427,18 @@ function _meowUrlBase64ToUint8Array(base64String) {
 
     window._shopSetCat = function(cat) {
       _curCat = cat;
+      var cached = _readShopProductsFromCache(cat);
+      if (cached && cached.length) {
+        _products = cached;
+        _loading = false;
+        render();
+        return;
+      }
       _products = [];
       _loading = true;
       render();
-      generateProducts(cat).then(function(ps) {
-        _products = ps;
+      generateProducts(cat, { force:false }).then(function(ps) {
+        _products = ps || [];
         _loading = false;
         var grid = container.querySelector('#shop-product-grid');
         if (grid) grid.innerHTML = _productGrid();
@@ -41006,7 +41522,7 @@ function _meowUrlBase64ToUint8Array(base64String) {
           + '<div style="padding:13px 16px;display:flex;align-items:center;justify-content:space-between;">'
           + '<div>'
           + '<div style="font-size:14px;color:var(--ph-text,#333);">自动刷新商品</div>'
-          + '<div style="font-size:11px;color:var(--ph-text-sub,#aaa);margin-top:2px;">切换分类时自动调用 AI 生成符合世界观的商品</div>'
+          + '<div style="font-size:11px;color:var(--ph-text-sub,#aaa);margin-top:2px;">切换分类时优先读取缓存，仅在缺货或过期时再调用 AI 补货</div>'
           + '</div>'
           + '<button id="shop-auto-toggle" onclick="window._shopToggleAuto()" style="'
           + 'width:44px;height:26px;border-radius:13px;border:none;cursor:pointer;position:relative;flex-shrink:0;transition:background .2s;'
@@ -41079,11 +41595,24 @@ function _meowUrlBase64ToUint8Array(base64String) {
         panel.remove();
         var grid = container.querySelector('#shop-product-grid');
         if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--ph-text-sub,#aaa);">AI 正在生成…</div>';
-        generateProducts(_curCat).then(function(ps) {
-          _products = ps;
+        if (typeof window._meowRunWorldBundleTargets === 'function') {
+          window._meowRunWorldBundleTargets(['shop'], { isManual:true, showToast:true, silentDone:true, startText:'🛒 正在刷新购物…' }).then(function(){
+            _products = _readShopProductsFromCache(_curCat) || _fallbackProducts(_curCat);
+            _genLoading = false;
+            if (grid) grid.innerHTML = _productGrid();
+            try{ toast('✅ 当前分类商品已刷新'); }catch(e){}
+          }).catch(function() {
+            _genLoading = false;
+            if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--ph-text-sub,#aaa);">生成失败，请重试</div>';
+          });
+          return;
+        }
+        generateProducts(_curCat, { force:true }).then(function(ps) {
+          _products = ps || [];
+          _cacheShopProducts(_curCat, _products);
           _genLoading = false;
           if (grid) grid.innerHTML = _productGrid();
-          try{ toast('✅ 商品已刷新'); }catch(e){}
+          try{ toast('✅ 当前分类商品已刷新'); }catch(e){}
         }).catch(function() {
           _genLoading = false;
           if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--ph-text-sub,#aaa);">生成失败，请重试</div>';
@@ -41123,28 +41652,36 @@ function _meowUrlBase64ToUint8Array(base64String) {
         }
       };
       window._shopClearData = function() {
-        if (!confirm('确定清空所有购物车和订单数据吗？')) return;
+        if (!confirm('确定清空所有购物车、订单和商品缓存吗？')) return;
         lsSet(K_ORDERS, {orders:[]});
+        _clearShopProductCache();
         _cart = [];
         panel.remove();
         render();
-        try{ toast('已清空'); }catch(e){}
+        try{ toast('已清空购物数据与缓存'); }catch(e){}
       };
     };
 
     // 初始加载
-    _loading = true;
-    render();
-    generateProducts(_curCat).then(function(ps) {
-      _products = ps;
+    var _bootCached = _readShopProductsFromCache(_curCat);
+    if (_bootCached && _bootCached.length) {
+      _products = _bootCached;
       _loading = false;
-      var grid = container.querySelector('#shop-product-grid');
-      if (grid) grid.innerHTML = _productGrid();
-    }).catch(function() {
-      _loading = false;
-      var grid = container.querySelector('#shop-product-grid');
-      if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--ph-text-sub,#aaa);">加载失败，请重试</div>';
-    });
+      render();
+    } else {
+      _loading = true;
+      render();
+      generateProducts(_curCat, { force:false }).then(function(ps) {
+        _products = ps || [];
+        _loading = false;
+        var grid = container.querySelector('#shop-product-grid');
+        if (grid) grid.innerHTML = _productGrid();
+      }).catch(function() {
+        _loading = false;
+        var grid = container.querySelector('#shop-product-grid');
+        if (grid) grid.innerHTML = '<div style="text-align:center;padding:40px;color:var(--ph-text-sub,#aaa);">加载失败，请重试</div>';
+      });
+    }
   }; // end renderShopApp
 
   /* ─── 购物车弹窗 ─── */
@@ -41635,11 +42172,30 @@ function _meowUrlBase64ToUint8Array(base64String) {
   }
 
   /** AI 生成工作（世界观一致），fallback 到静态模板 */
+  var K_WORK_AI_CACHE = 'meow.work.ai.v1';
   var _aiWorkCache = { items:null, at:0 };
   var AI_WORK_CACHE_TTL = 30 * 60 * 1000; // 30分钟
-  async function generateAIWork() {
-    // 缓存未过期直接用
-    if (_aiWorkCache.items && (Date.now() - _aiWorkCache.at < AI_WORK_CACHE_TTL)) return _aiWorkCache.items;
+  function _loadWorkAICache(){
+    try{
+      var raw = _lsGet(K_WORK_AI_CACHE, null);
+      if (raw && Array.isArray(raw.items)) return raw;
+    }catch(e){}
+    return { items:null, at:0 };
+  }
+  function _saveWorkAICache(items){
+    var pack = { items:Array.isArray(items)?items:[], at:Date.now() };
+    _aiWorkCache = pack;
+    try{ _lsSet(K_WORK_AI_CACHE, pack); }catch(e){}
+    return pack;
+  }
+  window._meowSaveWorkAICache = _saveWorkAICache;
+  async function generateAIWork(opts) {
+    opts = opts || {};
+    if (!opts.force) {
+      if (_aiWorkCache.items && (Date.now() - _aiWorkCache.at < AI_WORK_CACHE_TTL)) return _aiWorkCache.items;
+      var persisted = _loadWorkAICache();
+      if (persisted.items && (Date.now() - persisted.at < AI_WORK_CACHE_TTL)) { _aiWorkCache = persisted; return persisted.items; }
+    }
 
     var hasPhoneAI = (typeof window.PhoneAI !== 'undefined' && window.PhoneAI && typeof window.PhoneAI.chat === 'function');
     if (!hasPhoneAI) return null; // 返回 null → 调用方用 fallback
@@ -41673,7 +42229,7 @@ function _meowUrlBase64ToUint8Array(base64String) {
     if (ctx.characters) ctxLines.push('角色：' + ctx.characters);
     if (ctx.energy != null) ctxLines.push('玩家体力' + Math.round(ctx.energy) + ' 心情' + Math.round(ctx.mood||70) + ' 余额$' + Math.round(ctx.money||500) + ' 位置「' + (ctx.location||'家') + '」');
 
-    var sysPrompt = '你是虚拟世界的「工作推荐」AI。只输出JSON数组，不要其他文字。';
+    var sysPrompt = '你是虚拟世界的「工作推荐」AI。只输出JSON数组，不要其他文字；所有文本字段里不要出现英文双引号或反斜杠。';
     var userPrompt = '## 背景\n' + (ctxLines.join('\n') || '普通现代岛屿世界') + '\n\n'
       + '## 任务\n请为玩家生成6-8个今日可接工作。\n\n'
       + '## 要求\n'
@@ -41688,13 +42244,19 @@ function _meowUrlBase64ToUint8Array(base64String) {
       var result = await window.PhoneAI.chat({
         system: sysPrompt,
         messages: [{ role:'user', content: userPrompt }],
-        temperature: 0.85, maxTokens: 1200, channel: 'background', timeout: 60
+        temperature: 0.75, maxTokens: 1200, channel: 'background', timeout: 60
       });
-      if (!result || !result.ok || !result.data) throw new Error(result ? result.error : 'failed');
-      var text = String(result.data).replace(/```json|```/g, '').trim();
+      if (!result || !result.ok || !result.data) {
+        var _questErr = result ? (result.error||'') : '';
+        if (_questErr.indexOf('中断')>=0||_questErr.indexOf('abort')>=0) { console.log('[MeowQuest] 通道中断，用静态工作'); return null; }
+        throw new Error(_questErr || 'failed');
+      }
+      var text = _meowSanitizeJSONish(result.data);
+      var arrMatch = text.match(/\[[\s\S]*\]/);
+      if (arrMatch) text = _meowSanitizeJSONish(arrMatch[0]);
       var items = JSON.parse(text);
       if (!Array.isArray(items) || !items.length) throw new Error('empty');
-      _aiWorkCache = { items: items, at: Date.now() };
+      _saveWorkAICache(items);
       console.log('[MeowQuest] AI 工作生成成功:', items.length, '条');
       return items;
     } catch(e) {
@@ -41714,24 +42276,24 @@ function _meowUrlBase64ToUint8Array(base64String) {
     var _dailyWork = generateDailyWork();
     var _aiLoading = false;
 
-    // 尝试 AI 生成（异步，先显示静态，生成后替换）
-    (async function _tryAI() {
+    // 优先读缓存，不在进入页面时自动再发 AI 请求，避免和总调度器抢通道
+    (function _tryCachedAI() {
       try {
-        var ai = await generateAIWork();
-        if (ai && ai.length) {
-          var p = { energy:80 }; try { if (window.WorldState) p = window.WorldState.player; } catch(e){}
-          var quests = loadQuests(); var activeIds = {};
-          quests.active.forEach(function(q){ if(q.templateId) activeIds[q.templateId] = true; });
-          _dailyWork = ai.map(function(t) {
-            var canAccept = p.energy >= (t.minEnergy||0) && !activeIds[t.templateId] && quests.active.length < MAX_ACTIVE;
-            var reason = '';
-            if (p.energy < (t.minEnergy||0)) reason = '体力不足（需要' + t.minEnergy + '）';
-            else if (activeIds[t.templateId]) reason = '已在进行中';
-            else if (quests.active.length >= MAX_ACTIVE) reason = '任务已满';
-            return { templateId:t.templateId, title:t.title, desc:t.desc, cost:t.cost||{}, reward:t.reward||{}, minEnergy:t.minEnergy||0, tags:t.tags||[], canAccept:canAccept, reason:reason, source:'work' };
-          });
-          if (_tab === 'daily') render();
-        }
+        var persisted = _loadWorkAICache();
+        var ai = (persisted && Array.isArray(persisted.items) && persisted.items.length) ? persisted.items : null;
+        if (!ai) return;
+        var p = { energy:80 }; try { if (window.WorldState) p = window.WorldState.player; } catch(e){}
+        var quests = loadQuests(); var activeIds = {};
+        quests.active.forEach(function(q){ if(q.templateId) activeIds[q.templateId] = true; });
+        _dailyWork = ai.map(function(t) {
+          var canAccept = p.energy >= (t.minEnergy||0) && !activeIds[t.templateId] && quests.active.length < MAX_ACTIVE;
+          var reason = '';
+          if (p.energy < (t.minEnergy||0)) reason = '体力不足（需要' + t.minEnergy + '）';
+          else if (activeIds[t.templateId]) reason = '已在进行中';
+          else if (quests.active.length >= MAX_ACTIVE) reason = '任务已满';
+          return { templateId:t.templateId, title:t.title, desc:t.desc, cost:t.cost||{}, reward:t.reward||{}, minEnergy:t.minEnergy||0, tags:t.tags||[], canAccept:canAccept, reason:reason, source:'work' };
+        });
+        if (_tab === 'daily') render();
       } catch(e){}
     })();
 
@@ -41949,8 +42511,16 @@ function _meowUrlBase64ToUint8Array(base64String) {
       _aiLoading = true;
       render();
       try {
-        _aiWorkCache = { items:null, at:0 }; // 清缓存强制重新生成
-        var ai = await generateAIWork();
+        _aiWorkCache = { items:null, at:0 };
+        try{ localStorage.removeItem(K_WORK_AI_CACHE); }catch(e){}
+        var ai = null;
+        if (typeof window._meowRunWorldBundleTargets === 'function') {
+          await window._meowRunWorldBundleTargets(['work'], { isManual:true, showToast:true, silentDone:true, startText:'💼 正在刷新工作…' });
+          var persisted = _loadWorkAICache();
+          ai = persisted && persisted.items;
+        } else {
+          ai = await generateAIWork({ force:true });
+        }
         if (ai && ai.length) {
           var p = { energy:80 }; try { if (window.WorldState) p = window.WorldState.player; } catch(e){}
           var quests = loadQuests(); var activeIds = {};
@@ -42076,7 +42646,10 @@ function _meowUrlBase64ToUint8Array(base64String) {
   'use strict';
 
   var LS_NEWS_CACHE = 'meow.news.cache.v1';
-  var NEWS_CACHE_TTL = 30 * 60 * 1000; // 30分钟缓存
+  var NEWS_CACHE_TTL = 30 * 60 * 1000;
+
+  function lsGet(k, d) { try { var v = localStorage.getItem(k); return v !== null ? JSON.parse(v) : (d !== undefined ? d : null); } catch(e) { return d !== undefined ? d : null; } }
+  function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch(e) {} }
 
   /* ── 五类资讯定义 ── */
   function _newsTabSvg(d) {
@@ -42185,7 +42758,7 @@ function _meowUrlBase64ToUint8Array(base64String) {
     ].filter(Boolean).join('；');
 
     // ★ 精简 prompt
-    var sysPrompt = '你是虚拟世界资讯AI。只返回JSON数组，不加任何其他文字或代码块。';
+    var sysPrompt = '你是虚拟世界资讯AI。只返回JSON数组，不加任何其他文字或代码块；所有文本字段里不要出现英文双引号或反斜杠。';
     var userPrompt = '背景：' + (ctxDesc || '现代都市虚拟世界') + '\n'
       + '生成' + catFilter + '。\n'
       + '要求：符合世界观，给玩家可行动机会，关联已知角色地标。'
@@ -42202,7 +42775,11 @@ function _meowUrlBase64ToUint8Array(base64String) {
           var text;
           if (hasPhoneAI) {
             var result = await window.PhoneAI.chat({ system: sysPrompt, messages: [{ role:'user', content: userPrompt }], temperature: 0.85, maxTokens: 1200, channel: 'background', timeout: 60 });
-            if (!result || !result.ok || !result.data) throw new Error(result ? result.error : 'PhoneAI failed');
+            if (!result || !result.ok || !result.data) {
+              var _newsErr = result ? (result.error||'') : '';
+              if (_newsErr.indexOf('中断')>=0||_newsErr.indexOf('abort')>=0) { console.log('[MeowNews] 通道中断，用fallback'); return null; }
+              throw new Error(_newsErr || 'PhoneAI failed');
+            }
             text = String(result.data);
           } else {
             var cfg = _meowGetActiveApiConfig();
@@ -42212,10 +42789,9 @@ function _meowUrlBase64ToUint8Array(base64String) {
             text = (data.choices[0].message.content || '');
           }
           // ★ 健壮解析
-          text = text.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+          text = _meowSanitizeJSONish(text);
           var arrMatch = text.match(/\[[\s\S]*\]/);
-          if (arrMatch) text = arrMatch[0];
-          text = text.replace(/,\s*([\]}])/g, '$1');
+          if (arrMatch) text = _meowSanitizeJSONish(arrMatch[0]);
           var items = JSON.parse(text);
           if (!Array.isArray(items) || !items.length) throw new Error('empty');
           items = items.filter(function(n){ return n && n.type && n.title; });
@@ -42411,6 +42987,20 @@ function _meowUrlBase64ToUint8Array(base64String) {
         + '</div>';
     }
 
+    function _saveCache(tabId, items) {
+      try {
+        localStorage.setItem(LS_NEWS_CACHE + '_' + tabId, JSON.stringify({ items: Array.isArray(items) ? items : [], at: Date.now() }));
+      } catch(e) {}
+    }
+    function _fanoutAllCache(items) {
+      try {
+        _saveCache('all', items);
+        ['chance','trade','event','intel','world'].forEach(function(tp){
+          _saveCache(tp, (Array.isArray(items) ? items : []).filter(function(it){ return String(it && it.type || '') === tp; }));
+        });
+      } catch(e) {}
+    }
+
     // 尝试从缓存加载
     function _loadFromCache(tabId) {
       try {
@@ -42427,8 +43017,12 @@ function _meowUrlBase64ToUint8Array(base64String) {
       if (cached) { _items = cached; _render(); return; }
       _loading = true; _render();
       _generateNews(tabId).then(function(items) {
-        _items = items; _loading = false; _render();
-      });
+        _items = items || [];
+        _loading = false;
+        if (tabId === 'all') _fanoutAllCache(_items);
+        else _saveCache(tabId, _items);
+        _render();
+      }).catch(function(){ _items = []; _loading = false; _render(); });
     }
 
     window._newsSetTab = function(tabId) {
@@ -42436,6 +43030,15 @@ function _meowUrlBase64ToUint8Array(base64String) {
       _loadNews(tabId, false);
     };
     window._newsRefresh = function() {
+      if (typeof window._meowRunWorldBundleTargets === 'function') {
+        _loading = true; _render();
+        window._meowRunWorldBundleTargets(['news'], { isManual:true, showToast:true, silentDone:true, startText:'📰 正在刷新资讯…' }).then(function(){
+          _items = _loadFromCache(_curTab) || [];
+          _loading = false;
+          _render();
+        }).catch(function(){ _loadNews(_curTab, true); });
+        return;
+      }
       _loadNews(_curTab, true);
     };
     window._newsToggle = function(id) {
