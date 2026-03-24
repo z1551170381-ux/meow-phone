@@ -39080,7 +39080,6 @@ var npcs = _meowCollectNpcs().map(function(n){
         uid: uid,
         subscription: (subscription && subscription.toJSON) ? subscription.toJSON() : subscription,
         npcs: npcs,
-        apiConfig: apiConfig,
         enableBackgroundPush: enableBgPush
       })
     });
@@ -43135,6 +43134,585 @@ function _meowUrlBase64ToUint8Array(base64String) {
   console.log('[MeowNews] 资讯系统就绪 ✓');
 })();
 /* ── meow-news.js end ── */
+</script>
+<script>
+// ====== meow-bgpush.js — 后台推送 v4 ======
+// ====== meow-bgpush.js — 后台推送 v4（音频保活 + 离开时生成）======
+//
+// 流程：
+//   用户切走 → 音频保活 → 8秒防抖 → 挑角色 → 调本地API生成消息
+//   → POST /api/schedule-push（只发文本，不发API Key）
+//   → 后端 cron 到时间了 Web Push → SW 直接显示
+//   用户回来 → 取消未发的 pending → 停保活
+//
+// ★ API Key 永远不离开设备
+
+(function() {
+  'use strict';
+
+  // ═══════════════════════════════════════════
+  //  配置
+  // ═══════════════════════════════════════════
+
+  var DEBOUNCE_MS = 8000;   // 切走后等 8 秒再开始（防止秒切回来）
+  var API_TIMEOUT = 25000;  // API 调用超时（保活窗口约 60~180 秒，留余量）
+
+  // 关系 → { 延迟范围(分钟), 每日上限 }
+  var BOND_CONFIG = {
+    '亲近': { minDelay: 10,  maxDelay: 60,   dailyMax: 6, prob: 1.0 },
+    '暧昧': { minDelay: 10,  maxDelay: 60,   dailyMax: 6, prob: 1.0 },
+    '普通': { minDelay: 120, maxDelay: 240,  dailyMax: 2, prob: 0.9 },
+    '疏远': { minDelay: 240, maxDelay: 360,  dailyMax: 1, prob: 0.5 },
+    '冷战中': { minDelay: 360, maxDelay: 480, dailyMax: 0, prob: 0.0 }
+  };
+  var DEFAULT_BOND = '普通';
+
+  // ═══════════════════════════════════════════
+  //  工具
+  // ═══════════════════════════════════════════
+
+  function lsGet(key, def) {
+    try { var v = localStorage.getItem(key); return v !== null ? JSON.parse(v) : (def === undefined ? null : def); }
+    catch(e) { return def === undefined ? null : def; }
+  }
+  function lsSet(key, val) {
+    try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {}
+  }
+
+  function dayKey(ts) {
+    var d = new Date(ts || Date.now());
+    return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+  }
+
+  function cleanText(v, max) {
+    return String(v || '').replace(/```[\s\S]*?```/g, ' ').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max || 400);
+  }
+
+  function randInt(min, max) {
+    return Math.floor(Math.random() * (max - min + 1)) + min;
+  }
+
+  function normalizeTimeLabel() {
+    var h = new Date().getHours();
+    if (h < 5)  return '深夜';
+    if (h < 8)  return '清晨';
+    if (h < 11) return '上午';
+    if (h < 14) return '中午';
+    if (h < 18) return '下午';
+    if (h < 21) return '晚上';
+    return '夜里';
+  }
+
+  // ═══════════════════════════════════════════
+  //  音频保活
+  // ═══════════════════════════════════════════
+
+  var _audioCtx = null;
+  var _keepaliveNodes = null;
+
+  // 必须在用户手势中调一次
+  function initAudioContext() {
+    if (_audioCtx) return;
+    try {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) return;
+      _audioCtx = new AC();
+      // iOS 需要 resume
+      if (_audioCtx.state === 'suspended') {
+        _audioCtx.resume();
+      }
+      console.log('[BgPush] AudioContext 已初始化');
+    } catch(e) {
+      console.warn('[BgPush] AudioContext 初始化失败:', e);
+    }
+  }
+
+  // 在用户第一次触摸/点击时初始化
+  function _onFirstInteraction() {
+    initAudioContext();
+    document.removeEventListener('click', _onFirstInteraction, true);
+    document.removeEventListener('touchstart', _onFirstInteraction, true);
+  }
+  document.addEventListener('click', _onFirstInteraction, true);
+  document.addEventListener('touchstart', _onFirstInteraction, true);
+
+  function startKeepalive() {
+    if (!_audioCtx) {
+      console.warn('[BgPush] 无 AudioContext，保活不可用');
+      return false;
+    }
+    if (_keepaliveNodes) return true; // 已经在运行
+
+    try {
+      // resume（iOS 后台需要）
+      if (_audioCtx.state === 'suspended') _audioCtx.resume();
+
+      // 极低音量的振荡器（静音但保持 AudioContext 活跃）
+      var osc = _audioCtx.createOscillator();
+      var gain = _audioCtx.createGain();
+      gain.gain.value = 0.0001; // 几乎听不到
+      osc.frequency.value = 20; // 低于人耳可闻范围
+      osc.connect(gain);
+      gain.connect(_audioCtx.destination);
+      osc.start();
+
+      _keepaliveNodes = { osc: osc, gain: gain };
+      console.log('[BgPush] 保活已启动');
+      return true;
+    } catch(e) {
+      console.warn('[BgPush] 保活启动失败:', e);
+      return false;
+    }
+  }
+
+  function stopKeepalive() {
+    if (!_keepaliveNodes) return;
+    try {
+      _keepaliveNodes.osc.stop();
+      _keepaliveNodes.osc.disconnect();
+      _keepaliveNodes.gain.disconnect();
+    } catch(e) {}
+    _keepaliveNodes = null;
+    console.log('[BgPush] 保活已停止');
+  }
+
+
+  // ═══════════════════════════════════════════
+  //  NPC 选择：谁应该找用户
+  // ═══════════════════════════════════════════
+
+  function pickNpcsToMessage() {
+    var npcs;
+    if (typeof _meowCollectNpcs === 'function') {
+      npcs = _meowCollectNpcs();
+    } else {
+      return [];
+    }
+
+    if (!npcs || !npcs.length) return [];
+
+    var now = Date.now();
+    var today = dayKey(now);
+    var candidates = [];
+
+    for (var i = 0; i < npcs.length; i++) {
+      var npc = npcs[i];
+      if (!npc || !npc.id) continue;
+      if (npc.enableLifePush === false) continue;
+
+      var bond = String(npc.bond || DEFAULT_BOND);
+      var cfg = BOND_CONFIG[bond] || BOND_CONFIG[DEFAULT_BOND];
+
+      // 冷战中不发
+      if (cfg.dailyMax <= 0) continue;
+
+      // 概率检查（疏远的角色有概率不发）
+      if (Math.random() > cfg.prob) continue;
+
+      // 检查今日已发次数
+      var trackKey = 'meow_bgpush_track_' + npc.id;
+      var track = lsGet(trackKey, { date: '', count: 0 });
+      if (track.date === today && track.count >= cfg.dailyMax) continue;
+
+      // 检查最近推送冷却（至少间隔延迟下限的一半）
+      var lastPushAt = track.lastPushAt || 0;
+      var minCooldown = cfg.minDelay * 60 * 1000 * 0.5;
+      if (now - lastPushAt < minCooldown) continue;
+
+      // 计算延迟
+      var delayMinutes = randInt(cfg.minDelay, cfg.maxDelay);
+
+      candidates.push({
+        npc: npc,
+        bond: bond,
+        delayMs: delayMinutes * 60 * 1000,
+        priority: cfg.dailyMax - (track.date === today ? track.count : 0) // 剩余额度越多越优先
+      });
+    }
+
+    // 按优先级排序，最多取 2 个（保活时间有限）
+    candidates.sort(function(a, b) { return b.priority - a.priority; });
+    return candidates.slice(0, 2);
+  }
+
+  // 记录发送
+  function trackPush(npcId) {
+    var trackKey = 'meow_bgpush_track_' + npcId;
+    var today = dayKey(Date.now());
+    var track = lsGet(trackKey, { date: '', count: 0 });
+    if (track.date !== today) {
+      track = { date: today, count: 0 };
+    }
+    track.count++;
+    track.lastPushAt = Date.now();
+    lsSet(trackKey, track);
+  }
+
+
+  // ═══════════════════════════════════════════
+  //  API 调用：生成消息
+  // ═══════════════════════════════════════════
+
+  function getLocalApiConfig() {
+    try {
+      var raw = localStorage.getItem('meow_phone_api_presets_v1');
+      if (!raw) return null;
+      var data = JSON.parse(raw);
+      var presets = (data && data.presets) || [];
+      var activeId = (data && data.activeId) || '';
+      var preset = presets.find(function(p){ return p.id === activeId; }) || presets[0] || null;
+      if (!preset || !preset.apiKey || !preset.baseUrl) return null;
+      return {
+        baseUrl: String(preset.baseUrl || '').trim().replace(/\/+$/, ''),
+        apiKey:  String(preset.apiKey  || '').trim(),
+        model:   String(preset.model   || '').replace(/^\[.*?\]\s*/g, '').replace(/^\(.*?\)\s*/g, '').trim()
+      };
+    } catch(e) { return null; }
+  }
+
+  async function generateMessage(apiConfig, npc) {
+    var npcName = String(npc.name || npc.id || '角色');
+    var bond = String(npc.bond || '普通');
+    var timeLabel = normalizeTimeLabel();
+
+    var bondVibe =
+      bond === '亲近' ? '你们关系亲近，说话自然熟稔，可以带关心和生活感。' :
+      bond === '暧昧' ? '你们之间有点微妙，说话柔和、留一点试探。' :
+      bond === '疏远' ? '你们不算熟，偶尔联系，语气克制。' :
+                       '你们是正常来往的关系，说话自然、有分寸。';
+
+    var ctxLines = [
+      '现在是' + timeLabel + '。',
+      npc.npc_state     && ('你当前：' + cleanText(npc.npc_state, 140)),
+      npc.current_scene && ('场景：' + cleanText(npc.current_scene, 120)),
+      npc.location      && ('地点：' + cleanText(npc.location, 80)),
+      npc.user_state    && ('对方现在：' + cleanText(npc.user_state, 140)),
+      npc.recent_memory && ('你们最近聊过：' + cleanText(npc.recent_memory, 300)),
+      npc.summary       && ('聊天要点：' + cleanText(npc.summary, 400)),
+      npc.world_context && ('背景：' + cleanText(npc.world_context, 400)),
+      npc.user_profile  && ('关于对方：' + cleanText(npc.user_profile, 180)),
+    ].filter(Boolean).join('\n');
+
+    var systemPrompt = [
+      '你正在扮演「' + npcName + '」，此刻要主动给对方发一条即时聊天消息。',
+      npc.profile ? cleanText(npc.profile, 900) : '',
+      npc.onlineChatPrompt ? cleanText(npc.onlineChatPrompt, 500) : '',
+      '',
+      '【你和对方的关系】',
+      bondVibe,
+      '',
+      '【此刻的状态和背景】',
+      ctxLines,
+      '',
+      '【任务】',
+      '基于你现在的状态、最近的聊天内容、关系远近、世界背景与眼前情境，发一句自然找对方说话的话。',
+      '',
+      '【硬性要求】',
+      '1. 只输出一条消息正文，不要解释，不要编号，不要英文标签。',
+      '2. 必须是一句完整的话，像真人手机打字发出去的。',
+      '3. 15~30 个中文字符，最多不超过 40 个。',
+      '4. 必须像"在找对方说话"，不是描写画面。',
+      '5. 优先从具体细节切入：眼前看到的、刚发生的事、此刻的状态。',
+      '6. 禁止模板句：如"在忙吗""突然想起你""顺手问问你""刚空下来""你在干嘛"。',
+      '7. 关系不同语气不同。',
+      '8. 写不出就只输出：__SKIP__'
+    ].filter(Boolean).join('\n');
+
+    var userPrompt = '你' + timeLabel + '忽然因为一个具体的小事想到对方，于是自然地发一句。直接输出那句话。';
+
+    // 判断 API 类型并调用
+    var isClaudeAPI = apiConfig.baseUrl.indexOf('anthropic') !== -1;
+    var rawResponse;
+
+    var controller = new AbortController();
+    var timeout = setTimeout(function() { controller.abort(); }, API_TIMEOUT);
+
+    try {
+      if (isClaudeAPI) {
+        var resp = await fetch(apiConfig.baseUrl + '/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': apiConfig.apiKey,
+            'anthropic-version': '2023-06-01'
+          },
+          body: JSON.stringify({
+            model: apiConfig.model || 'claude-sonnet-4-20250514',
+            system: systemPrompt,
+            messages: [{ role: 'user', content: userPrompt }],
+            max_tokens: 180,
+            temperature: 0.82
+          }),
+          signal: controller.signal
+        });
+        if (!resp.ok) throw new Error('API ' + resp.status);
+        var data = await resp.json();
+        rawResponse = (data.content && data.content[0] && data.content[0].text) || '';
+      } else {
+        var resp2 = await fetch(apiConfig.baseUrl + '/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + apiConfig.apiKey
+          },
+          body: JSON.stringify({
+            model: apiConfig.model || 'gpt-4o-mini',
+            messages: [
+              { role: 'system', content: systemPrompt },
+              { role: 'user', content: userPrompt }
+            ],
+            temperature: 0.82,
+            presence_penalty: 0.28,
+            frequency_penalty: 0.22,
+            max_tokens: 180
+          }),
+          signal: controller.signal
+        });
+        if (!resp2.ok) throw new Error('API ' + resp2.status);
+        var data2 = await resp2.json();
+        rawResponse = (data2.choices && data2.choices[0] && data2.choices[0].message && data2.choices[0].message.content) || '';
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+
+    return postProcess(rawResponse);
+  }
+
+  function postProcess(raw) {
+    var s = String(raw || '').trim();
+    if (!s || s === '__SKIP__') return '';
+
+    // 多行取第一条含中文的
+    var lines = s.split(/[\r\n]+/).map(function(l) { return l.trim(); }).filter(Boolean);
+    if (lines.length > 1) {
+      s = '';
+      for (var i = 0; i < lines.length; i++) {
+        if (/[\u4e00-\u9fff]/.test(lines[i])) { s = lines[i]; break; }
+      }
+      if (!s) s = lines[0];
+    }
+
+    s = s
+      .replace(/^(draft|option|version|choice|message|scene|tone|setting)\s*\d*\s*(\([^)]*\))?\s*[:：\-*]\s*/i, '')
+      .replace(/^[\(\uff08]?\d+[\)\uff09.\uff0e]?\s*/, '')
+      .replace(/^[-*•●]\s*/, '')
+      .replace(/^(消息|回复|内容|正文|发送|我说|我发|草稿)\s*[\d一二三四五六七八九十]*\s*[:：]\s*/, '')
+      .replace(/^[\*"'\u201c\u201d\u2018\u2019\u300c\u300e\s]+|[\*"'\u201c\u201d\u2018\u2019\u300d\u300f\s]+$/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+
+    // 质检
+    if (!s) return '';
+    if (!/[\u4e00-\u9fff]/.test(s)) return '';
+    if (s.length < 8 || s.length > 80) return '';
+    if (/^(在忙吗|你在干嘛|突然想起你|顺手问问你|刚空下来一点)/.test(s)) return '';
+    if (/^(Scene|Draft|Option|Tone|Setting)\b/i.test(s)) return '';
+    if (/(看到|想到|发现|路过|经过|翻到|闻到)$/.test(s)) return '';  // 半截话
+    if (/[，、：；—…·,;:\-]$/.test(s)) return '';  // 标点结尾 = 没说完
+
+    return s.slice(0, 80);
+  }
+
+
+  // ═══════════════════════════════════════════
+  //  上传到后端（只发文本 + 延迟）
+  // ═══════════════════════════════════════════
+
+  async function schedulePush(uid, npcId, npcName, text, delayMs) {
+    var pushAt = Date.now() + delayMs;
+
+    var resp = await fetch('/api/schedule-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        uid: uid,
+        npcId: npcId,
+        npcName: npcName,
+        text: text,
+        pushAt: pushAt
+      })
+    });
+
+    if (!resp.ok) throw new Error('schedule-push HTTP ' + resp.status);
+    return true;
+  }
+
+  // 取消所有未发的
+  async function cancelPending(uid) {
+    try {
+      await fetch('/api/schedule-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: uid, action: 'cancel' })
+      });
+    } catch(e) {
+      console.warn('[BgPush] 取消 pending 失败:', e);
+    }
+  }
+
+
+  // ═══════════════════════════════════════════
+  //  ★ 核心流程：用户离开时
+  // ═══════════════════════════════════════════
+
+  var _debounceTimer = null;
+  var _isProcessing = false;
+  var _userLeft = false;
+
+  async function onUserLeave() {
+    if (_isProcessing) return;
+
+    var uid = 'standalone_main';
+
+    // 1. 启动音频保活
+    var alive = startKeepalive();
+    if (!alive) {
+      console.warn('[BgPush] 保活失败，放弃后台生成');
+      return;
+    }
+
+    // 2. 检查 API 配置
+    var apiConfig = getLocalApiConfig();
+    if (!apiConfig) {
+      console.log('[BgPush] 无 API 配置，跳过');
+      stopKeepalive();
+      return;
+    }
+
+    // 3. 挑选角色
+    var candidates = pickNpcsToMessage();
+    if (!candidates.length) {
+      console.log('[BgPush] 没有需要发消息的角色');
+      stopKeepalive();
+      return;
+    }
+
+    _isProcessing = true;
+    console.log('[BgPush] 开始为', candidates.length, '个角色生成消息...');
+
+    for (var i = 0; i < candidates.length; i++) {
+      // 每步都检查用户是否回来了
+      if (!_userLeft) {
+        console.log('[BgPush] 用户已回来，中止');
+        break;
+      }
+
+      var c = candidates[i];
+      var npc = c.npc;
+
+      try {
+        var text = await generateMessage(apiConfig, npc);
+
+        if (!_userLeft) break; // 生成完后再检查一次
+
+        if (!text) {
+          console.log('[BgPush]', npc.name, 'AI 返回空或不合格，跳过');
+          continue;
+        }
+
+        await schedulePush(uid, npc.id, npc.name || npc.id, text, c.delayMs);
+
+        trackPush(npc.id);
+
+        var delayMin = Math.round(c.delayMs / 60000);
+        console.log('[BgPush] ✓', npc.name, ':', text.slice(0, 30), '... (', delayMin, '分钟后推送)');
+
+      } catch(e) {
+        console.warn('[BgPush]', npc.name, '生成失败:', e.message || e);
+      }
+    }
+
+    _isProcessing = false;
+    stopKeepalive();
+  }
+
+  // ═══════════════════════════════════════════
+  //  ★ 核心流程：用户回来时
+  // ═══════════════════════════════════════════
+
+  function onUserReturn() {
+    var uid = 'standalone_main';
+
+    // 取消还没发出去的消息
+    cancelPending(uid);
+
+    // 停保活
+    stopKeepalive();
+
+    console.log('[BgPush] 用户回来了，已取消 pending');
+  }
+
+
+  // ═══════════════════════════════════════════
+  //  visibilitychange 监听
+  // ═══════════════════════════════════════════
+
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'hidden') {
+      // 用户切走
+      _userLeft = true;
+
+      // 防抖：8 秒后才真正开始
+      if (_debounceTimer) clearTimeout(_debounceTimer);
+      _debounceTimer = setTimeout(function() {
+        if (_userLeft) {
+          onUserLeave();
+        }
+      }, DEBOUNCE_MS);
+
+    } else {
+      // 用户回来
+      _userLeft = false;
+
+      if (_debounceTimer) {
+        clearTimeout(_debounceTimer);
+        _debounceTimer = null;
+      }
+
+      onUserReturn();
+    }
+  });
+
+
+  // ═══════════════════════════════════════════
+  //  暴露调试接口
+  // ═══════════════════════════════════════════
+
+  window._meowBgPushStatus = function() {
+    var npcs;
+    try { npcs = typeof _meowCollectNpcs === 'function' ? _meowCollectNpcs() : []; } catch(e) { npcs = []; }
+    var today = dayKey(Date.now());
+    var result = {};
+    for (var i = 0; i < npcs.length; i++) {
+      var npc = npcs[i];
+      var bond = String(npc.bond || DEFAULT_BOND);
+      var cfg = BOND_CONFIG[bond] || BOND_CONFIG[DEFAULT_BOND];
+      var track = lsGet('meow_bgpush_track_' + npc.id, { date: '', count: 0 });
+      var todayCount = track.date === today ? track.count : 0;
+      result[npc.id] = {
+        name: npc.name,
+        bond: bond,
+        todaySent: todayCount,
+        dailyMax: cfg.dailyMax,
+        delayRange: cfg.minDelay + '~' + cfg.maxDelay + '分钟',
+        audioReady: !!_audioCtx
+      };
+    }
+    return result;
+  };
+
+  // 手动触发一次（调试用）
+  window._meowBgPushTest = function() {
+    _userLeft = true;
+    onUserLeave().then(function() {
+      console.log('[BgPush] 测试完成');
+    });
+  };
+
+  console.log('[BgPush] 后台推送模块已加载');
+})();
+
 </script>
 </body>
 </html>
