@@ -22733,117 +22733,163 @@ const npc = _wxGetChatTargetMeta(npcId);
 
         // ---- 主动消息队列（延迟发送，行为做完才告诉你） ----
         // ---- AI 生成主动消息内容 ----
-        async function _generateAIMsg(npcId, behaviorKey, behaviorLabel, s, opts){
-  try{
-    var db = loadContactsDB();
-    var npc = findContactById(db, npcId) || { name: String(npcId) };
-    var charEx = _loadCharExtra(npcId);
-    var targetMode = (opts && opts.mode) ? String(opts.mode) : 'online';
-    var promptTs = (opts && opts.atTs) ? Number(opts.atTs) : Date.now();
+        function _looksLikeGarbage(text) {
+          var s = String(text || '').trim();
+          if (!s) return true;
 
-    var recentLogs = [];
-    try{
-      var raw = targetMode === 'online' && typeof _getLogForModeBranch === 'function'
-        ? _getLogForModeBranch(npcId, 'online')
-        : ((loadLogs().map || {})[String(npcId)] || []);
-      recentLogs = _safeArr(raw).slice(-10).map(function(m){
-        return (m.role === 'me' ? '用户' : '角色') + '：' + String(m.text || '').slice(0, 80);
-      });
-    }catch(e){}
+          // 太短（少于 5 个字）
+          if (s.replace(/\s/g, '').length < 5) return true;
 
-    var p = s.personality || {};
-    var socialDrive = p.socialDrive != null ? p.socialDrive : 50;
-    var emotionDisplay = p.emotionDisplay != null ? p.emotionDisplay : 50;
-    var personalityBlock = _buildPersonalityPromptBlock(npcId, { concise:true });
-    var relationStage = s.bond || '普通';
-    var emotionCtx = _getRecentUserEmotionContext(npcId, targetMode);
+          // 没有中文
+          if (!/[\u4e00-\u9fff]/.test(s)) return true;
 
-    var stateDesc = '';
-    if (s.attrs.energy < 30) stateDesc += '有点累，';
-    if (s.attrs.hunger < 30) stateDesc += '有点饿，';
-    if ((s.attrs.loneliness || 0) > 65) stateDesc += '有点想你，';
-    stateDesc += '心情' + (s.moodText || '平静');
+          // 英文标签碎片（Draft / Scene / Option 等）
+          if (/^(Scene|Draft|Option|Version|Choice|Message|Tone|Setting)\b/i.test(s)) return true;
 
-    var temporalBlock = _buildTemporalPromptBlock(npcId, targetMode, promptTs);
-    var summaryBlocks = [];
-    try{
-      var sumOnline = getChatSummary(npcId, 'online');
-      if (sumOnline && sumOnline.summaryText) summaryBlocks.push('【线上关系摘要】\n' + String(sumOnline.summaryText).trim().slice(0, 700));
-    }catch(e){}
-    try{
-      var sumOffline = getChatSummary(npcId, 'offline');
-      if (sumOffline && sumOffline.summaryText) summaryBlocks.push('【线下经历摘要】\n' + String(sumOffline.summaryText).trim().slice(0, 500));
-    }catch(e){}
+          // 明显断句：结尾是动词/半截动作/标点
+          if (/(看到|想到|发现|路过|经过|翻到|闻到|买到|看见|刚在|刚从|刚路过|然后|结果)$/.test(s)) return true;
+          if (/[，、：；—…·,;:\-]$/.test(s)) return true;
 
-    var smartRule = [
-      '【主动消息生成规则】',
-      '- 先根据关系阶段、最近对话、聊天总结、当前时间，再决定发什么。',
-      '- 不要写成固定模板式的生活播报，不要像系统通知。',
-      '- 如果最近用户在生气、受伤、冷淡，优先修复关系、回应情绪，不要突然转去聊无关日常。',
-      '- 如果关系较近（亲近/暧昧），可以更柔和、更贴近生活；如果关系普通或疏远，要克制有分寸。',
-      '- 内容要像这个角色自己会发的话，而不是万能模板。'
-    ].join('\n');
-    var relationRule = '【关系阶段】当前你和用户的关系：' + relationStage + '。' +
-      (relationStage === '暧昧' ? '可以带一点试探和在意。' :
-      relationStage === '亲近' ? '可以更自然地关心和分享。' :
-      relationStage === '疏远' ? '语气要克制一点，不要太亲密。' : '保持自然、有分寸。');
-    var emotionRule = emotionCtx && emotionCtx.kind && emotionCtx.kind !== 'normal'
-      ? ('【最近用户情绪】' + (emotionCtx.label || '用户情绪有波动') + '。最近用户原话参考：\n' + String(emotionCtx.recentText || '').slice(0, 240))
-      : '';
+          // 太短且没有自然结尾
+          var hasTerminalPunct = /[。！？!?~～」』"'》）)\u3002]$/.test(s);
+          var hasNaturalEnding = /[了吧啊呢吗呀哦嘛哈啦喔哇诶耶噢的]$/.test(s);
+          if (!hasTerminalPunct && !hasNaturalEnding && s.length < 12) return true;
 
-    var sysPrompt = [
-      '你正在扮演「' + (npc.name || npcId) + '」。',
-      String(npc.profile || npc.description || charEx.profile || '').slice(0, 300),
-      temporalBlock || '',
-      personalityBlock || '',
-      relationRule,
-      smartRule,
-      emotionRule || '',
-      '【行为背景】你刚刚' + behaviorLabel + '，' + stateDesc + '，想主动联系用户。',
-      '【性格】' +
-        (socialDrive > 65 ? '比较主动爱聊天。' : socialDrive < 35 ? '平时话不多，这次难得主动。' : '') +
-        (emotionDisplay > 65 ? '情绪外放。' : emotionDisplay < 35 ? '情绪内敛。' : ''),
-      summaryBlocks.join('\n\n'),
-      (targetMode === 'online' && charEx.onlineChatPrompt ? ('【线上聊天附加要求】\n' + String(charEx.onlineChatPrompt).trim()) : ''),
-      '【输出要求】只发 1 条主动消息，像真实聊天软件里会发出的那种。可以是 1-3 句，但总长度尽量控制在 60 字内。若当前时段在工作/休息中，要让消息带一点忙里偷闲、稍后看到或刚空下来的感觉。不要用引号，不要解释自己在执行规则。' + (recentLogs.length ? ('\n【最近对话】\n' + recentLogs.join('\n')) : '')
-    ].filter(Boolean).join('\n\n');
+          // 模板句
+          if (/^(在忙吗|你在干嘛|突然想起你|顺手问问你|刚空下来一点|在吗在吗)/.test(s)) return true;
 
-    var result = await PhoneAI.chat({
-      system: sysPrompt,
-      messages: [{ role:'user', content:'（请直接输出那条消息）' }],
-      temperature: 0.9,
-      maxTokens: 80,
-      timeout: 45,
-      channel: 'proactive'
-    });
-    var proactiveKind = (opts && opts.kind) ? String(opts.kind) : (String(behaviorKey || '').indexOf('daily') >= 0 ? 'daily' : 'random');
-    if (result && result.ok && result.data){
-      var cleanText = String(result.data).trim().replace(/^[\"「『【]|[\"」』】]$/g, '').slice(0, 120);
-      if (cleanText){
-        try{ _pushProactiveDebug(npcId, proactiveKind, 'ai_ok', cleanText.slice(0, 80)); }catch(e){}
-        return cleanText;
-      }
-      try{
-        _setProactiveAttemptState(npcId, proactiveKind, { status:'fail', failReason:'AI 返回空文本' });
-        _pushProactiveDebug(npcId, proactiveKind, 'ai_empty', 'AI 返回空文本');
-      }catch(e){}
-      return null;
-    }
-    try{
-      _setProactiveAttemptState(npcId, proactiveKind, { status:'fail', failReason:(result && result.error) ? String(result.error) : 'AI 请求失败' });
-      _pushProactiveDebug(npcId, proactiveKind, 'ai_fail', (result && result.error) ? String(result.error) : 'AI 请求失败');
-    }catch(e){}
-    return null;
-  }catch(e){
-    console.warn('[LifeEngine] _generateAIMsg error:', e);
-    try{
-      var proactiveKind2 = (opts && opts.kind) ? String(opts.kind) : (String(behaviorKey || '').indexOf('daily') >= 0 ? 'daily' : 'random');
-      _setProactiveAttemptState(npcId, proactiveKind2, { status:'fail', failReason:String((e && e.message) || e || '未知异常') });
-      _pushProactiveDebug(npcId, proactiveKind2, 'ai_error', String((e && e.message) || e || '未知异常'));
-    }catch(_e){}
-    return null;
-  }
-}
+          return false;
+        }
+
+        async function _generateAIMsg(npcId, behaviorKey, behaviorLabel, s, opts) {
+          try {
+            var db = loadContactsDB();
+            var npc = findContactById(db, npcId) || { name: String(npcId) };
+            var charEx = _loadCharExtra(npcId);
+            var targetMode = (opts && opts.mode) ? String(opts.mode) : 'online';
+            var promptTs = (opts && opts.atTs) ? Number(opts.atTs) : Date.now();
+
+            // 读最近 10 条聊天记录
+            var recentLogs = [];
+            try {
+              var raw = targetMode === 'online' && typeof _getLogForModeBranch === 'function'
+                ? _getLogForModeBranch(npcId, 'online')
+                : ((loadLogs().map || {})[String(npcId)] || []);
+              recentLogs = _safeArr(raw).slice(-10).map(function(m) {
+                return (m.role === 'me' ? '用户' : '角色') + '：' + String(m.text || '').slice(0, 80);
+              });
+            } catch(e) {}
+
+            var p = s.personality || {};
+            var socialDrive = p.socialDrive != null ? p.socialDrive : 50;
+            var emotionDisplay = p.emotionDisplay != null ? p.emotionDisplay : 50;
+            var personalityBlock = _buildPersonalityPromptBlock(npcId, { concise: true });
+            var temporalBlock = _buildTemporalPromptBlock(npcId, targetMode, promptTs);
+
+            // 状态描述（保持不变）
+            var stateDesc = '';
+            if (s.attrs.energy < 30) stateDesc += '有点累，';
+            if (s.attrs.hunger < 30) stateDesc += '有点饿，';
+            if ((s.attrs.loneliness || 0) > 65) stateDesc += '有点想你，';
+            stateDesc += '心情' + (s.moodText || '平静');
+
+            // ★ 关系阶段（保留，但精简为一句）
+            var relationStage = s.bond || '普通';
+            var bondHint =
+              relationStage === '暧昧' ? '你们之间有点特别的在意。' :
+              relationStage === '亲近' ? '你们关系亲近，说话自然。' :
+              relationStage === '疏远' ? '你们不算熟，语气克制。' : '';
+
+            // ★ 构建 prompt — 回退到旧版简洁风格
+            //    删除：smartRule, emotionRule, summaryBlocks
+            //    保留：temporalBlock, personalityBlock, bondHint, onlineChatPrompt, recentLogs
+            var sysPrompt = '你正在扮演「' + (npc.name || npcId) + '」。\n' +
+              String(npc.profile || npc.description || charEx.profile || '').slice(0, 300) + '\n\n' +
+              (temporalBlock ? temporalBlock + '\n\n' : '') +
+              (personalityBlock ? personalityBlock + '\n\n' : '') +
+              (bondHint ? '【关系】' + bondHint + '\n' : '') +
+              '【行为背景】你刚刚' + behaviorLabel + '，' + stateDesc + '，想主动联系用户。\n' +
+              '【性格】' +
+              (socialDrive > 65 ? '比较主动爱聊天。' : socialDrive < 35 ? '平时话不多，这次难得主动。' : '') +
+              (emotionDisplay > 65 ? '情绪外放。' : emotionDisplay < 35 ? '情绪内敛。' : '') + '\n' +
+              (targetMode === 'online' && charEx.onlineChatPrompt
+                ? '【线上聊天附加要求】\n' + String(charEx.onlineChatPrompt).trim() + '\n' : '') +
+              '【要求】发一条简短自然的消息，2-3句，像真实聊天，不要正式，不要引号，直接输出内容。若当前时段在工作/休息中，要让消息带一点忙里偷闲、稍后看到或刚空下来的感觉。不直接说想你之类的话，而是找话题。' +
+              (recentLogs.length ? '\n【最近对话】\n' + recentLogs.join('\n') : '');
+
+            // ★ maxTokens 提到 120（80 太紧，模型容易截断）
+            var result = await PhoneAI.chat({
+              system: sysPrompt,
+              messages: [{ role: 'user', content: '（请直接输出那条消息）' }],
+              temperature: 0.9,
+              maxTokens: 120,
+              timeout: 45,
+              channel: 'proactive'
+            });
+
+            var proactiveKind = (opts && opts.kind) ? String(opts.kind)
+              : (String(behaviorKey || '').indexOf('daily') >= 0 ? 'daily' : 'random');
+
+            if (result && result.ok && result.data) {
+              var cleanText = String(result.data).trim()
+                .replace(/^[\*"'\u201c\u201d\u2018\u2019\u300c\u300e\s]+|[\*"'\u201c\u201d\u2018\u2019\u300d\u300f\s]+$/g, '')
+                .replace(/^(draft|option|version|choice|message|scene|tone|setting)\s*\d*\s*(\([^)]*\))?\s*[:：\-*]\s*/i, '')
+                .replace(/^[\(\uff08]?\d+[\)\uff09.\uff0e]?\s*/, '')
+                .replace(/^[-*•●]\s*/, '')
+                .replace(/^(消息|回复|内容|正文|发送|我说|我发|草稿)\s*[\d一二三四五六七八九十]*\s*[:：]\s*/, '')
+                .replace(/\s{2,}/g, ' ')
+                .trim()
+                .slice(0, 120);
+
+              // ★ 质检：拦截垃圾消息
+              if (_looksLikeGarbage(cleanText)) {
+                try {
+                  _setProactiveAttemptState(npcId, proactiveKind, {
+                    status: 'fail',
+                    failReason: '质检不通过：「' + cleanText.slice(0, 20) + '」太短/断句/碎片'
+                  });
+                  _pushProactiveDebug(npcId, proactiveKind, 'quality_reject',
+                    '「' + cleanText.slice(0, 30) + '」不合格');
+                } catch(e) {}
+                return null;
+              }
+
+              if (cleanText) {
+                try { _pushProactiveDebug(npcId, proactiveKind, 'ai_ok', cleanText.slice(0, 80)); } catch(e) {}
+                return cleanText;
+              }
+
+              try {
+                _setProactiveAttemptState(npcId, proactiveKind, { status: 'fail', failReason: 'AI 返回空文本' });
+                _pushProactiveDebug(npcId, proactiveKind, 'ai_empty', 'AI 返回空文本');
+              } catch(e) {}
+              return null;
+            }
+
+            try {
+              _setProactiveAttemptState(npcId, proactiveKind, {
+                status: 'fail',
+                failReason: (result && result.error) ? String(result.error) : 'AI 请求失败'
+              });
+              _pushProactiveDebug(npcId, proactiveKind, 'ai_fail',
+                (result && result.error) ? String(result.error) : 'AI 请求失败');
+            } catch(e) {}
+            return null;
+
+          } catch(e) {
+            console.warn('[LifeEngine] _generateAIMsg error:', e);
+            try {
+              var proactiveKind2 = (opts && opts.kind) ? String(opts.kind)
+                : (String(behaviorKey || '').indexOf('daily') >= 0 ? 'daily' : 'random');
+              _setProactiveAttemptState(npcId, proactiveKind2, {
+                status: 'fail', failReason: String((e && e.message) || e || '未知异常')
+              });
+              _pushProactiveDebug(npcId, proactiveKind2, 'ai_error',
+                String((e && e.message) || e || '未知异常'));
+            } catch(_e) {}
+            return null;
+          }
+        }
 
 // ---- 主动消息队列（存元信息，flush 时再调 AI） ----
         function _queueProactiveMsg(npcId, fallbackText, delayMin, behaviorKey, behaviorLabel){
@@ -30997,6 +31043,15 @@ function _insertOnlineProactiveMessage(npcId, text, opts){
     var ts = (opts && opts.ts) ? Number(opts.ts) : _pickFakeOnlinePushTs(npcId, kind, branch);
     var finalText = String(text || '').trim();
     if (!finalText) return null;
+
+    // ★ 兜底质检：太短/碎片消息不写入
+    if (_looksLikeGarbage(finalText)) {
+      try {
+        _pushProactiveDebug(npcId, kind, 'insert_reject',
+          '「' + finalText.slice(0, 20) + '」质检不通过，不写入');
+      } catch(e) {}
+      return null;
+    }
     var lg = loadLogs();
     lg.map ||= {};
     var id = String(npcId);
