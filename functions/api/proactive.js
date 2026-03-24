@@ -125,7 +125,13 @@ function buildMessageContext(npc, chatHistory, now) {
 // ─────────── AI 生成 ───────────
 // ─────────── AI 生成 ───────────
 async function generateMessage(npc, kind, apiCfg, ctx) {
-  const { base_url, api_key, model } = apiCfg;
+  var base_url = apiCfg.base_url;
+  var api_key = apiCfg.api_key;
+  // ★ 清洗模型名：去掉中转站常见的 [按次] [限免] 等前缀
+  var model = String(apiCfg.model || '')
+    .replace(/^\[.*?\]\s*/g, '')
+    .replace(/^\(.*?\)\s*/g, '')
+    .trim();
   if (!base_url || !api_key || !model) throw new Error('用户未配置 API');
 
   const bond = npc.bond || '普通';
@@ -304,19 +310,12 @@ async function generateMessage(npc, kind, apiCfg, ctx) {
     return cleaned;
   }
 
-  const retryHints = [
-    '',
-    '重写一次：只写一句完整的话，15到25字左右，像在主动找对方说话，不要停在“看到”“想到”“路过”上。',
-    '再重写一次：必须是一句能直接发给对方的完整聊天句子，别写画面碎片，别写英文标签。'
-  ];
-
-  for (let i = 0; i < retryHints.length; i++) {
-    try {
-      const text = await tryOnce(retryHints[i]);
-      if (text) return text;
-    } catch (e) {
-      if (i === retryHints.length - 1) throw e;
-    }
+  // ★ 只尝试 1 次，不浪费 API 次数。失败就跳过，等下次 cron 再来。
+  try {
+    const text = await tryOnce('');
+    if (text) return text;
+  } catch (e) {
+    throw e;
   }
 
   return '';
