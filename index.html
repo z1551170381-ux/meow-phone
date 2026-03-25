@@ -43503,117 +43503,245 @@ function _meowUrlBase64ToUint8Array(base64String) {
   //  ★ 用户切走时：POST 热备消息到后端
   // ═══════════════════════════════════════════
 
-  function onUserLeave() {
-    var uid = 'standalone_main';
-    var today = dayKey();
+function _meowBgPushBuildLeaveTask() {
+  var uid = 'standalone_main';
+  var today = dayKey();
+  var npcs = typeof _meowCollectNpcs === 'function' ? _meowCollectNpcs() : [];
+  var scheduled = [];
+  var hotMeta = {};
 
-    try {
-      var npcs = typeof _meowCollectNpcs === 'function' ? _meowCollectNpcs() : [];
-      var scheduled = [];
+  for (var i = 0; i < npcs.length; i++) {
+    var npc = npcs[i];
+    if (!npc || !npc.id || npc.enableLifePush === false) continue;
 
-      for (var i = 0; i < npcs.length; i++) {
-        var npc = npcs[i];
-        if (!npc || !npc.id || npc.enableLifePush === false) continue;
+    var hot = lsGet(HOT_MSG_KEY_PREFIX + npc.id, null);
+    if (!hot || !hot.slots) continue;
 
-        var hot = lsGet(HOT_MSG_KEY_PREFIX + npc.id, null);
-        if (!hot || !hot.slots) continue;
+    var bond = String(hot.bond || npc.bond || '普通');
+    var max = BOND_DAILY_MAX[bond] || 2;
 
-        var bond = String(hot.bond || npc.bond || '普通');
-        var max = BOND_DAILY_MAX[bond] || 2;
+    var trackKey = 'meow_bgpush_track_' + npc.id;
+    var track = lsGet(trackKey, { date: '', count: 0 });
+    if (track.date === today && track.count >= max) continue;
 
-        // 检查今日额度
-        var trackKey = 'meow_bgpush_track_' + npc.id;
-        var track = lsGet(trackKey, { date: '', count: 0 });
-        if (track.date === today && track.count >= max) continue;
+    var nowMs = Date.now();
+    var slots = hot.slots;
+    var hasAny = false;
 
-        var nowMs = Date.now();
-        var slots = hot.slots;
+    ['soon', 'later', 'nextDay'].forEach(function(key) {
+      var slot = slots[key];
+      if (!slot || !slot.text) return;
 
-        // 构造每个 slot 的 push_at
-        ['soon', 'later', 'nextDay'].forEach(function(key) {
-          var slot = slots[key];
-          if (!slot || !slot.text) return;
+      var delayMs = randInt(slot.minMin, slot.maxMin) * 60 * 1000;
+      var pushAt = nowMs + delayMs;
 
-          var delayMs = randInt(slot.minMin, slot.maxMin) * 60 * 1000;
-          var pushAt = nowMs + delayMs;
-
-          // 深夜保护：23:00~7:00 之间不推，推迟到 8~10 点
-          var pushDate = new Date(pushAt);
-          var pushHour = pushDate.getHours();
-          if (pushHour >= 23 || pushHour < 7) {
-            // 推迟到第二天 8~10 点
-            pushDate.setDate(pushDate.getDate() + (pushHour >= 23 ? 1 : 0));
-            pushDate.setHours(randInt(8, 10), randInt(0, 59), 0, 0);
-            pushAt = pushDate.getTime();
-          }
-
-          scheduled.push({
-            npcId: npc.id,
-            npcName: hot.npcName || npc.name || npc.id,
-            text: JSON.stringify(slot.text),  // 数组序列化为 JSON 字符串
-            pushAt: pushAt,
-            slot: key
-          });
-        });
-
-        // 清空热备（已上传）
-        lsSet(HOT_MSG_KEY_PREFIX + npc.id, null);
+      var pushDate = new Date(pushAt);
+      var pushHour = pushDate.getHours();
+      if (pushHour >= 23 || pushHour < 7) {
+        pushDate.setDate(pushDate.getDate() + (pushHour >= 23 ? 1 : 0));
+        pushDate.setHours(randInt(8, 10), randInt(0, 59), 0, 0);
+        pushAt = pushDate.getTime();
       }
 
-      if (!scheduled.length) return;
-
-      // 瞬间 POST（不等响应）
-      var payload = JSON.stringify({ uid: uid, messages: scheduled });
-      // sendBeacon 需要 Blob 才能发 JSON
-      var blob = new Blob([payload], { type: 'application/json' });
-
-      if (navigator.sendBeacon) {
-        navigator.sendBeacon('/api/schedule-push', blob);
-        console.log('[BgPush] sendBeacon 发送', scheduled.length, '条定时消息');
-      } else {
-        fetch('/api/schedule-push', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: payload,
-          keepalive: true
-        }).catch(function(){});
-        console.log('[BgPush] fetch 发送', scheduled.length, '条定时消息');
-      }
-
-      // 预扣额度：每个角色每次切走只算 1 次（不管几个 slot/几句连发）
-      var countedNpcs = {};
-      scheduled.forEach(function(msg) {
-        if (countedNpcs[msg.npcId]) return; // 同一角色只算一次
-        countedNpcs[msg.npcId] = true;
-        var trackKey = 'meow_bgpush_track_' + msg.npcId;
-        var today2 = dayKey();
-        var track = lsGet(trackKey, { date: '', count: 0 });
-        if (track.date !== today2) track = { date: today2, count: 0 };
-        track.count++;
-        track.lastPushAt = Date.now();
-        lsSet(trackKey, track);
+      scheduled.push({
+        npcId: npc.id,
+        npcName: hot.npcName || npc.name || npc.id,
+        text: JSON.stringify(slot.text),
+        pushAt: pushAt,
+        slot: key
       });
+      hasAny = true;
+    });
 
-    } catch(e) {
-      console.warn('[BgPush] onUserLeave error:', e);
+    if (hasAny) {
+      hotMeta[npc.id] = {
+        key: HOT_MSG_KEY_PREFIX + npc.id,
+        generatedAt: Number(hot.generatedAt || 0)
+      };
     }
   }
 
-  // ═══════════════════════════════════════════
-  //  用户回来时：取消未发的 pending
-  // ═══════════════════════════════════════════
+  if (!scheduled.length) return null;
 
-  function onUserReturn() {
-    try {
-      fetch('/api/schedule-push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid: 'standalone_main', action: 'cancel' })
-      }).catch(function(){});
-      console.log('[BgPush] 用户回来了，已取消 pending');
-    } catch(e) {}
+  return {
+    id: 'leave_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+    uid: uid,
+    scheduled: scheduled,
+    hotMeta: hotMeta,
+    createdAt: Date.now()
+  };
+}
+
+function _meowBgPushMarkTrackSuccess(task) {
+  if (!task || !task.scheduled || !task.scheduled.length) return;
+
+  var countedNpcs = {};
+  task.scheduled.forEach(function(msg) {
+    if (!msg || !msg.npcId || countedNpcs[msg.npcId]) return;
+    countedNpcs[msg.npcId] = true;
+
+    var trackKey = 'meow_bgpush_track_' + msg.npcId;
+    var today = dayKey();
+    var track = lsGet(trackKey, { date: '', count: 0 });
+    if (track.date !== today) track = { date: today, count: 0 };
+    track.count++;
+    track.lastPushAt = Date.now();
+    lsSet(trackKey, track);
+  });
+}
+
+function _meowBgPushClearHotSuccess(task) {
+  if (!task || !task.hotMeta) return;
+
+  Object.keys(task.hotMeta).forEach(function(npcId) {
+    var meta = task.hotMeta[npcId];
+    if (!meta || !meta.key) return;
+
+    var cur = lsGet(meta.key, null);
+    var curGen = Number(cur && cur.generatedAt || 0);
+
+    // 只清“这一次上传对应的那份热备”，避免误删更新后的新热备
+    if (cur && cur.slots && curGen === Number(meta.generatedAt || 0)) {
+      lsSet(meta.key, null);
+    }
+  });
+}
+
+function _meowBgPushGetPendingQueue() {
+  var q = lsGet('meow_bgpush_pending_upload_v1', []);
+  return Array.isArray(q) ? q : [];
+}
+
+function _meowBgPushSetPendingQueue(queue) {
+  lsSet('meow_bgpush_pending_upload_v1', Array.isArray(queue) ? queue : []);
+}
+
+function _meowBgPushEnqueueTask(task) {
+  if (!task || !task.scheduled || !task.scheduled.length) return;
+
+  var queue = _meowBgPushGetPendingQueue();
+
+  // 只保留一个待上传任务，避免同一份热备重复排队
+  if (queue.length) {
+    console.log('[BgPush] 已有待上传任务，跳过重复入队');
+    return;
   }
 
+  queue.push(task);
+  _meowBgPushSetPendingQueue(queue);
+}
+
+var _meowBgPushFlushPromise = null;
+
+function _meowBgPushFlushPending(reason) {
+  if (_meowBgPushFlushPromise) return _meowBgPushFlushPromise;
+
+  _meowBgPushFlushPromise = (async function() {
+    var queue = _meowBgPushGetPendingQueue();
+    if (!queue.length) return false;
+
+    var task = queue[0];
+    if (!task || !task.scheduled || !task.scheduled.length) {
+      queue.shift();
+      _meowBgPushSetPendingQueue(queue);
+      return false;
+    }
+
+    try {
+      var res = await fetch('/api/schedule-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: task.uid || 'standalone_main', messages: task.scheduled }),
+        keepalive: true,
+        credentials: 'same-origin'
+      });
+
+      if (!res.ok) {
+        var errText = '';
+        try { errText = await res.text(); } catch(_) {}
+        throw new Error('HTTP ' + res.status + (errText ? (' ' + errText.slice(0, 160)) : ''));
+      }
+
+      var data = null;
+      try { data = await res.json(); } catch(_) {}
+      if (data && data.ok === false) {
+        throw new Error(data.error || 'schedule-push rejected');
+      }
+
+      _meowBgPushMarkTrackSuccess(task);
+      _meowBgPushClearHotSuccess(task);
+
+      queue.shift();
+      _meowBgPushSetPendingQueue(queue);
+      console.log('[BgPush] 上传成功，已清热备:', (task.scheduled || []).length, '条', reason || '');
+      return true;
+
+    } catch (e) {
+      console.warn('[BgPush] 上传失败，保留热备，下次重试:', e);
+      return false;
+    }
+  })();
+
+  return _meowBgPushFlushPromise.finally(function() {
+    _meowBgPushFlushPromise = null;
+  });
+}
+
+function onUserLeave() {
+  try {
+    var queue = _meowBgPushGetPendingQueue();
+
+    // 先重试旧任务；有旧任务时不再为同一份热备重复建新任务
+    if (!queue.length) {
+      var task = _meowBgPushBuildLeaveTask();
+      if (task) {
+        _meowBgPushEnqueueTask(task);
+        console.log('[BgPush] 已入队待上传:', task.scheduled.length, '条');
+      }
+    }
+
+    _meowBgPushFlushPending('leave');
+
+  } catch(e) {
+    console.warn('[BgPush] onUserLeave error:', e);
+  }
+}
+
+function onUserReturn() {
+  try {
+    fetch('/api/schedule-push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ uid: 'standalone_main', action: 'cancel' })
+    }).catch(function(){});
+
+    // 回到前台时顺手重试一次上次失败的热备上传
+    _meowBgPushFlushPending('return');
+
+    console.log('[BgPush] 用户回来了，已取消 pending，并尝试重传失败任务');
+  } catch(e) {}
+}
+
+【再补一个监听】
+
+搜索这一段：
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState === 'hidden') {
+    onUserLeave();
+  } else {
+    onUserReturn();
+  }
+});
+
+在它下面紧接着加上这一段：
+
+window.addEventListener('pagehide', function() {
+  onUserLeave();
+});
+
+setTimeout(function() {
+  _meowBgPushFlushPending('boot');
+}, 2000);
 
   // ═══════════════════════════════════════════
   //  visibilitychange 监听
