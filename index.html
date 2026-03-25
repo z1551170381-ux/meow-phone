@@ -43567,8 +43567,22 @@ var userPrompt = [
         pushAt = nowMs + randInt(minMin, maxMin) * 60 * 1000;
 
         if (_bgPushIsInQuiet(pushAt, quietStart, quietEnd)) {
-          var stagger = (key === 'soon') ? randInt(5, 35) : randInt(50, 130);
-          pushAt = _bgPushMoveOutOfQuiet(pushAt, quietStart, quietEnd) + stagger * 60000;
+          if (key === 'soon') {
+            // ★ soon 不拦截：用户刚聊完，显然醒着，23:20 发 soon 很自然
+            // 只做轻微保护：如果 soon 落在凌晨 3 点之后（真的很晚了），才推迟
+            var pushHour = new Date(pushAt).getHours();
+            if (pushHour >= 3 && pushHour < 7) {
+              pushAt = _bgPushMoveOutOfQuiet(pushAt, quietStart, quietEnd) + randInt(5, 35) * 60000;
+            }
+            // 否则：不管静默期，直接发
+          } else {
+            // ★ later 落入静默期 → 直接丢弃
+            // 理由：later 的内容是基于晚上的语境写的（"刚躺下""你洗完澡了吗"）
+            // 推到第二天早上会严重出戏，不如不发
+            // 次日的消息由 nextDay 专门负责，AI 会为"第二天"写合适的内容
+            console.log('[BgPush] later 落入静默期，丢弃（内容基于夜间语境，次日发会出戏）');
+            return;  // 跳过这个 slot
+          }
         }
       }
       if (!pushAt || !isFinite(pushAt)) return;
