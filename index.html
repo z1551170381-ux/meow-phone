@@ -39218,33 +39218,46 @@ async function _meowPullOfflineMessages() {
 
     data.messages.forEach(function(msg) {
       var npcId = String(msg.npcId || '');
-      var text = String(msg.text || '').trim();
+      var rawText = String(msg.text || '').trim();
       var ts = Number(msg.ts || Date.now());
       var kind = String(msg.kind || 'daily');
-      if (!npcId || !text) return;
+      if (!npcId || !rawText) return;
+
+      // ★ text 可能是 JSON 数组（连发多条），拆开逐条插入
+      var textList = [rawText];
+      try {
+        var parsed = JSON.parse(rawText);
+        if (Array.isArray(parsed) && parsed.length) {
+          textList = parsed.map(function(t){ return String(t || '').trim(); }).filter(function(t){ return t.length > 0; });
+        }
+      } catch(e) {}
+
+      for (var ti = 0; ti < textList.length; ti++) {
+        var text = textList[ti];
+        var msgTs = ts + ti * 3000; // 每条间隔 3 秒的时间戳，模拟连发
 
       // ★ 质检：丢弃后端的兜底短句/垃圾消息，避免跟前端活人消息冲突
       if (typeof _looksLikeGarbage === 'function' && _looksLikeGarbage(text)) {
         console.log('[MeowPush] 丢弃后端低质量消息:', text.slice(0, 20));
-        if (ts > maxTs) maxTs = ts;
-        return;
+        if (msgTs > maxTs) maxTs = msgTs;
+        continue;
       }
 
       logs.map[npcId] = logs.map[npcId] || [];
 
       // 去重：同 npcId + 同 ts + 同 text 就不再插一次
       var exists = logs.map[npcId].some(function(m) {
-        return Number(m.t || 0) === ts && String(m.text || '') === text;
+        return Number(m.t || 0) === msgTs && String(m.text || '') === text;
       });
       if (exists) {
-        if (ts > maxTs) maxTs = ts;
-        return;
+        if (msgTs > maxTs) maxTs = msgTs;
+        continue;
       }
 
       logs.map[npcId].push({
         role: 'them',
         text: text,
-        t: ts,
+        t: msgTs,
         fromLife: true,
         mode: 'online',
         branch: 'main',
@@ -39257,11 +39270,12 @@ async function _meowPullOfflineMessages() {
       if (thr) {
         thr.unread = (thr.unread || 0) + 1;
         thr.lastMsg = text.slice(0, 30) + (text.length > 30 ? '…' : '');
-        thr.lastTime = Math.max(Number(thr.lastTime || 0), ts);
+        thr.lastTime = Math.max(Number(thr.lastTime || 0), msgTs);
       }
 
       inserted++;
-      if (ts > maxTs) maxTs = ts;
+      if (msgTs > maxTs) maxTs = msgTs;
+      } // end for ti
 
       // ★ 关键：同步更新 proactiveMeta，告诉前端"后端已经发过了，别再生成"
       try {
