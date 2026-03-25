@@ -43187,15 +43187,17 @@ function _meowUrlBase64ToUint8Array(base64String) {
 /* ── meow-news.js end ── */
 </script>
 <script>
-// ====== meow-bgpush.js — 后台推送 v4 ======
-// ====== meow-bgpush.js — 后台推送 v4（音频保活 + 离开时生成）======
+// ====== meow-bgpush.js v5 — 聊天后预生成 + 离开时推送 ======
 //
 // 流程：
-//   用户切走 → 音频保活 → 8秒防抖 → 挑角色 → 调本地API生成消息
-//   → POST /api/schedule-push（只发文本，不发API Key）
-//   → 后端 cron 到时间了 Web Push → SW 直接显示
-//   用户回来 → 取消未发的 pending → 停保活
+//   1. NPC 回复完毕后，静默调一次 API，生成 3 条不同时段的消息
+//      模型自己决定每条消息的延迟范围（根据对话氛围、情绪、关系）
+//   2. 存入 localStorage（热备消息）
+//   3. 用户切走时，一个 fetch POST 到后端（< 500ms，iOS 安全）
+//   4. 后端 cron 到时间推送
+//   5. 用户回来 → 取消未发的 pending
 //
+// ★ 不需要音频保活，不需要后台调 API
 // ★ API Key 永远不离开设备
 
 (function() {
@@ -43205,18 +43207,15 @@ function _meowUrlBase64ToUint8Array(base64String) {
   //  配置
   // ═══════════════════════════════════════════
 
-  var DEBOUNCE_MS = 8000;   // 切走后等 8 秒再开始（防止秒切回来）
-  var API_TIMEOUT = 25000;  // API 调用超时（保活窗口约 60~180 秒，留余量）
+  var HOT_MSG_KEY_PREFIX = 'meow_bgpush_hot_';
+  var DEBOUNCE_MS = 3000;       // NPC 回复完 3 秒后再生成（等连发都写完）
+  var GEN_COOLDOWN = 120000;    // 同一角色 2 分钟内不重复生成
+  var API_TIMEOUT = 30000;
 
-  // 关系 → { 延迟范围(分钟), 每日上限 }
-  var BOND_CONFIG = {
-    '亲近': { minDelay: 10,  maxDelay: 60,   dailyMax: 6, prob: 1.0 },
-    '暧昧': { minDelay: 10,  maxDelay: 60,   dailyMax: 6, prob: 1.0 },
-    '普通': { minDelay: 120, maxDelay: 240,  dailyMax: 2, prob: 0.9 },
-    '疏远': { minDelay: 240, maxDelay: 360,  dailyMax: 1, prob: 0.5 },
-    '冷战中': { minDelay: 360, maxDelay: 480, dailyMax: 0, prob: 0.0 }
+  // 关系 → 每日上限
+  var BOND_DAILY_MAX = {
+    '亲近': 6, '暧昧': 6, '普通': 2, '疏远': 1, '冷战中': 1
   };
-  var DEFAULT_BOND = '普通';
 
   // ═══════════════════════════════════════════
   //  工具
@@ -43229,179 +43228,20 @@ function _meowUrlBase64ToUint8Array(base64String) {
   function lsSet(key, val) {
     try { localStorage.setItem(key, JSON.stringify(val)); } catch(e) {}
   }
-
-  function dayKey(ts) {
-    var d = new Date(ts || Date.now());
+  function dayKey() {
+    var d = new Date();
     return d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
   }
-
   function cleanText(v, max) {
     return String(v || '').replace(/```[\s\S]*?```/g, ' ').replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim().slice(0, max || 400);
   }
-
   function randInt(min, max) {
     return Math.floor(Math.random() * (max - min + 1)) + min;
   }
-
-  function normalizeTimeLabel() {
-    var h = new Date().getHours();
-    if (h < 5)  return '深夜';
-    if (h < 8)  return '清晨';
-    if (h < 11) return '上午';
-    if (h < 14) return '中午';
-    if (h < 18) return '下午';
-    if (h < 21) return '晚上';
-    return '夜里';
-  }
+  function nowHour() { return new Date().getHours(); }
 
   // ═══════════════════════════════════════════
-  //  音频保活
-  // ═══════════════════════════════════════════
-
-  var _audioCtx = null;
-  var _keepaliveNodes = null;
-
-  // 必须在用户手势中调一次
-  function initAudioContext() {
-    if (_audioCtx) return;
-    try {
-      var AC = window.AudioContext || window.webkitAudioContext;
-      if (!AC) return;
-      _audioCtx = new AC();
-      // iOS 需要 resume
-      if (_audioCtx.state === 'suspended') {
-        _audioCtx.resume();
-      }
-      console.log('[BgPush] AudioContext 已初始化');
-    } catch(e) {
-      console.warn('[BgPush] AudioContext 初始化失败:', e);
-    }
-  }
-
-  // 在用户第一次触摸/点击时初始化
-  function _onFirstInteraction() {
-    initAudioContext();
-    document.removeEventListener('click', _onFirstInteraction, true);
-    document.removeEventListener('touchstart', _onFirstInteraction, true);
-  }
-  document.addEventListener('click', _onFirstInteraction, true);
-  document.addEventListener('touchstart', _onFirstInteraction, true);
-
-  function startKeepalive() {
-    if (!_audioCtx) {
-      console.warn('[BgPush] 无 AudioContext，保活不可用');
-      return false;
-    }
-    if (_keepaliveNodes) return true; // 已经在运行
-
-    try {
-      // resume（iOS 后台需要）
-      if (_audioCtx.state === 'suspended') _audioCtx.resume();
-
-      // 极低音量的振荡器（静音但保持 AudioContext 活跃）
-      var osc = _audioCtx.createOscillator();
-      var gain = _audioCtx.createGain();
-      gain.gain.value = 0.0001; // 几乎听不到
-      osc.frequency.value = 20; // 低于人耳可闻范围
-      osc.connect(gain);
-      gain.connect(_audioCtx.destination);
-      osc.start();
-
-      _keepaliveNodes = { osc: osc, gain: gain };
-      console.log('[BgPush] 保活已启动');
-      return true;
-    } catch(e) {
-      console.warn('[BgPush] 保活启动失败:', e);
-      return false;
-    }
-  }
-
-  function stopKeepalive() {
-    if (!_keepaliveNodes) return;
-    try {
-      _keepaliveNodes.osc.stop();
-      _keepaliveNodes.osc.disconnect();
-      _keepaliveNodes.gain.disconnect();
-    } catch(e) {}
-    _keepaliveNodes = null;
-    console.log('[BgPush] 保活已停止');
-  }
-
-
-  // ═══════════════════════════════════════════
-  //  NPC 选择：谁应该找用户
-  // ═══════════════════════════════════════════
-
-  function pickNpcsToMessage() {
-    var npcs;
-    if (typeof _meowCollectNpcs === 'function') {
-      npcs = _meowCollectNpcs();
-    } else {
-      return [];
-    }
-
-    if (!npcs || !npcs.length) return [];
-
-    var now = Date.now();
-    var today = dayKey(now);
-    var candidates = [];
-
-    for (var i = 0; i < npcs.length; i++) {
-      var npc = npcs[i];
-      if (!npc || !npc.id) continue;
-      if (npc.enableLifePush === false) continue;
-
-      var bond = String(npc.bond || DEFAULT_BOND);
-      var cfg = BOND_CONFIG[bond] || BOND_CONFIG[DEFAULT_BOND];
-
-      // 冷战中不发
-      if (cfg.dailyMax <= 0) continue;
-
-      // 概率检查（疏远的角色有概率不发）
-      if (Math.random() > cfg.prob) continue;
-
-      // 检查今日已发次数
-      var trackKey = 'meow_bgpush_track_' + npc.id;
-      var track = lsGet(trackKey, { date: '', count: 0 });
-      if (track.date === today && track.count >= cfg.dailyMax) continue;
-
-      // 检查最近推送冷却（至少间隔延迟下限的一半）
-      var lastPushAt = track.lastPushAt || 0;
-      var minCooldown = cfg.minDelay * 60 * 1000 * 0.5;
-      if (now - lastPushAt < minCooldown) continue;
-
-      // 计算延迟
-      var delayMinutes = randInt(cfg.minDelay, cfg.maxDelay);
-
-      candidates.push({
-        npc: npc,
-        bond: bond,
-        delayMs: delayMinutes * 60 * 1000,
-        priority: cfg.dailyMax - (track.date === today ? track.count : 0) // 剩余额度越多越优先
-      });
-    }
-
-    // 按优先级排序，最多取 2 个（保活时间有限）
-    candidates.sort(function(a, b) { return b.priority - a.priority; });
-    return candidates.slice(0, 2);
-  }
-
-  // 记录发送
-  function trackPush(npcId) {
-    var trackKey = 'meow_bgpush_track_' + npcId;
-    var today = dayKey(Date.now());
-    var track = lsGet(trackKey, { date: '', count: 0 });
-    if (track.date !== today) {
-      track = { date: today, count: 0 };
-    }
-    track.count++;
-    track.lastPushAt = Date.now();
-    lsSet(trackKey, track);
-  }
-
-
-  // ═══════════════════════════════════════════
-  //  API 调用：生成消息
+  //  读取 API 配置（本地）
   // ═══════════════════════════════════════════
 
   function getLocalApiConfig() {
@@ -43421,64 +43261,112 @@ function _meowUrlBase64ToUint8Array(base64String) {
     } catch(e) { return null; }
   }
 
-  async function generateMessage(apiConfig, npc) {
-    var npcName = String(npc.name || npc.id || '角色');
-    var bond = String(npc.bond || '普通');
-    var timeLabel = normalizeTimeLabel();
+  // ═══════════════════════════════════════════
+  //  收集角色上下文
+  // ═══════════════════════════════════════════
 
-    var bondVibe =
-      bond === '亲近' ? '你们关系亲近，说话自然熟稔，可以带关心和生活感。' :
-      bond === '暧昧' ? '你们之间有点微妙，说话柔和、留一点试探。' :
-      bond === '疏远' ? '你们不算熟，偶尔联系，语气克制。' :
-                       '你们是正常来往的关系，说话自然、有分寸。';
+  function getNpcContext(npcId) {
+    if (typeof _meowCollectNpcs !== 'function') return null;
+    var npcs = _meowCollectNpcs();
+    for (var i = 0; i < npcs.length; i++) {
+      if (npcs[i] && npcs[i].id === npcId) return npcs[i];
+    }
+    return null;
+  }
+
+  // ═══════════════════════════════════════════
+  //  ★ 核心：生成三时段消息（模型自决时机）
+  // ═══════════════════════════════════════════
+
+  var _genLocks = {};   // npcId → timestamp
+  var _genTimers = {};  // npcId → debounce timer
+
+  async function generateHotMessages(npcId) {
+    // 冷却检查
+    var now = Date.now();
+    if (_genLocks[npcId] && now - _genLocks[npcId] < GEN_COOLDOWN) {
+      console.log('[BgPush]', npcId, '冷却中，跳过');
+      return;
+    }
+
+    var apiConfig = getLocalApiConfig();
+    if (!apiConfig) return;
+
+    var npc = getNpcContext(npcId);
+    if (!npc) return;
+    if (npc.enableLifePush === false) return;
+
+    // reserved 过滤
+    var reserved = {player:1,system:1,user:1,me:1,self:1};
+    if (reserved[String(npcId).toLowerCase()]) return;
+
+    _genLocks[npcId] = now;
+
+    var npcName = String(npc.name || npcId);
+    var bond = String(npc.bond || '普通');
+    var h = nowHour();
 
     var ctxLines = [
-      '现在是' + timeLabel + '。',
+      '现在是' + h + '点。',
       npc.npc_state     && ('你当前：' + cleanText(npc.npc_state, 140)),
       npc.current_scene && ('场景：' + cleanText(npc.current_scene, 120)),
-      npc.location      && ('地点：' + cleanText(npc.location, 80)),
-      npc.user_state    && ('对方现在：' + cleanText(npc.user_state, 140)),
-      npc.recent_memory && ('你们最近聊过：' + cleanText(npc.recent_memory, 300)),
-      npc.summary       && ('聊天要点：' + cleanText(npc.summary, 400)),
-      npc.world_context && ('背景：' + cleanText(npc.world_context, 400)),
-      npc.user_profile  && ('关于对方：' + cleanText(npc.user_profile, 180)),
+      npc.world_context && ('背景：' + cleanText(npc.world_context, 300)),
     ].filter(Boolean).join('\n');
 
+    // ★ 拿最近 6 条真实聊天记录（比 summary 更具体）
+    var recentLines = '';
+    try {
+      if (typeof window._meowGetLog === 'function') {
+        var log = window._meowGetLog(npcId) || [];
+        var recent = log.slice(-6);
+        recentLines = recent.map(function(m) {
+          var who = (m.role === 'me' || m.role === 'user') ? '对方' : npcName;
+          return who + '：' + cleanText(m.text, 60);
+        }).join('\n');
+      }
+    } catch(e) {}
+    if (!recentLines && npc.recent_memory) {
+      recentLines = cleanText(npc.recent_memory, 400);
+    }
+
     var systemPrompt = [
-      '你正在扮演「' + npcName + '」，此刻要主动给对方发一条即时聊天消息。',
+      '你是「' + npcName + '」。',
       npc.profile ? cleanText(npc.profile, 900) : '',
       npc.onlineChatPrompt ? cleanText(npc.onlineChatPrompt, 500) : '',
       '',
-      '【你和对方的关系】',
-      bondVibe,
-      '',
-      '【此刻的状态和背景】',
+      '关系：' + bond,
       ctxLines,
-      '',
-      '【任务】',
-      '基于你现在的状态、最近的聊天内容、关系远近、世界背景与眼前情境，发一句自然找对方说话的话。',
-      '',
-      '【硬性要求】',
-      '1. 只输出一条消息正文，不要解释，不要编号，不要英文标签。',
-      '2. 必须是一句完整的话，像真人手机打字发出去的。',
-      '3. 15~30 个中文字符，最多不超过 40 个。',
-      '4. 必须像"在找对方说话"，不是描写画面。',
-      '5. 优先从具体细节切入：眼前看到的、刚发生的事、此刻的状态。',
-      '6. 禁止模板句：如"在忙吗""突然想起你""顺手问问你""刚空下来""你在干嘛"。',
-      '7. 关系不同语气不同。',
-      '8. 写不出就只输出：__SKIP__'
     ].filter(Boolean).join('\n');
 
-    var userPrompt = '你' + timeLabel + '忽然因为一个具体的小事想到对方，于是自然地发一句。直接输出那句话。';
-
-    // 判断 API 类型并调用
-    var isClaudeAPI = apiConfig.baseUrl.indexOf('anthropic') !== -1;
-    var rawResponse;
-
-    var controller = new AbortController();
-    var timeout = setTimeout(function() { controller.abort(); }, API_TIMEOUT);
+    var userPrompt = [
+      '你们刚才的对话：',
+      recentLines || '（没有最近对话）',
+      '',
+      '你要在三个不同时间点主动给对方发消息。',
+      '每个时间点可以发 1~3 条短消息（像真人微信连发那样，比如先叫名字再说事），也可以只发 1 条。',
+      '',
+      '三个时间点：',
+      '- soon：聊完后不久。你决定几分钟后发（minMin/maxMin）。',
+      '- later：几小时后。你在过自己的生活，某个瞬间想到对方。',
+      '- nextDay：第二天（现在' + h + '点，推算明天什么时段）。',
+      '',
+      '你自己判断：',
+      '- 刚才对方心情怎样？需要马上安慰（3~10分钟）还是正常闲聊（20~60分钟）？',
+      '- 你们关系如何？在冷战吗？谁的错？该主动还是晾着？',
+      '- 某个时间点不适合发就 text 设 null',
+      '',
+      '直接返回 JSON：',
+      '{"soon":{"text":["消息1","消息2"],"minMin":10,"maxMin":40},"later":{"text":["消息1"],"minMin":120,"maxMin":360},"nextDay":{"text":["消息1"],"minMin":720,"maxMin":1440}}',
+      '',
+      'text 是数组（1~3条）。不发就 text 设 null。不要解释。'
+    ].join('\n');
 
     try {
+      var isClaudeAPI = apiConfig.baseUrl.indexOf('anthropic') !== -1;
+      var controller = new AbortController();
+      var timeout = setTimeout(function() { controller.abort(); }, API_TIMEOUT);
+      var rawResponse;
+
       if (isClaudeAPI) {
         var resp = await fetch(apiConfig.baseUrl + '/v1/messages', {
           method: 'POST',
@@ -43491,11 +43379,12 @@ function _meowUrlBase64ToUint8Array(base64String) {
             model: apiConfig.model || 'claude-sonnet-4-20250514',
             system: systemPrompt,
             messages: [{ role: 'user', content: userPrompt }],
-            max_tokens: 180,
-            temperature: 0.82
+            max_tokens: 500,
+            temperature: 0.85
           }),
           signal: controller.signal
         });
+        clearTimeout(timeout);
         if (!resp.ok) throw new Error('API ' + resp.status);
         var data = await resp.json();
         rawResponse = (data.content && data.content[0] && data.content[0].text) || '';
@@ -43512,186 +43401,256 @@ function _meowUrlBase64ToUint8Array(base64String) {
               { role: 'system', content: systemPrompt },
               { role: 'user', content: userPrompt }
             ],
-            temperature: 0.82,
-            presence_penalty: 0.28,
-            frequency_penalty: 0.22,
-            max_tokens: 180
+            temperature: 0.85,
+            max_tokens: 500
           }),
           signal: controller.signal
         });
+        clearTimeout(timeout);
         if (!resp2.ok) throw new Error('API ' + resp2.status);
         var data2 = await resp2.json();
         rawResponse = (data2.choices && data2.choices[0] && data2.choices[0].message && data2.choices[0].message.content) || '';
       }
-    } finally {
-      clearTimeout(timeout);
-    }
 
-    return postProcess(rawResponse);
-  }
-
-  function postProcess(raw) {
-    var s = String(raw || '').trim();
-    if (!s || s === '__SKIP__') return '';
-
-    // 多行取第一条含中文的
-    var lines = s.split(/[\r\n]+/).map(function(l) { return l.trim(); }).filter(Boolean);
-    if (lines.length > 1) {
-      s = '';
-      for (var i = 0; i < lines.length; i++) {
-        if (/[\u4e00-\u9fff]/.test(lines[i])) { s = lines[i]; break; }
+      // 解析 JSON
+      var parsed = parseSlotJSON(rawResponse);
+      if (!parsed) {
+        console.warn('[BgPush] JSON 解析失败:', rawResponse.slice(0, 100));
+        return;
       }
-      if (!s) s = lines[0];
-    }
 
-    s = s
-      .replace(/^(draft|option|version|choice|message|scene|tone|setting)\s*\d*\s*(\([^)]*\))?\s*[:：\-*]\s*/i, '')
-      .replace(/^[\(\uff08]?\d+[\)\uff09.\uff0e]?\s*/, '')
-      .replace(/^[-*•●]\s*/, '')
-      .replace(/^(消息|回复|内容|正文|发送|我说|我发|草稿)\s*[\d一二三四五六七八九十]*\s*[:：]\s*/, '')
-      .replace(/^[\*"'\u201c\u201d\u2018\u2019\u300c\u300e\s]+|[\*"'\u201c\u201d\u2018\u2019\u300d\u300f\s]+$/g, '')
-      .replace(/\s{2,}/g, ' ')
-      .trim();
-
-    // 质检
-    if (!s) return '';
-    if (!/[\u4e00-\u9fff]/.test(s)) return '';
-    if (s.length < 8 || s.length > 80) return '';
-    if (/^(在忙吗|你在干嘛|突然想起你|顺手问问你|刚空下来一点)/.test(s)) return '';
-    if (/^(Scene|Draft|Option|Tone|Setting)\b/i.test(s)) return '';
-    if (/(看到|想到|发现|路过|经过|翻到|闻到)$/.test(s)) return '';  // 半截话
-    if (/[，、：；—…·,;:\-]$/.test(s)) return '';  // 标点结尾 = 没说完
-
-    return s.slice(0, 80);
-  }
-
-
-  // ═══════════════════════════════════════════
-  //  上传到后端（只发文本 + 延迟）
-  // ═══════════════════════════════════════════
-
-  async function schedulePush(uid, npcId, npcName, text, delayMs) {
-    var pushAt = Date.now() + delayMs;
-
-    var resp = await fetch('/api/schedule-push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        uid: uid,
+      // 存入 localStorage
+      lsSet(HOT_MSG_KEY_PREFIX + npcId, {
         npcId: npcId,
         npcName: npcName,
-        text: text,
-        pushAt: pushAt
-      })
-    });
-
-    if (!resp.ok) throw new Error('schedule-push HTTP ' + resp.status);
-    return true;
-  }
-
-  // 取消所有未发的
-  async function cancelPending(uid) {
-    try {
-      await fetch('/api/schedule-push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uid: uid, action: 'cancel' })
+        bond: bond,
+        slots: parsed,
+        generatedAt: Date.now()
       });
+
+      var count = [parsed.soon, parsed.later, parsed.nextDay].filter(function(s){ return s && s.text; }).length;
+      console.log('[BgPush] ✓', npcName, '生成了', count, '条热备消息');
+
     } catch(e) {
-      console.warn('[BgPush] 取消 pending 失败:', e);
+      if (e.name === 'AbortError') {
+        console.log('[BgPush]', npcName, 'API 超时，跳过');
+      } else {
+        console.warn('[BgPush]', npcName, '生成失败:', e.message || e);
+      }
+    }
+  }
+
+  function parseSlotJSON(raw) {
+    var text = String(raw || '').trim();
+    text = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+
+    try {
+      var obj = JSON.parse(text);
+      if (!obj || typeof obj !== 'object') return null;
+
+      var result = {};
+      ['soon', 'later', 'nextDay'].forEach(function(key) {
+        var slot = obj[key];
+        if (!slot) { result[key] = null; return; }
+
+        // text 可能是字符串或数组
+        var texts = slot.text;
+        if (!texts || texts === 'null' || texts === null) { result[key] = null; return; }
+
+        // 统一转为数组
+        if (typeof texts === 'string') texts = [texts];
+        if (!Array.isArray(texts)) { result[key] = null; return; }
+
+        // 过滤无效条目
+        texts = texts
+          .map(function(t) { return String(t || '').trim(); })
+          .filter(function(t) { return t.length >= 2 && /[\u4e00-\u9fff]/.test(t); })
+          .map(function(t) { return t.slice(0, 80); })
+          .slice(0, 3);
+
+        if (!texts.length) { result[key] = null; return; }
+
+        result[key] = {
+          text: texts,  // 始终是数组
+          minMin: Math.max(1, parseInt(slot.minMin) || 10),
+          maxMin: Math.max(10, parseInt(slot.maxMin) || 60)
+        };
+      });
+
+      if (!result.soon && !result.later && !result.nextDay) return null;
+      return result;
+    } catch(e) {
+      return null;
     }
   }
 
 
   // ═══════════════════════════════════════════
-  //  ★ 核心流程：用户离开时
+  //  监听 NPC 回复完成
   // ═══════════════════════════════════════════
 
-  var _debounceTimer = null;
-  var _isProcessing = false;
-  var _userLeft = false;
+  window.addEventListener('meow:chat-updated', function(e) {
+    try {
+      var detail = e.detail || {};
+      var npcId = String(detail.npcId || '').trim();
+      var role = String(detail.role || '').trim();
 
-  async function onUserLeave() {
-    if (_isProcessing) return;
+      // 只在 NPC 回复时触发（不是用户消息、不是系统消息）
+      if (!npcId || role === 'me' || role === 'user' || role === 'system' || role === 'narrator') return;
 
-    var uid = 'standalone_main';
+      // 防抖：NPC 可能连发 3 条，等最后一条写完再生成
+      if (_genTimers[npcId]) clearTimeout(_genTimers[npcId]);
+      _genTimers[npcId] = setTimeout(function() {
+        delete _genTimers[npcId];
+        generateHotMessages(npcId).catch(function(e) {
+          console.warn('[BgPush] 生成异常:', e);
+        });
+      }, DEBOUNCE_MS);
 
-    // 1. 启动音频保活
-    var alive = startKeepalive();
-    if (!alive) {
-      console.warn('[BgPush] 保活失败，放弃后台生成');
-      return;
-    }
+    } catch(e) {}
+  });
 
-    // 2. 检查 API 配置
-    var apiConfig = getLocalApiConfig();
-    if (!apiConfig) {
-      console.log('[BgPush] 无 API 配置，跳过');
-      stopKeepalive();
-      return;
-    }
 
-    // 3. 挑选角色
-    var candidates = pickNpcsToMessage();
-    if (!candidates.length) {
-      console.log('[BgPush] 没有需要发消息的角色');
-      stopKeepalive();
-      return;
-    }
+  // ═══════════════════════════════════════════
+  //  App 打开时兜底生成（用户没聊天就走的情况）
+  // ═══════════════════════════════════════════
 
-    _isProcessing = true;
-    console.log('[BgPush] 开始为', candidates.length, '个角色生成消息...');
+  setTimeout(function() {
+    try {
+      if (typeof _meowCollectNpcs !== 'function') return;
+      var npcs = _meowCollectNpcs();
+      var apiConfig = getLocalApiConfig();
+      if (!apiConfig) return;
 
-    for (var i = 0; i < candidates.length; i++) {
-      // 每步都检查用户是否回来了
-      if (!_userLeft) {
-        console.log('[BgPush] 用户已回来，中止');
-        break;
-      }
+      // 找第一个有开启推送、没有热备消息的角色
+      for (var i = 0; i < npcs.length; i++) {
+        var npc = npcs[i];
+        if (!npc || !npc.id || npc.enableLifePush === false) continue;
+        var reserved = {player:1,system:1,user:1,me:1,self:1};
+        if (reserved[String(npc.id).toLowerCase()]) continue;
 
-      var c = candidates[i];
-      var npc = c.npc;
-
-      try {
-        var text = await generateMessage(apiConfig, npc);
-
-        if (!_userLeft) break; // 生成完后再检查一次
-
-        if (!text) {
-          console.log('[BgPush]', npc.name, 'AI 返回空或不合格，跳过');
-          continue;
+        var existing = lsGet(HOT_MSG_KEY_PREFIX + npc.id, null);
+        // 没有热备 或者 热备超过 6 小时了（过期）
+        if (!existing || (Date.now() - (existing.generatedAt || 0) > 6 * 60 * 60 * 1000)) {
+          console.log('[BgPush] 兜底生成:', npc.name);
+          generateHotMessages(npc.id).catch(function(){});
+          break; // 一次只生成一个，不占太多资源
         }
-
-        await schedulePush(uid, npc.id, npc.name || npc.id, text, c.delayMs);
-
-        trackPush(npc.id);
-
-        var delayMin = Math.round(c.delayMs / 60000);
-        console.log('[BgPush] ✓', npc.name, ':', text.slice(0, 30), '... (', delayMin, '分钟后推送)');
-
-      } catch(e) {
-        console.warn('[BgPush]', npc.name, '生成失败:', e.message || e);
       }
-    }
+    } catch(e) {}
+  }, 8000); // 打开 8 秒后
 
-    _isProcessing = false;
-    stopKeepalive();
+
+  // ═══════════════════════════════════════════
+  //  ★ 用户切走时：POST 热备消息到后端
+  // ═══════════════════════════════════════════
+
+  function onUserLeave() {
+    var uid = 'standalone_main';
+    var today = dayKey();
+
+    try {
+      var npcs = typeof _meowCollectNpcs === 'function' ? _meowCollectNpcs() : [];
+      var scheduled = [];
+
+      for (var i = 0; i < npcs.length; i++) {
+        var npc = npcs[i];
+        if (!npc || !npc.id || npc.enableLifePush === false) continue;
+
+        var hot = lsGet(HOT_MSG_KEY_PREFIX + npc.id, null);
+        if (!hot || !hot.slots) continue;
+
+        var bond = String(hot.bond || npc.bond || '普通');
+        var max = BOND_DAILY_MAX[bond] || 2;
+
+        // 检查今日额度
+        var trackKey = 'meow_bgpush_track_' + npc.id;
+        var track = lsGet(trackKey, { date: '', count: 0 });
+        if (track.date === today && track.count >= max) continue;
+
+        var nowMs = Date.now();
+        var slots = hot.slots;
+
+        // 构造每个 slot 的 push_at
+        ['soon', 'later', 'nextDay'].forEach(function(key) {
+          var slot = slots[key];
+          if (!slot || !slot.text) return;
+
+          var delayMs = randInt(slot.minMin, slot.maxMin) * 60 * 1000;
+          var pushAt = nowMs + delayMs;
+
+          // 深夜保护：23:00~7:00 之间不推，推迟到 8~10 点
+          var pushDate = new Date(pushAt);
+          var pushHour = pushDate.getHours();
+          if (pushHour >= 23 || pushHour < 7) {
+            // 推迟到第二天 8~10 点
+            pushDate.setDate(pushDate.getDate() + (pushHour >= 23 ? 1 : 0));
+            pushDate.setHours(randInt(8, 10), randInt(0, 59), 0, 0);
+            pushAt = pushDate.getTime();
+          }
+
+          scheduled.push({
+            npcId: npc.id,
+            npcName: hot.npcName || npc.name || npc.id,
+            text: JSON.stringify(slot.text),  // 数组序列化为 JSON 字符串
+            pushAt: pushAt,
+            slot: key
+          });
+        });
+
+        // 清空热备（已上传）
+        lsSet(HOT_MSG_KEY_PREFIX + npc.id, null);
+      }
+
+      if (!scheduled.length) return;
+
+      // 瞬间 POST（不等响应）
+      var payload = JSON.stringify({ uid: uid, messages: scheduled });
+      // sendBeacon 需要 Blob 才能发 JSON
+      var blob = new Blob([payload], { type: 'application/json' });
+
+      if (navigator.sendBeacon) {
+        navigator.sendBeacon('/api/schedule-push', blob);
+        console.log('[BgPush] sendBeacon 发送', scheduled.length, '条定时消息');
+      } else {
+        fetch('/api/schedule-push', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          keepalive: true
+        }).catch(function(){});
+        console.log('[BgPush] fetch 发送', scheduled.length, '条定时消息');
+      }
+
+      // 预扣额度
+      scheduled.forEach(function(msg) {
+        var trackKey = 'meow_bgpush_track_' + msg.npcId;
+        var today2 = dayKey();
+        var track = lsGet(trackKey, { date: '', count: 0 });
+        if (track.date !== today2) track = { date: today2, count: 0 };
+        track.count++;
+        track.lastPushAt = Date.now();
+        lsSet(trackKey, track);
+      });
+
+    } catch(e) {
+      console.warn('[BgPush] onUserLeave error:', e);
+    }
   }
 
   // ═══════════════════════════════════════════
-  //  ★ 核心流程：用户回来时
+  //  用户回来时：取消未发的 pending
   // ═══════════════════════════════════════════
 
   function onUserReturn() {
-    var uid = 'standalone_main';
-
-    // 取消还没发出去的消息
-    cancelPending(uid);
-
-    // 停保活
-    stopKeepalive();
-
-    console.log('[BgPush] 用户回来了，已取消 pending');
+    try {
+      fetch('/api/schedule-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: 'standalone_main', action: 'cancel' })
+      }).catch(function(){});
+      console.log('[BgPush] 用户回来了，已取消 pending');
+    } catch(e) {}
   }
 
 
@@ -43701,68 +43660,59 @@ function _meowUrlBase64ToUint8Array(base64String) {
 
   document.addEventListener('visibilitychange', function() {
     if (document.visibilityState === 'hidden') {
-      // 用户切走
-      _userLeft = true;
-
-      // 防抖：8 秒后才真正开始
-      if (_debounceTimer) clearTimeout(_debounceTimer);
-      _debounceTimer = setTimeout(function() {
-        if (_userLeft) {
-          onUserLeave();
-        }
-      }, DEBOUNCE_MS);
-
+      onUserLeave();
     } else {
-      // 用户回来
-      _userLeft = false;
-
-      if (_debounceTimer) {
-        clearTimeout(_debounceTimer);
-        _debounceTimer = null;
-      }
-
       onUserReturn();
     }
   });
 
 
   // ═══════════════════════════════════════════
-  //  暴露调试接口
+  //  调试接口
   // ═══════════════════════════════════════════
 
   window._meowBgPushStatus = function() {
     var npcs;
     try { npcs = typeof _meowCollectNpcs === 'function' ? _meowCollectNpcs() : []; } catch(e) { npcs = []; }
-    var today = dayKey(Date.now());
+    var today = dayKey();
     var result = {};
     for (var i = 0; i < npcs.length; i++) {
       var npc = npcs[i];
-      var bond = String(npc.bond || DEFAULT_BOND);
-      var cfg = BOND_CONFIG[bond] || BOND_CONFIG[DEFAULT_BOND];
+      if (!npc || !npc.id) continue;
+      var bond = String(npc.bond || '普通');
       var track = lsGet('meow_bgpush_track_' + npc.id, { date: '', count: 0 });
-      var todayCount = track.date === today ? track.count : 0;
+      var hot = lsGet(HOT_MSG_KEY_PREFIX + npc.id, null);
       result[npc.id] = {
         name: npc.name,
         bond: bond,
-        todaySent: todayCount,
-        dailyMax: cfg.dailyMax,
-        delayRange: cfg.minDelay + '~' + cfg.maxDelay + '分钟',
-        audioReady: !!_audioCtx
+        todaySent: track.date === today ? track.count : 0,
+        dailyMax: BOND_DAILY_MAX[bond] || 2,
+        hasHotMsg: !!(hot && hot.slots),
+        hotSlots: hot ? hot.slots : null,
+        hotAge: hot ? Math.round((Date.now() - (hot.generatedAt || 0)) / 60000) + '分钟前' : null
       };
     }
     return result;
   };
 
-  // 手动触发一次（调试用）
-  window._meowBgPushTest = function() {
-    _userLeft = true;
-    onUserLeave().then(function() {
-      console.log('[BgPush] 测试完成');
+  window._meowBgPushTest = function(npcId) {
+    if (!npcId) {
+      var npcs = typeof _meowCollectNpcs === 'function' ? _meowCollectNpcs() : [];
+      for (var i = 0; i < npcs.length; i++) {
+        if (npcs[i] && npcs[i].enableLifePush !== false) { npcId = npcs[i].id; break; }
+      }
+    }
+    if (!npcId) { console.log('没有可用角色'); return; }
+    console.log('[BgPush] 手动测试:', npcId);
+    generateHotMessages(npcId).then(function() {
+      var hot = lsGet(HOT_MSG_KEY_PREFIX + npcId, null);
+      console.log('[BgPush] 生成结果:', hot ? hot.slots : '失败');
     });
   };
 
-  console.log('[BgPush] 后台推送模块已加载');
+  console.log('[BgPush] 聊天后预生成模块已加载 v5');
 })();
+
 </script>
 <script>
 // ====== Gist 自动同步后台逻辑 ======

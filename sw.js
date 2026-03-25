@@ -47,32 +47,49 @@ async function handlePush(event) {
 
   const npcId   = payload.npcId   || '';
   const npcName = payload.npcName || payload.title || '消息';
-  const text    = payload.text    || payload.body  || '';
+  let rawText   = payload.text    || payload.body  || '';
 
-  if (!text) return;
+  if (!rawText) return;
+
+  // text 可能是 JSON 数组字符串（连发多条）
+  let messages = [rawText];
+  try {
+    const parsed = JSON.parse(rawText);
+    if (Array.isArray(parsed) && parsed.length) {
+      messages = parsed.map(m => String(m || '').trim()).filter(m => m.length > 0);
+    }
+  } catch(e) {}
+
+  if (!messages.length) return;
 
   // 存 IDB
   try {
     await idbPut('meow_sw_pending_msgs_' + npcId, {
-      npcId, messages: [text], generatedAt: Date.now(), kind: payload.kind || 'bgpush'
+      npcId, messages, generatedAt: Date.now(), kind: payload.kind || 'bgpush'
     });
   } catch (e) {}
 
-  // 弹通知
-  await self.registration.showNotification(npcName, {
-    body: text,
-    icon: '/icon-192.png',
-    badge: '/icon-192.png',
-    tag: 'meow-' + npcId + '-' + Date.now(),
-    renotify: true,
-    data: { npcId, action: 'open-chat' }
-  });
+  // 逐条弹通知（模拟真人连发）
+  for (let i = 0; i < messages.length; i++) {
+    await self.registration.showNotification(npcName, {
+      body: messages[i],
+      icon: '/icon-192.png',
+      badge: '/icon-192.png',
+      tag: 'meow-' + npcId + '-' + Date.now() + '-' + i,
+      renotify: true,
+      data: { npcId, action: 'open-chat', messageIndex: i }
+    });
+    // 多条之间短暂延迟
+    if (i < messages.length - 1) {
+      await new Promise(r => setTimeout(r, 1500 + Math.floor(Math.random() * 2000)));
+    }
+  }
 
   // 通知前端
   try {
     const allClients = await clients.matchAll({ type: 'window', includeUncontrolled: true });
     for (const client of allClients) {
-      client.postMessage({ type: 'meow-messages-generated', npcId, messages: [text] });
+      client.postMessage({ type: 'meow-messages-generated', npcId, messages });
     }
   } catch (e) {}
 }
