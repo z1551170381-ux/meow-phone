@@ -196,7 +196,7 @@ export async function onRequestGet(context) {
         });
       } catch(e) {}
 
-      results.push({ id, npc_id, npc_name, pushed, preview: text.slice(0, 30) });
+      results.push({ id, npc_id, npc_name, pushed, preview: text.slice(0, 30), batch_id: msg.batch_id || null });
     }
 
     // ── 清理：删除 7 天前的已发送/已取消记录 ──
