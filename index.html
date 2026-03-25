@@ -43722,26 +43722,6 @@ function onUserReturn() {
   } catch(e) {}
 }
 
-【再补一个监听】
-
-搜索这一段：
-document.addEventListener('visibilitychange', function() {
-  if (document.visibilityState === 'hidden') {
-    onUserLeave();
-  } else {
-    onUserReturn();
-  }
-});
-
-在它下面紧接着加上这一段：
-
-window.addEventListener('pagehide', function() {
-  onUserLeave();
-});
-
-setTimeout(function() {
-  _meowBgPushFlushPending('boot');
-}, 2000);
 
   // ═══════════════════════════════════════════
   //  visibilitychange 监听
@@ -43755,6 +43735,13 @@ setTimeout(function() {
     }
   });
 
+window.addEventListener('pagehide', function() {
+  onUserLeave();
+});
+
+setTimeout(function() {
+  _meowBgPushFlushPending('boot');
+}, 2000);
 
   // ═══════════════════════════════════════════
   //  调试接口
