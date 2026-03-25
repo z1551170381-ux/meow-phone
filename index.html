@@ -4045,6 +4045,13 @@ case '🍪': return s('<circle cx="12" cy="12" r="10"/><circle cx="8" cy="9" r="
   position:absolute; bottom:0; left:0; right:0;
   padding:6px 10px; font-size:12px; color:#fff;
   background:linear-gradient(transparent, rgba(0,0,0,.55));
+  white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  transition:all .25s ease;
+}
+#${ID} .wxPhotoCard.wxPhotoExpanded .wxPhotoCaption{
+  white-space:normal; overflow:visible; text-overflow:clip;
+  background:rgba(0,0,0,.65); padding:10px 12px;
+  font-size:13px; line-height:1.5;
 }
 #${ID} .wxPhotoCard .wxPhotoLoading{
   width:220px; height:160px; background:linear-gradient(135deg,#e8ecf0,#d0d8e0);
@@ -19753,7 +19760,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           var _photoQuery = encodeURIComponent(meta.query || 'life moment');
           var _photoSrc = 'https://source.unsplash.com/440x320/?' + _photoQuery + '&sig=' + _photoSeed;
           contentHtml = '<div class="wxCBContent wxCBSpecial" style="padding:0;">'
-            + '<div class="wxPhotoCard">'
+            + '<div class="wxPhotoCard" onclick="this.classList.toggle(\'wxPhotoExpanded\')">'
             + '<img src="' + _photoSrc + '" onerror="this.parentNode.innerHTML=\'<div class=wxPhotoLoading>🖼</div>\'" />'
             + (_photoDesc ? '<div class="wxPhotoCaption">' + _photoDesc + '</div>' : '')
             + '</div>'
@@ -20164,7 +20171,13 @@ const npc = _wxGetChatTargetMeta(npcId);
         if (parsed.stickerGroup !== null && parsed.stickerIdx >= 0){
           try{
             var packs = _loadStickerPacks();
-            var stkArr = _safeArr(packs[parsed.stickerGroup]);
+            // ★ 专属表情包从 charGroups[npcId] 取
+            var stkArr;
+            if (parsed.stickerGroup === 'chargroup' || parsed.stickerGroup === '专属表情') {
+              stkArr = _safeArr(packs.charGroups && packs.charGroups[npcId]);
+            } else {
+              stkArr = _safeArr(packs[parsed.stickerGroup]);
+            }
             var stk = stkArr[parsed.stickerIdx];
             if (stk && stk.data && stk.data.indexOf('idb:') !== 0){
               setTimeout(function(){
@@ -20688,6 +20701,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           var grpRaw = stkMatch[1].trim();
           if (grpRaw === '角色表情' || grpRaw === 'char') stickerGroup = 'char';
           else if (grpRaw === '通用表情' || grpRaw === 'common') stickerGroup = 'common';
+          else if (grpRaw === '专属表情' || grpRaw === 'chargroup') stickerGroup = 'chargroup';
           else stickerGroup = grpRaw;
           stickerIdx = parseInt(stkMatch[2]);
           s = s.replace(stkMatch[0], '').trim();
@@ -20864,7 +20878,7 @@ const npc = _wxGetChatTargetMeta(npcId);
         try{
           var cfg = phoneLoadSettings();
           var n = Number(cfg.chatContextN);
-          if (n && n > 0 && n <= 50) return n;
+          if (n && n > 0 && n <= 100) return n;
         }catch(e){}
         return 10;
       }
@@ -21104,6 +21118,21 @@ const npc = _wxGetChatTargetMeta(npcId);
           if(momLines.length) parts.push('【朋友圈互动近况】\n'+momLines.join('\n'));
         }catch(e){}
 
+        // === 3.65 [通话纪要]：让 AI 知道最近通过电话聊了什么 ===
+        try{
+          var _callMode = _getChatMode(npcId);
+          var _callLog = _getLogForModeBranch(npcId, _callMode);
+          var _callSummaries = _callLog.filter(function(m){
+            return m && m.role === 'system' && m.text && m.text.indexOf('通话纪要') !== -1;
+          }).slice(-3);
+          if (_callSummaries.length){
+            var _callLines = _callSummaries.map(function(m){
+              return String(m.text || '').slice(0, 200);
+            });
+            parts.push('【最近通话纪要】\n' + _callLines.join('\n'));
+          }
+        }catch(e){}
+
         // === 3.7 [地图环境]：注入当前地标和近期活动 ===
         try{
           var _mapBlock = _buildMapPromptBlock(npcId);
@@ -21242,30 +21271,40 @@ const npc = _wxGetChatTargetMeta(npcId);
           var allPacks = _loadStickerPacks();
           var charStks = _safeArr(allPacks.char);
           var commonStks = _safeArr(allPacks.common);
+          // ★ 加载角色专属表情包
+          var cgKey = 'cg_' + npcId;
+          var cgStks = (allPacks.charGroups && allPacks.charGroups[npcId]) ? _safeArr(allPacks.charGroups[npcId]) : [];
           var stkLines = [];
+          // 专属表情包优先列出
+          cgStks.forEach(function(s,i){ if(s && s.name) stkLines.push('[专属表情:'+i+'] '+s.name); else stkLines.push('[专属表情:'+i+']'); });
           charStks.forEach(function(s,i){ if(s && s.name) stkLines.push('[角色表情:'+i+'] '+s.name); else stkLines.push('[角色表情:'+i+']'); });
           commonStks.forEach(function(s,i){ if(s && s.name) stkLines.push('[通用表情:'+i+'] '+s.name); else stkLines.push('[通用表情:'+i+']'); });
           if (stkLines.length){
             stkForAI = '\n\n【表情包系统】\n' +
-              '发表情包方法：在消息末尾写 [发表情:角色表情:0]（编号）。\n' +
+              '发表情包方法：在消息末尾写 [发表情:专属表情:0] 或 [发表情:角色表情:0]（编号）。\n' +
+              (cgStks.length ? '★ 优先使用专属表情包（这是你们之间的独有表情）！\n' : '') +
               '★ 必须发表情包的场景（遇到就发，不要忽略）：\n' +
               '- 收到好消息、对方说了什么让你开心的\n- 故意撒娇卖萌\n- 被逗笑了\n- 安慰对方\n- 表达"嗯嗯""好呀"之类的轻快回应\n' +
-              '可用列表：\n' + stkLines.slice(0,20).join('\n') + '\n' +
-              '每次最多发一个，可附文字："哈哈哈 [发表情:通用表情:0]"';
+              '可用列表：\n' + stkLines.slice(0,25).join('\n') + '\n' +
+              '每次最多发一个，可附文字："哈哈哈 [发表情:专属表情:0]"';
           }
         }catch(e){}
 
         // ★ 照片 & 分享卡指令（让 AI 主动分享生活内容）
         var mediaForAI = '\n\n【主动分享媒体（让聊天更生动）】\n' +
           '你可以主动分享照片或资讯卡片，让对话更真实自然。\n' +
-          '① 发照片：[发照片:描述文字|搜索关键词英文]\n' +
-          '  例："刚拍的 [发照片:今天下午的咖啡|coffee latte]"\n' +
-          '  适合场景：描述自己在做什么、分享今天遇到的事、晒心情\n' +
+          '① 发照片：[发照片:详细描述文字|搜索关键词英文]\n' +
+          '  描述文字要具体生动（15-40字），像朋友圈配文一样，说清楚拍了什么、在哪、什么氛围。\n' +
+          '  好的例子：\n' +
+          '    "刚拍的 [发照片:下午三点半的办公室窗边，阳光打在杯壁上，拿铁拉花还没散|coffee latte sunlight office]"\n' +
+          '    "你看 [发照片:路过花店门口摆了一排向日葵，黄灿灿的特别好看|sunflower flower shop street]"\n' +
+          '  坏的例子（太简短）：\n' +
+          '    "[发照片:咖啡|coffee]" ← 完全没画面感\n' +
+          '  搜索关键词必须是英文（2-4个词，用于找图片），描述文字用中文。\n' +
           '② 发分享卡：[分享:标题|一句话描述|搜索关键词英文]\n' +
           '  例："你看这个 [分享:《三体》第四部要来了|刘慈欣最新消息|science fiction book]"\n' +
           '  适合场景：聊到某个话题时顺手分享相关内容、电影/歌曲/新闻推荐\n' +
-          '频率：每3~8条消息主动发一次媒体内容，不要每条都发。\n' +
-          '搜索关键词必须是英文（用于找图片），描述文字用中文。';
+          '频率：每3~8条消息主动发一次媒体内容，不要每条都发。';
 
 
         // ★ 构建自定义条目提示（如果用户添加了自定义条目，告诉 AI 有哪些可以更新）
@@ -29569,7 +29608,7 @@ function renderSettingsUIApp(container){
       // ===== 【上下文条数设置子页面】线上/线下分开 =====
       function renderSettingsChatContextN(container){
         var cfg = phoneLoadSettings();
-        var currentOnline = Math.min(50, Math.max(3, Number(cfg.chatContextN) || 10));
+        var currentOnline = Math.min(100, Math.max(3, Number(cfg.chatContextN) || 10));
         var currentOffline = Math.min(30, Math.max(1, Number(cfg.chatContextNOffline) || 5));
         var offlineBridgeOn = cfg.onlineIncludeOfflineCtx !== false; // 默认开启
         var html = '<div class="settingSubPage">' +
@@ -29579,12 +29618,12 @@ function renderSettingsUIApp(container){
           '<div style="margin-top:16px;font-size:13px;color:var(--ph-text);margin-bottom:6px;">💬 线上模式（短消息气泡）</div>' +
           '<div class="settingSubDesc" style="margin-bottom:10px;">AI 回复时参考最近多少条在线聊天记录。</div>' +
           '<div style="display:flex;align-items:center;gap:12px;">' +
-            '<input type="range" min="3" max="50" value="' + currentOnline + '" data-ph="ctxNSlider" style="flex:1;accent-color:var(--ph-accent,#07c160);" />' +
+            '<input type="range" min="3" max="100" value="' + currentOnline + '" data-ph="ctxNSlider" style="flex:1;accent-color:var(--ph-accent,#07c160);" />' +
             '<span data-ph="ctxNVal" style="font-size:15px;color:var(--ph-text);min-width:36px;text-align:center;">' + currentOnline + '</span>' +
           '</div>' +
-          '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ph-text-dim);margin-top:4px;padding:0 2px;"><span>3条</span><span>50条</span></div>' +
+          '<div style="display:flex;justify-content:space-between;font-size:11px;color:var(--ph-text-dim);margin-top:4px;padding:0 2px;"><span>3条</span><span>100条</span></div>' +
           '<div style="margin-top:8px;padding:8px 12px;border-radius:10px;background:var(--ph-glass);font-size:12px;color:var(--ph-text-sub);line-height:1.6;">' +
-            '💡 建议：日常闲聊 8~15 条；深度对话 20~30 条。' +
+            '💡 建议：日常闲聊 10~50 条；深度对话 50~100 条。' +
           '</div>' +
 
           // 线上读取线下开关
@@ -38877,9 +38916,25 @@ function _meowCollectNpcs() {
         var entry = byChat[String(npcId)] || null;
         if (!entry) return '';
         var modes = entry.modes || {};
-        var mode = modes.online || modes.offline || Object.values(modes)[0];
-        if (!mode) return '';
-        return compactText(mode.lastSummary || mode.summary || '', 1600);
+        // ★ 合并线上 + 线下总结，不再只取一个
+        var parts = [];
+        if (modes.online) {
+          var onTxt = compactText(modes.online.lastSummary || modes.online.summary || '', 800);
+          if (onTxt) parts.push('【线上】' + onTxt);
+        }
+        if (modes.offline) {
+          var offTxt = compactText(modes.offline.lastSummary || modes.offline.summary || '', 800);
+          if (offTxt) parts.push('【线下】' + offTxt);
+        }
+        // 兜底：如果没有 online/offline 标签的旧数据
+        if (!parts.length) {
+          var anyMode = Object.values(modes)[0];
+          if (anyMode) {
+            var anyTxt = compactText(anyMode.lastSummary || anyMode.summary || '', 1600);
+            if (anyTxt) parts.push(anyTxt);
+          }
+        }
+        return parts.join('\n').slice(0, 1600);
       } catch(e) {
         return '';
       }
@@ -38913,6 +38968,44 @@ function _meowCollectNpcs() {
           return txt ? (role + '：' + txt) : '';
         }).filter(Boolean);
         return compactText(arr.join('｜'), 1000);
+      } catch(e) {
+        return '';
+      }
+    }
+    // ★ 提取最近通话总结
+    function getCallSummaries(logsMap, npcId) {
+      try {
+        var arr = (logsMap && logsMap[String(npcId)]) || [];
+        if (!Array.isArray(arr) || !arr.length) return '';
+        var calls = arr.filter(function(m) {
+          return m && m.role === 'system' && m.text && m.text.indexOf('通话纪要') !== -1;
+        }).slice(-3); // 最近 3 条通话纪要
+        if (!calls.length) return '';
+        return calls.map(function(m) {
+          return compactText(m.text || '', 200);
+        }).join('\n');
+      } catch(e) {
+        return '';
+      }
+    }
+    // ★ 提取最近朋友圈互动摘要
+    function getMomentsInteractions(logsMap, npcId) {
+      try {
+        var arr = (logsMap && logsMap[String(npcId)]) || [];
+        if (!Array.isArray(arr) || !arr.length) return '';
+        var moments = arr.filter(function(m) {
+          return m && m.text && (
+            m.text.indexOf('朋友圈') !== -1 ||
+            m.text.indexOf('评论了') !== -1 ||
+            m.text.indexOf('点赞了') !== -1 ||
+            (m.fromLife && m.text.indexOf('发了一条') !== -1)
+          );
+        }).slice(-5); // 最近 5 条朋友圈相关
+        if (!moments.length) return '';
+        return moments.map(function(m) {
+          var who = String(m.role || '') === 'me' ? '用户' : '角色';
+          return who + '：' + compactText(m.text || '', 80);
+        }).join('\n');
       } catch(e) {
         return '';
       }
@@ -39061,6 +39154,8 @@ function _meowCollectNpcs() {
 
       var summary = getSummaryForNpc(summaryStore, npcId);
       var recentMemory = getRecentMemory(logsMap, npcId);
+      var callSummaries = getCallSummaries(logsMap, npcId);
+      var momentsInteractions = getMomentsInteractions(logsMap, npcId);
 
       var currentScene = compactText(joinNonEmpty([
         scene.name || '',
@@ -39108,7 +39203,9 @@ function _meowCollectNpcs() {
         user_state: formatUserState(userState, worldPlayer),
         current_scene: currentScene,
         location: location,
-        user_profile: formatUserProfile(userState, worldPlayer)
+        user_profile: formatUserProfile(userState, worldPlayer),
+        call_summaries: callSummaries,
+        moments_interactions: momentsInteractions
       };
     });
   } catch(e) {
@@ -43343,11 +43440,27 @@ function _meowUrlBase64ToUint8Array(base64String) {
     var bond = String(npc.bond || '普通');
     var h = nowHour();
 
+    // ★ 读取作息表（如果有）
+    var scheduleStr = '';
+    try {
+      var charStateRaw = localStorage.getItem('meow_phone_c_standalone_main_charstate_' + npcId);
+      var charState = charStateRaw ? JSON.parse(charStateRaw) : null;
+      if (charState && charState.schedule && Array.isArray(charState.schedule) && charState.schedule.length) {
+        scheduleStr = charState.schedule.map(function(sl) {
+          return (sl.hour || 0) + ':00-' + (sl.endHour || 0) + ':00 ' + (sl.activity || sl.tag || '');
+        }).join('、');
+        if (scheduleStr.length > 300) scheduleStr = scheduleStr.slice(0, 300);
+      }
+    } catch(e) {}
+
     var ctxLines = [
       '现在是' + h + '点。',
-      npc.npc_state     && ('你当前：' + cleanText(npc.npc_state, 140)),
+      npc.npc_state     && ('你当前：' + cleanText(npc.npc_state, 200)),
       npc.current_scene && ('场景：' + cleanText(npc.current_scene, 120)),
+      npc.location      && ('位置：' + cleanText(npc.location, 100)),
       npc.world_context && ('背景：' + cleanText(npc.world_context, 300)),
+      npc.user_state    && ('对方状态：' + cleanText(npc.user_state, 150)),
+      scheduleStr       && ('你今天的作息：' + scheduleStr),
     ].filter(Boolean).join('\n');
 
     // ★ 拿最近 6 条真实聊天记录（比 summary 更具体）
@@ -43372,7 +43485,9 @@ function _meowUrlBase64ToUint8Array(base64String) {
       npc.onlineChatPrompt ? cleanText(npc.onlineChatPrompt, 500) : '',
       '',
       '关系：' + bond,
-npc.speech_style ? ('说话习惯：' + cleanText(npc.speech_style, 220)) : '',
+      npc.summary ? ('你们之间的故事摘要：' + cleanText(npc.summary, 600)) : '',
+      npc.call_summaries ? ('最近通话纪要：\n' + cleanText(npc.call_summaries, 400)) : '',
+      npc.moments_interactions ? ('最近朋友圈互动：\n' + cleanText(npc.moments_interactions, 300)) : '',
       ctxLines,
     ].filter(Boolean).join('\n');
 
@@ -43381,23 +43496,23 @@ var userPrompt = [
   recentLines || '（没有最近对话）',
   '',
   '你现在不是在写文案，不是在写情话模板，也不是在写小说对白。',
-  '你是在扮演这个角色，用手机给对方发一组“真实会发出来的连续消息”。',
+  '你是在扮演这个角色，用手机给对方发一组"真实会发出来的连续消息"。',
   '重点不是把意思说完整，而是让人感觉到：你此刻真的在生活里，刚好因为某个自然瞬间想到了对方，所以发来了这些消息。',
   '',
   '请先吃透最近上下文，再决定消息怎么发：',
   '- 要接得上刚才的聊天，不要像重新起头。',
   '- 要符合角色性格、你们现在的关系、当前情绪、你现在正在经历的状态。',
-  '- 要像这个人现在真的会发出来的话，不要像AI写出来的“自然句子”。',
+  '- 要像这个人现在真的会发出来的话，不要像AI写出来的"自然句子"。',
   '',
-  '你要生成三个时间点的主动消息：',
-  '- soon：聊完后不久。',
-  '- later：几小时后。你在过自己的生活，某个瞬间又想到对方。',
-  '- nextDay：第二天，你根据当前时间自然判断更合适的时段。',
+  (h < 18
+    ? '你要生成两个时间点的主动消息（白天聊天，不需要准备明天的）：\n- soon：聊完后不久。\n- later：几小时后。你在过自己的生活，某个瞬间又想到对方。'
+    : '你要生成两个时间点的主动消息（晚上聊天，几小时后太晚了不需要）：\n- soon：聊完后不久。\n- nextDay：第二天，你根据当前时间自然判断更合适的时段。'
+  ),
   '',
   '每个时间点都这样思考：',
   '- 这个时间点你为什么会突然想联系对方？只能选一个最自然的动机。',
   '- 这个动机要具体，像：刚忙完、路上看到什么、想起对方前面一句话、情绪还没完全过去、嘴硬但还是想来找一下、想确认对方状态、想顺手分享一个眼前小事。',
-  '- 不要为了“主动消息”而主动消息。',
+  '- 不要为了"主动消息"而主动消息。',
   '',
   '消息风格要求：',
   '- 每个时间点发 1~3 条，默认更偏向 2~3 条，像真人微信连发。',
@@ -43415,17 +43530,22 @@ var userPrompt = [
   '',
   '强烈避免模板味：',
   '- 不要把消息写成客服、通知、情话文案、偶像剧台词。',
-  '- 不要空泛地说“想你了”“在干嘛”“早点休息”“记得吃饭”“突然想起你了”“只是想和你说说话”这类话来凑自然感，除非上下文真的非常合适。',
+  '- 不要空泛地说"想你了""在干嘛""早点休息""记得吃饭""突然想起你了""只是想和你说说话"这类话来凑自然感，除非上下文真的非常合适。',
   '- 宁可短一点、偏一点、像真人一点，也不要平滑、工整、正确但假。',
   '',
   '时机规则：',
   '- soon：由你判断是 3~60 分钟内更合适，给出 minMin / maxMin。',
-  '- later：由你判断是 120~480 分钟内更合适，给出 minMin / maxMin。',
-  '- nextDay：由你判断是第二天更自然的时间段，给出 minMin / maxMin。',
+  (h < 18
+    ? '- later：由你判断是 120~480 分钟内更合适，给出 minMin / maxMin。'
+    : '- nextDay：由你判断是第二天更自然的时间段，给出 minMin / maxMin。'
+  ),
   '- 如果某个时间点根本不适合发，就让 text 为 null。',
   '',
   '直接返回 JSON，不要解释，不要加代码块：',
-  '{"soon":{"text":["消息1","消息2"],"minMin":10,"maxMin":40},"later":{"text":["消息1"],"minMin":120,"maxMin":360},"nextDay":{"text":["消息1"],"minMin":720,"maxMin":1440}}',
+  (h < 18
+    ? '{"soon":{"text":["消息1","消息2"],"minMin":10,"maxMin":40},"later":{"text":["消息1"],"minMin":120,"maxMin":360}}'
+    : '{"soon":{"text":["消息1","消息2"],"minMin":10,"maxMin":40},"nextDay":{"text":["消息1"],"minMin":720,"maxMin":1440}}'
+  ),
   '',
   '硬性要求：',
   '- text 是数组，1~3条；不发就 text 设 null。',
@@ -43567,22 +43687,12 @@ var userPrompt = [
         pushAt = nowMs + randInt(minMin, maxMin) * 60 * 1000;
 
         if (_bgPushIsInQuiet(pushAt, quietStart, quietEnd)) {
-          if (key === 'soon') {
-            // ★ soon 不拦截：用户刚聊完，显然醒着，23:20 发 soon 很自然
-            // 只做轻微保护：如果 soon 落在凌晨 3 点之后（真的很晚了），才推迟
-            var pushHour = new Date(pushAt).getHours();
-            if (pushHour >= 3 && pushHour < 7) {
-              pushAt = _bgPushMoveOutOfQuiet(pushAt, quietStart, quietEnd) + randInt(5, 35) * 60000;
-            }
-            // 否则：不管静默期，直接发
-          } else {
-            // ★ later 落入静默期 → 直接丢弃
-            // 理由：later 的内容是基于晚上的语境写的（"刚躺下""你洗完澡了吗"）
-            // 推到第二天早上会严重出戏，不如不发
-            // 次日的消息由 nextDay 专门负责，AI 会为"第二天"写合适的内容
-            console.log('[BgPush] later 落入静默期，丢弃（内容基于夜间语境，次日发会出戏）');
-            return;  // 跳过这个 slot
-          }
+          // ★ soon / later 落入静默期 → 直接丢弃
+          // soon 是即时消息，过了静默期就没意义
+          // later 的内容基于当时语境，推到次日会出戏
+          // 次日由 nextDay 专门负责
+          console.log('[BgPush]', key, '落入静默期，丢弃');
+          return;
         }
       }
       if (!pushAt || !isFinite(pushAt)) return;
