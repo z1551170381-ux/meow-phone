@@ -43210,7 +43210,6 @@ function _meowUrlBase64ToUint8Array(base64String) {
   var HOT_MSG_KEY_PREFIX = 'meow_bgpush_hot_';
   var DEBOUNCE_MS = 3000;       // NPC 回复完 3 秒后再生成（等连发都写完）
   var GEN_COOLDOWN = 120000;    // 同一角色 2 分钟内不重复生成
-  var API_TIMEOUT = 30000;
 
   // 关系 → 每日上限
   var BOND_DAILY_MAX = {
@@ -43241,27 +43240,6 @@ function _meowUrlBase64ToUint8Array(base64String) {
   function nowHour() { return new Date().getHours(); }
 
   // ═══════════════════════════════════════════
-  //  读取 API 配置（本地）
-  // ═══════════════════════════════════════════
-
-  function getLocalApiConfig() {
-    try {
-      var raw = localStorage.getItem('meow_phone_api_presets_v1');
-      if (!raw) return null;
-      var data = JSON.parse(raw);
-      var presets = (data && data.presets) || [];
-      var activeId = (data && data.activeId) || '';
-      var preset = presets.find(function(p){ return p.id === activeId; }) || presets[0] || null;
-      if (!preset || !preset.apiKey || !preset.baseUrl) return null;
-      return {
-        baseUrl: String(preset.baseUrl || '').trim().replace(/\/+$/, ''),
-        apiKey:  String(preset.apiKey  || '').trim(),
-        model:   String(preset.model   || '').replace(/^\[.*?\]\s*/g, '').replace(/^\(.*?\)\s*/g, '').trim()
-      };
-    } catch(e) { return null; }
-  }
-
-  // ═══════════════════════════════════════════
   //  收集角色上下文
   // ═══════════════════════════════════════════
 
@@ -43289,8 +43267,8 @@ function _meowUrlBase64ToUint8Array(base64String) {
       return;
     }
 
-    var apiConfig = getLocalApiConfig();
-    if (!apiConfig) return;
+    // 检查 PhoneAI 是否可用
+    if (typeof PhoneAI === 'undefined' || !PhoneAI || typeof PhoneAI.chat !== 'function') return;
 
     var npc = getNpcContext(npcId);
     if (!npc) return;
@@ -43299,6 +43277,8 @@ function _meowUrlBase64ToUint8Array(base64String) {
     // reserved 过滤
     var reserved = {player:1,system:1,user:1,me:1,self:1};
     if (reserved[String(npcId).toLowerCase()]) return;
+
+    _genLocks[npcId] = now;
 
     _genLocks[npcId] = now;
 
@@ -43362,55 +43342,20 @@ function _meowUrlBase64ToUint8Array(base64String) {
     ].join('\n');
 
     try {
-      var isClaudeAPI = apiConfig.baseUrl.indexOf('anthropic') !== -1;
-      var controller = new AbortController();
-      var timeout = setTimeout(function() { controller.abort(); }, API_TIMEOUT);
-      var rawResponse;
+      var result = await PhoneAI.chat({
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+        temperature: 0.85,
+        maxTokens: 500,
+        timeout: 30,
+        channel: 'proactive'
+      });
 
-      if (isClaudeAPI) {
-        var resp = await fetch(apiConfig.baseUrl + '/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiConfig.apiKey,
-            'anthropic-version': '2023-06-01'
-          },
-          body: JSON.stringify({
-            model: apiConfig.model || 'claude-sonnet-4-20250514',
-            system: systemPrompt,
-            messages: [{ role: 'user', content: userPrompt }],
-            max_tokens: 500,
-            temperature: 0.85
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeout);
-        if (!resp.ok) throw new Error('API ' + resp.status);
-        var data = await resp.json();
-        rawResponse = (data.content && data.content[0] && data.content[0].text) || '';
-      } else {
-        var resp2 = await fetch(apiConfig.baseUrl + '/chat/completions', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + apiConfig.apiKey
-          },
-          body: JSON.stringify({
-            model: apiConfig.model || 'gpt-4o-mini',
-            messages: [
-              { role: 'system', content: systemPrompt },
-              { role: 'user', content: userPrompt }
-            ],
-            temperature: 0.85,
-            max_tokens: 500
-          }),
-          signal: controller.signal
-        });
-        clearTimeout(timeout);
-        if (!resp2.ok) throw new Error('API ' + resp2.status);
-        var data2 = await resp2.json();
-        rawResponse = (data2.choices && data2.choices[0] && data2.choices[0].message && data2.choices[0].message.content) || '';
+      if (!result.ok) {
+        throw new Error(result.error || 'PhoneAI 返回失败');
       }
+
+      var rawResponse = String(result.data || '').trim();
 
       // 解析 JSON
       var parsed = parseSlotJSON(rawResponse);
@@ -43518,9 +43463,8 @@ function _meowUrlBase64ToUint8Array(base64String) {
   setTimeout(function() {
     try {
       if (typeof _meowCollectNpcs !== 'function') return;
+      if (typeof PhoneAI === 'undefined' || !PhoneAI || typeof PhoneAI.chat !== 'function') return;
       var npcs = _meowCollectNpcs();
-      var apiConfig = getLocalApiConfig();
-      if (!apiConfig) return;
 
       // 找第一个有开启推送、没有热备消息的角色
       for (var i = 0; i < npcs.length; i++) {
@@ -43712,6 +43656,7 @@ function _meowUrlBase64ToUint8Array(base64String) {
 
   console.log('[BgPush] 聊天后预生成模块已加载 v5');
 })();
+
 
 </script>
 <script>
