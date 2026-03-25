@@ -28968,7 +28968,7 @@ function renderPushSettingsPage(container){
   function buildSummary(cfg){
     const dailyWin = (cfg.daily_windows && cfg.daily_windows[0]) || '11:00-13:00';
     const randomWin = (cfg.random_windows && cfg.random_windows[0]) || '19:30-22:30';
-    return `当前策略：保底 ${cfg.daily_guaranteed_count} 条 / 随机最多 ${cfg.random_max_count} 条 / 冷却 ${cfg.random_cooldown_minutes} 分钟 / 静默 ${cfg.quiet_hours_start}-${cfg.quiet_hours_end} / 保底窗 ${dailyWin} / 随机窗 ${randomWin}`;
+    return `当前策略：保底 ${cfg.daily_guaranteed_count} 条 / 随机最多 ${cfg.random_max_count} 条 / 冷却 ${cfg.random_cooldown_minutes} 分钟 / 静默 ${cfg.quiet_hours_start}-${cfg.quiet_hours_end} / 保底窗 ${dailyWin} / 随机窗 ${randomWin}\n后台推送：每次推送(slot)计 1 次，静默期内 soon/later 自动丢弃`;
   }
 
   async function loadRemote(){
@@ -29046,6 +29046,15 @@ function renderPushSettingsPage(container){
           ${rowInput('静默结束', `<input data-el="ps_quiet_end" type="time" value="${cfg.quiet_hours_end}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
         </div>
 
+        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:10px 2px 4px;">后台热备推送状态</div>
+        <div class="settingSection" id="ps_bgpush_status_area">
+          <div style="padding:10px 12px;font-size:12px;color:var(--ph-text-sub);">加载中…</div>
+        </div>
+        <div style="font-size:11px;line-height:1.6;color:var(--ph-text-dim);padding:4px 2px 0;">
+          <span style="opacity:.7;">说明：每个时段（soon / later / nextDay）算 1 次推送。</span><br>
+          <span style="opacity:.7;">soon / later 落入静默期会被丢弃，nextDay 会推迟到静默结束后。</span>
+        </div>
+
         <div style="display:flex;gap:10px;margin-top:14px;">
           <button data-el="ps_reset" style="flex:1;appearance:none;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.72);color:var(--ph-text);padding:10px 12px;border-radius:14px;font-size:13px;font-weight:700;">恢复默认</button>
           <button data-el="ps_save" style="flex:1;appearance:none;border:none;background:var(--ph-accent,#07c160);color:#fff;padding:10px 12px;border-radius:14px;font-size:13px;font-weight:700;">保存设置</button>
@@ -29104,6 +29113,42 @@ function renderPushSettingsPage(container){
         elSave.textContent = '保存设置';
       }
     });
+
+    // ★ 填充后台热备推送状态
+    try {
+      const statusArea = container.querySelector('#ps_bgpush_status_area');
+      if (statusArea && typeof window._meowBgPushStatus === 'function') {
+        const st = window._meowBgPushStatus();
+        const npcIds = Object.keys(st);
+        if (!npcIds.length) {
+          statusArea.innerHTML = '<div style="padding:10px 12px;font-size:12px;color:var(--ph-text-sub);">暂无角色数据</div>';
+        } else {
+          statusArea.innerHTML = npcIds.map(function(nid) {
+            const n = st[nid];
+            const pct = n.dailyMax > 0 ? Math.min(100, Math.round(n.todaySent / n.dailyMax * 100)) : 0;
+            const barColor = pct >= 100 ? '#e07060' : 'var(--ph-accent,#07c160)';
+            const hotLabel = n.hasHotMsg ? '✓ 已备好' : '✗ 无热备';
+            const hotColor = n.hasHotMsg ? 'var(--ph-accent,#07c160)' : 'var(--ph-text-dim,#aaa)';
+            return '<div style="padding:10px 12px;border-bottom:1px solid var(--ph-sep,rgba(0,0,0,.05));">'
+              + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
+              + '<span style="font-size:13px;font-weight:600;color:var(--ph-text);">' + (n.name || nid) + '</span>'
+              + '<span style="font-size:11px;color:var(--ph-text-sub);">' + n.bond + ' · 上限 ' + n.dailyMax + '次/天</span>'
+              + '</div>'
+              + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">'
+              + '<div style="flex:1;height:6px;border-radius:3px;background:var(--ph-glass,rgba(0,0,0,.06));overflow:hidden;">'
+              + '<div style="width:' + pct + '%;height:100%;border-radius:3px;background:' + barColor + ';transition:width .3s;"></div>'
+              + '</div>'
+              + '<span style="font-size:11px;font-weight:600;color:var(--ph-text-sub);min-width:50px;text-align:right;">' + n.todaySent + ' / ' + n.dailyMax + '</span>'
+              + '</div>'
+              + '<div style="display:flex;align-items:center;gap:12px;font-size:11px;color:var(--ph-text-dim);">'
+              + '<span style="color:' + hotColor + ';">' + hotLabel + '</span>'
+              + (n.hotAge ? '<span>' + n.hotAge + '</span>' : '')
+              + '</div>'
+              + '</div>';
+          }).join('');
+        }
+      }
+    } catch(e) { console.warn('[pushSettings] bgpush status error:', e); }
   }
 
   renderUI(getDraft());
@@ -43425,7 +43470,7 @@ var userPrompt = [
       });
 
       var count = [parsed.soon, parsed.later, parsed.nextDay].filter(function(s){ return s && s.text; }).length;
-      console.log('[BgPush] ✓', npcName, '生成了', count, '条热备消息');
+      console.log('[BgPush] ✓', npcName, '生成了', count, '次热备（每次可含多条连发消息）');
 
     } catch(e) {
       if (e.name === 'AbortError') {
@@ -43547,6 +43592,16 @@ function _meowBgPushBuildLeaveTask() {
   var scheduled = [];
   var hotMeta = {};
 
+  // ★ 读取用户的推送设置（静默时段 + 每日上限）
+  var pushCfg;
+  try {
+    pushCfg = JSON.parse(localStorage.getItem('meow_push_settings_draft_v1') || 'null');
+  } catch(e) { pushCfg = null; }
+  if (!pushCfg) pushCfg = {};
+
+  var quietStart = _parseTimeToMinutes(pushCfg.quiet_hours_start || '23:30');
+  var quietEnd   = _parseTimeToMinutes(pushCfg.quiet_hours_end   || '08:00');
+
   for (var i = 0; i < npcs.length; i++) {
     var npc = npcs[i];
     if (!npc || !npc.id || npc.enableLifePush === false) continue;
@@ -43559,13 +43614,18 @@ function _meowBgPushBuildLeaveTask() {
 
     var trackKey = 'meow_bgpush_track_' + npc.id;
     var track = lsGet(trackKey, { date: '', count: 0 });
-    if (track.date === today && track.count >= max) continue;
+    var todaySent = (track.date === today) ? track.count : 0;
+    if (todaySent >= max) continue;
 
     var nowMs = Date.now();
     var slots = hot.slots;
     var hasAny = false;
+    var slotsScheduled = 0;   // ★ 按"推送次数"计，每个 slot = 1 次
 
     ['soon', 'later', 'nextDay'].forEach(function(key) {
+      // ★ 已达今日上限，不再排入
+      if (todaySent + slotsScheduled >= max) return;
+
       var slot = slots[key];
       if (!slot || !slot.text) return;
 
@@ -43573,11 +43633,31 @@ function _meowBgPushBuildLeaveTask() {
       var pushAt = nowMs + delayMs;
 
       var pushDate = new Date(pushAt);
-      var pushHour = pushDate.getHours();
-      if (pushHour >= 23 || pushHour < 7) {
-        pushDate.setDate(pushDate.getDate() + (pushHour >= 23 ? 1 : 0));
-        pushDate.setHours(randInt(8, 10), randInt(0, 59), 0, 0);
-        pushAt = pushDate.getTime();
+      var pushMinOfDay = pushDate.getHours() * 60 + pushDate.getMinutes();
+
+      // ★ 检查是否落入静默时段
+      var inQuiet = _isMinuteInQuietRange(pushMinOfDay, quietStart, quietEnd);
+
+      if (inQuiet) {
+        if (key === 'soon' || key === 'later') {
+          // ★ soon / later 落入静默期 → 直接丢弃，不推到次日
+          //   理由：这些消息的"时效性"只在当天，推到次日就不自然了
+          console.log('[BgPush] ' + key + ' 落入静默期，跳过（不推次日）');
+          return;
+        }
+        // ★ nextDay 落入静默期 → 推到静默结束后的合理时间
+        var nextDate = new Date(pushAt);
+        // 如果当前已经过了静默开始，推到明天
+        if (pushMinOfDay >= quietStart || pushMinOfDay < quietEnd) {
+          if (pushMinOfDay >= quietStart) {
+            nextDate.setDate(nextDate.getDate() + 1);
+          }
+          var endH = Math.floor(quietEnd / 60);
+          var endM = quietEnd % 60;
+          // 静默结束后 0~120 分钟内随机
+          nextDate.setHours(endH, endM + randInt(0, 120), 0, 0);
+          pushAt = nextDate.getTime();
+        }
       }
 
       scheduled.push({
@@ -43587,13 +43667,15 @@ function _meowBgPushBuildLeaveTask() {
         pushAt: pushAt,
         slot: key
       });
+      slotsScheduled++;
       hasAny = true;
     });
 
     if (hasAny) {
       hotMeta[npc.id] = {
         key: HOT_MSG_KEY_PREFIX + npc.id,
-        generatedAt: Number(hot.generatedAt || 0)
+        generatedAt: Number(hot.generatedAt || 0),
+        slotsScheduled: slotsScheduled   // ★ 记录本次排了几个 slot
       };
     }
   }
@@ -43609,19 +43691,39 @@ function _meowBgPushBuildLeaveTask() {
   };
 }
 
+// ★ 工具函数：解析 "HH:MM" → 分钟数
+function _parseTimeToMinutes(timeStr) {
+  var parts = String(timeStr || '').split(':');
+  return (parseInt(parts[0]) || 0) * 60 + (parseInt(parts[1]) || 0);
+}
+
+// ★ 工具函数：判断某分钟是否在静默区间内（支持跨午夜，如 23:30 - 08:00）
+function _isMinuteInQuietRange(minuteOfDay, quietStartMin, quietEndMin) {
+  if (quietStartMin <= quietEndMin) {
+    // 不跨午夜：如 01:00 - 06:00
+    return minuteOfDay >= quietStartMin && minuteOfDay < quietEndMin;
+  } else {
+    // 跨午夜：如 23:30 - 08:00
+    return minuteOfDay >= quietStartMin || minuteOfDay < quietEndMin;
+  }
+}
+
 function _meowBgPushMarkTrackSuccess(task) {
   if (!task || !task.scheduled || !task.scheduled.length) return;
 
-  var countedNpcs = {};
+  // ★ 按 NPC 统计本次排了几个 slot（每个 slot = 1 次推送事件）
+  var npcSlotCounts = {};
   task.scheduled.forEach(function(msg) {
-    if (!msg || !msg.npcId || countedNpcs[msg.npcId]) return;
-    countedNpcs[msg.npcId] = true;
+    if (!msg || !msg.npcId) return;
+    npcSlotCounts[msg.npcId] = (npcSlotCounts[msg.npcId] || 0) + 1;
+  });
 
-    var trackKey = 'meow_bgpush_track_' + msg.npcId;
+  Object.keys(npcSlotCounts).forEach(function(npcId) {
+    var trackKey = 'meow_bgpush_track_' + npcId;
     var today = dayKey();
     var track = lsGet(trackKey, { date: '', count: 0 });
     if (track.date !== today) track = { date: today, count: 0 };
-    track.count++;
+    track.count += npcSlotCounts[npcId];  // ★ 每个 slot 计 1 次
     track.lastPushAt = Date.now();
     lsSet(trackKey, track);
   });
@@ -43710,7 +43812,7 @@ function _meowBgPushFlushPending(reason) {
 
       queue.shift();
       _meowBgPushSetPendingQueue(queue);
-      console.log('[BgPush] 上传成功，已清热备:', (task.scheduled || []).length, '条', reason || '');
+      console.log('[BgPush] 上传成功，已清热备:', (task.scheduled || []).length, '次推送', reason || '');
       return true;
 
     } catch (e) {
@@ -43725,315 +43827,21 @@ function _meowBgPushFlushPending(reason) {
 }
 
 function onUserLeave() {
-  if (window.__meowBgPushLeaveBusy) return;
-  window.__meowBgPushLeaveBusy = true;
-
-  var uid = 'standalone_main';
-  var today = dayKey();
-
-  var DEFAULT_PUSH_CFG = {
-    enable_push: true,
-    daily_guaranteed_count: 1,
-    random_max_count: 1,
-    random_cooldown_minutes: 240,
-    quiet_hours_start: '23:30',
-    quiet_hours_end: '08:00',
-    daily_windows: ['09:00-13:00'],
-    random_windows: ['16:00-22:30']
-  };
-
-  function safeNum(n, d) {
-    n = Number(n);
-    return isFinite(n) ? n : d;
-  }
-
-  function parseHHMM(str, fallbackMin) {
-    str = String(str || '').trim();
-    var m = str.match(/^(\d{1,2}):(\d{1,2})$/);
-    if (!m) return fallbackMin;
-    var hh = Math.max(0, Math.min(23, Number(m[1])));
-    var mm = Math.max(0, Math.min(59, Number(m[2])));
-    return hh * 60 + mm;
-  }
-
-  function parseWindow(str, fallbackStart, fallbackEnd) {
-    str = String(str || '').trim();
-    var m = str.match(/^(\d{1,2}:\d{1,2})\s*-\s*(\d{1,2}:\d{1,2})$/);
-    if (!m) {
-      return {
-        start: fallbackStart,
-        end: fallbackEnd
-      };
-    }
-    return {
-      start: parseHHMM(m[1], fallbackStart),
-      end: parseHHMM(m[2], fallbackEnd)
-    };
-  }
-
-  function getPushCfg() {
-    try {
-      var raw = JSON.parse(localStorage.getItem('meow_push_settings_draft_v1') || 'null') || {};
-      return {
-        enable_push: raw.enable_push !== false,
-        daily_guaranteed_count: safeNum(raw.daily_guaranteed_count, DEFAULT_PUSH_CFG.daily_guaranteed_count),
-        random_max_count: safeNum(raw.random_max_count, DEFAULT_PUSH_CFG.random_max_count),
-        random_cooldown_minutes: safeNum(raw.random_cooldown_minutes, DEFAULT_PUSH_CFG.random_cooldown_minutes),
-        quiet_hours_start: raw.quiet_hours_start || DEFAULT_PUSH_CFG.quiet_hours_start,
-        quiet_hours_end: raw.quiet_hours_end || DEFAULT_PUSH_CFG.quiet_hours_end,
-        daily_windows: Array.isArray(raw.daily_windows) && raw.daily_windows.length ? raw.daily_windows : DEFAULT_PUSH_CFG.daily_windows.slice(),
-        random_windows: Array.isArray(raw.random_windows) && raw.random_windows.length ? raw.random_windows : DEFAULT_PUSH_CFG.random_windows.slice()
-      };
-    } catch (e) {
-      return JSON.parse(JSON.stringify(DEFAULT_PUSH_CFG));
-    }
-  }
-
-  function isMinuteInRange(minute, start, end) {
-    if (start === end) return true;
-    if (start < end) return minute >= start && minute < end;
-    return minute >= start || minute < end;
-  }
-
-  function localDayStartMs(ts) {
-    var d = new Date(ts);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime();
-  }
-
-  function minuteOfDay(ts) {
-    var d = new Date(ts);
-    return d.getHours() * 60 + d.getMinutes();
-  }
-
-  function isInQuiet(ts, quietStart, quietEnd) {
-    return isMinuteInRange(minuteOfDay(ts), quietStart, quietEnd);
-  }
-
-  function moveOutOfQuiet(ts, quietStart, quietEnd) {
-    if (!isInQuiet(ts, quietStart, quietEnd)) return ts;
-
-    var dayStart = localDayStartMs(ts);
-    var endToday = dayStart + quietEnd * 60000;
-
-    if (quietStart < quietEnd) {
-      if (ts < endToday) return endToday;
-      return ts;
-    }
-
-    var nextDayStart = dayStart + 24 * 60 * 60000;
-    return nextDayStart + quietEnd * 60000;
-  }
-
-  function randomBetweenMinutes(startMin, endMin) {
-    startMin = Math.max(0, Math.min(1439, safeNum(startMin, 0)));
-    endMin = Math.max(0, Math.min(1439, safeNum(endMin, startMin)));
-    if (endMin < startMin) endMin = startMin;
-    return randInt(startMin, endMin);
-  }
-
-  function randomTimeInWindow(dayStartMs, windowObj) {
-    var startMin = safeNum(windowObj && windowObj.start, 9 * 60);
-    var endMin = safeNum(windowObj && windowObj.end, 13 * 60);
-
-    if (startMin === endMin) {
-      return dayStartMs + startMin * 60000;
-    }
-
-    if (startMin < endMin) {
-      return dayStartMs + randomBetweenMinutes(startMin, endMin - 1) * 60000;
-    }
-
-    var lenA = 1440 - startMin;
-    var lenB = endMin;
-    var total = lenA + lenB;
-    var pick = randInt(0, Math.max(0, total - 1));
-    if (pick < lenA) return dayStartMs + (startMin + pick) * 60000;
-    return dayStartMs + (pick - lenA) * 60000;
-  }
-
-  function normalizeSlotText(raw) {
-    if (Array.isArray(raw)) {
-      return raw.map(function(x) {
-        return String(x || '').trim();
-      }).filter(Boolean).slice(0, 3);
-    }
-    var s = String(raw || '').trim();
-    return s ? [s] : [];
-  }
-
-  function scheduleSoonOrLater(nowMs, slot, quietStart, quietEnd) {
-    var minMin = Math.max(1, safeNum(slot && slot.minMin, 10));
-    var maxMin = Math.max(minMin, safeNum(slot && slot.maxMin, minMin));
-    var pushAt = nowMs + randInt(minMin, maxMin) * 60000;
-    pushAt = moveOutOfQuiet(pushAt, quietStart, quietEnd);
-    return pushAt;
-  }
-
-  function scheduleNextDay(nowMs, cfg, quietStart, quietEnd) {
-    var dailyWindow = parseWindow(
-      (cfg.daily_windows && cfg.daily_windows[0]) || '09:00-13:00',
-      9 * 60,
-      13 * 60
-    );
-
-    var tomorrowStart = localDayStartMs(nowMs) + 24 * 60 * 60000;
-    var pushAt = randomTimeInWindow(tomorrowStart, dailyWindow);
-
-    pushAt = moveOutOfQuiet(pushAt, quietStart, quietEnd);
-
-    // nextDay 必须锁在“明天”这一天，不能漂到后天
-    var tomorrowDateKey = (function(ts) {
-      var d = new Date(ts);
-      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    })(tomorrowStart);
-
-    var actualDateKey = (function(ts) {
-      var d = new Date(ts);
-      return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
-    })(pushAt);
-
-    if (actualDateKey !== tomorrowDateKey) {
-      // 如果静默修正把它推偏了，就强制拉回明天保底窗起点后 5~45 分钟内
-      var dayStart = tomorrowStart;
-      var baseMin = safeNum(dailyWindow.start, 9 * 60);
-      pushAt = dayStart + (baseMin + randInt(5, 45)) * 60000;
-      if (isInQuiet(pushAt, quietStart, quietEnd)) {
-        // 极端情况再兜一次：固定到明天静默结束后 5 分钟
-        pushAt = dayStart + quietEnd * 60000 + 5 * 60000;
-      }
-    }
-
-    return pushAt;
-  }
-
   try {
-    var cfg = getPushCfg();
-    if (cfg.enable_push === false) {
-      window.__meowBgPushLeaveBusy = false;
-      return;
+    var queue = _meowBgPushGetPendingQueue();
+
+    // 先重试旧任务；有旧任务时不再为同一份热备重复建新任务
+    if (!queue.length) {
+      var task = _meowBgPushBuildLeaveTask();
+      if (task) {
+        _meowBgPushEnqueueTask(task);
+        console.log('[BgPush] 已入队待上传:', task.scheduled.length, '条');
+      }
     }
 
-    var quietStart = parseHHMM(cfg.quiet_hours_start, 23 * 60 + 30);
-    var quietEnd = parseHHMM(cfg.quiet_hours_end, 8 * 60);
+    _meowBgPushFlushPending('leave');
 
-    var npcs = typeof _meowCollectNpcs === 'function' ? _meowCollectNpcs() : [];
-    var nowMs = Date.now();
-    var scheduled = [];
-    var hotNpcIdsToClear = [];
-    var countedNpcIds = {};
-
-    for (var i = 0; i < npcs.length; i++) {
-      var npc = npcs[i];
-      if (!npc || !npc.id || npc.enableLifePush === false) continue;
-
-      var hot = lsGet(HOT_MSG_KEY_PREFIX + npc.id, null);
-      if (!hot || !hot.slots) continue;
-
-      var bond = String(hot.bond || npc.bond || '普通');
-      var max = BOND_DAILY_MAX[bond] || 2;
-
-      var trackKey = 'meow_bgpush_track_' + npc.id;
-      var track = lsGet(trackKey, { date: '', count: 0 });
-
-      if (track.date === today && track.count >= max) {
-        continue;
-      }
-
-      var npcRows = [];
-      var slots = hot.slots || {};
-
-      ['soon', 'later', 'nextDay'].forEach(function(key) {
-        var slot = slots[key];
-        if (!slot) return;
-
-        var texts = normalizeSlotText(slot.text);
-        if (!texts.length) return;
-
-        var pushAt = 0;
-
-        if (key === 'nextDay') {
-          pushAt = scheduleNextDay(nowMs, cfg, quietStart, quietEnd);
-        } else {
-          pushAt = scheduleSoonOrLater(nowMs, slot, quietStart, quietEnd);
-        }
-
-        if (!pushAt || !isFinite(pushAt)) return;
-
-        npcRows.push({
-          npcId: npc.id,
-          npcName: hot.npcName || npc.name || npc.id,
-          text: JSON.stringify(texts),
-          pushAt: pushAt,
-          slot: key
-        });
-      });
-
-      if (!npcRows.length) continue;
-
-      for (var r = 0; r < npcRows.length; r++) {
-        scheduled.push(npcRows[r]);
-      }
-
-      hotNpcIdsToClear.push(npc.id);
-      countedNpcIds[npc.id] = true;
-    }
-
-    if (!scheduled.length) {
-      window.__meowBgPushLeaveBusy = false;
-      return;
-    }
-
-    console.log('[BgPush] 准备上传热备:', scheduled.map(function(x) {
-      return {
-        npcId: x.npcId,
-        slot: x.slot,
-        pushAt: new Date(x.pushAt).toLocaleString()
-      };
-    }));
-
-    fetch('/api/schedule-push', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ uid: uid, messages: scheduled }),
-      keepalive: true
-    })
-    .then(function(resp) {
-      return resp.json().catch(function() {
-        return { ok: resp.ok };
-      }).then(function(data) {
-        if (!resp.ok || !data || data.ok !== true) {
-          throw new Error((data && data.error) || ('HTTP ' + resp.status));
-        }
-        return data;
-      });
-    })
-    .then(function(data) {
-      for (var i = 0; i < hotNpcIdsToClear.length; i++) {
-        lsSet(HOT_MSG_KEY_PREFIX + hotNpcIdsToClear[i], null);
-      }
-
-      Object.keys(countedNpcIds).forEach(function(npcId) {
-        var trackKey = 'meow_bgpush_track_' + npcId;
-        var track = lsGet(trackKey, { date: '', count: 0 });
-        var today2 = dayKey();
-        if (track.date !== today2) track = { date: today2, count: 0 };
-        track.count++;
-        track.lastPushAt = Date.now();
-        lsSet(trackKey, track);
-      });
-
-      console.log('[BgPush] 上传成功，已清热备:', (data && data.inserted) || scheduled.length, '条');
-    })
-    .catch(function(err) {
-      console.warn('[BgPush] 上传失败，保留热备，下次重试:', err);
-    })
-    .finally(function() {
-      window.__meowBgPushLeaveBusy = false;
-    });
-
-  } catch (e) {
-    window.__meowBgPushLeaveBusy = false;
+  } catch(e) {
     console.warn('[BgPush] onUserLeave error:', e);
   }
 }
@@ -44094,6 +43902,7 @@ setTimeout(function() {
         bond: bond,
         todaySent: track.date === today ? track.count : 0,
         dailyMax: BOND_DAILY_MAX[bond] || 2,
+        countUnit: '推送次数(slot)',  // ★ 明确计数单位
         hasHotMsg: !!(hot && hot.slots),
         hotSlots: hot ? hot.slots : null,
         hotAge: hot ? Math.round((Date.now() - (hot.generatedAt || 0)) / 60000) + '分钟前' : null
