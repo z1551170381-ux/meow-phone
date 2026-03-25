@@ -43580,8 +43580,11 @@ function _meowUrlBase64ToUint8Array(base64String) {
         console.log('[BgPush] fetch 发送', scheduled.length, '条定时消息');
       }
 
-      // 预扣额度
+      // 预扣额度：每个角色每次切走只算 1 次（不管几个 slot/几句连发）
+      var countedNpcs = {};
       scheduled.forEach(function(msg) {
+        if (countedNpcs[msg.npcId]) return; // 同一角色只算一次
+        countedNpcs[msg.npcId] = true;
         var trackKey = 'meow_bgpush_track_' + msg.npcId;
         var today2 = dayKey();
         var track = lsGet(trackKey, { date: '', count: 0 });
@@ -43670,6 +43673,7 @@ function _meowUrlBase64ToUint8Array(base64String) {
 
   console.log('[BgPush] 聊天后预生成模块已加载 v5');
 })();
+
 
 
 </script>
