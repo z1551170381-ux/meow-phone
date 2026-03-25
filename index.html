@@ -30423,13 +30423,14 @@ function bindPageScroll(){
 
         // ★ LifeEngine：每5分钟 tick 所有有状态的角色
         try{
+          var _lifeReserved = {player:1,system:1,user:1,me:1,self:1,chat:1,chatdetail:1,contacts:1,discover:1,settings:1,moments:1,forum:1,browser:1,weather:1,sms:1,calendar:1,shop:1,map:1,home:1,phone:1,app:1,null:1,undefined:1};
           var _lifeTickFn = function(){
             try{
               var prefix = _phUID() + '_charstate_';
               Object.keys(localStorage).forEach(function(k){
                 if (k.indexOf(prefix) === 0){
                   var npcId = k.slice(prefix.length);
-                  if (npcId) LifeEngine.tick(npcId);
+                  if (npcId && !_lifeReserved[npcId.toLowerCase()]) LifeEngine.tick(npcId);
                 }
               });
             }catch(e){ console.warn('[LifeEngine] global tick error:', e); }
@@ -31054,6 +31055,9 @@ function _getOnlineFallbackText(npcId, kind, atTs){
 }
 function _insertOnlineProactiveMessage(npcId, text, opts){
   try{
+    // ★ 安全过滤：禁止给 player/system 等保留 ID 插入消息
+    var _insReserved = {player:1,system:1,user:1,me:1,self:1};
+    if (_insReserved[String(npcId||'').toLowerCase()]) return null;
     var branch = (opts && opts.branch) || (typeof _getActiveBranch === 'function' ? _getActiveBranch(npcId) : 'main');
     var kind = (opts && opts.kind) || 'random';
     var now = Date.now();
