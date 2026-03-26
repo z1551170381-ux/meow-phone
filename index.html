@@ -20905,10 +20905,12 @@ const npc = _wxGetChatTargetMeta(npcId);
       // ===== _cleanOfflineAIResponse：清理离线回复中的模型思考泄露 =====
       function _cleanOfflineAIResponse(text){
         var s = String(text || '');
-        // ★ 清理 AI 输出的 CSS 类名标签（任何引号变体 + wxNovelAside + > → 删除）
-        s = s.replace(/\W?wxNovel[A-Za-z]+\W?\s*>?\s*/g, '');
-        s = s.replace(/\W?rp(?:Action|Dialog|Speaker|Text)\W?\s*>?\s*/g, '');
-        // 清理 HTML 标签残留
+        // ★ 核弹级清理：indexOf 检测 + \S* 正则，不依赖任何引号匹配
+        while(s.indexOf('wxNovelAside') !== -1){ s = s.replace(/\S*wxNovelAside\S*\s*>?\s*/g, ''); }
+        while(s.indexOf('wxNovelDialog') !== -1){ s = s.replace(/\S*wxNovelDialog\S*\s*>?\s*/g, ''); }
+        while(s.indexOf('wxNovelP') !== -1){ s = s.replace(/\S*wxNovelP\S*\s*>?\s*/g, ''); }
+        s = s.replace(/\S*rpAction\S*\s*>?\s*/g, '');
+        s = s.replace(/\S*rpDialog\S*\s*>?\s*/g, '');
         s = s.replace(/<\/?(?:span|em|p|div)[^>]*>/g, '');
         // 清理 Gemini 常见的思考泄露模式
         s = s.replace(/^\s*\*(?:字数|扩充|检查|修改|确认|时间检查|计划|思考|分析|调整|注意|提醒|总结|回顾|补充|完善|润色)\*\s*[:：]?[^\n]*$/gm, '');
@@ -32558,22 +32560,32 @@ function _autoParagraphizeOfflineText(text){
 }
 
 function _cleanOfflineDisplayText(text){
-  return String(text || '').trim()
-    // ★ 最高优先：清理 AI 输出的 wxNovelAside/rpAction 等标签（任何引号变体）
-    .replace(/\W?wxNovel[A-Za-z]+\W?\s*>?\s*/g, '')
-    .replace(/\W?rp(?:Action|Dialog|Speaker|Text)\W?\s*>?\s*/g, '')
-    // 清理独立成行的残留
-    .replace(/^\s*\W?rp[A-Za-z]+\W?\s*$/gm, '')
-    .replace(/^\s*\W?wx[A-Za-z]+\W?\s*$/gm, '')
-    .replace(/^>\s*/gm, '')
-    .replace(/<\/?em[^>]*>/g, '')
-    .replace(/<\/?span[^>]*>/g, '')
-    .replace(/<\/?p[^>]*>/g, '')
-    .replace(/<\/?div[^>]*>/g, '')
-    .replace(/class="[^"]*"/g, '')
-    .replace(/\r\n?/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .trim();
+  var s = String(text || '').trim();
+  // ★ 核弹级清理：只要包含 wxNovelAside 这个词，把它和周围的引号/括号/> 全删
+  while(s.indexOf('wxNovelAside') !== -1){
+    s = s.replace(/\S*wxNovelAside\S*\s*>?\s*/g, '');
+  }
+  while(s.indexOf('wxNovelDialog') !== -1){
+    s = s.replace(/\S*wxNovelDialog\S*\s*>?\s*/g, '');
+  }
+  while(s.indexOf('wxNovelP') !== -1){
+    s = s.replace(/\S*wxNovelP\S*\s*>?\s*/g, '');
+  }
+  // rpAction/rpDialog 同理
+  s = s.replace(/\S*rpAction\S*\s*>?\s*/g, '');
+  s = s.replace(/\S*rpDialog\S*\s*>?\s*/g, '');
+  s = s.replace(/\S*rpSpeaker\S*\s*>?\s*/g, '');
+  s = s.replace(/\S*rpText\S*\s*>?\s*/g, '');
+  // 清理残留
+  s = s.replace(/^>\s*/gm, '');
+  s = s.replace(/<\/?em[^>]*>/g, '');
+  s = s.replace(/<\/?span[^>]*>/g, '');
+  s = s.replace(/<\/?p[^>]*>/g, '');
+  s = s.replace(/<\/?div[^>]*>/g, '');
+  s = s.replace(/class="[^"]*"/g, '');
+  s = s.replace(/\r\n?/g, '\n');
+  s = s.replace(/\n{3,}/g, '\n\n');
+  return s.trim();
 }
 
 function _formatOfflineNovelHTML(text){
