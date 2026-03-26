@@ -21106,6 +21106,27 @@ const npc = _wxGetChatTargetMeta(npcId);
           }
         }catch(e){}
 
+        // ★ 时间锚点注入：在最后一条 user 消息内容前加当前时间
+        // 解决"上下文是凌晨但用户在傍晚回复"时 AI 被旧语境带跑的问题
+        try {
+          if (out.length >= 2) {
+            var _now = new Date();
+            var _hh = _now.getHours();
+            var _mm = String(_now.getMinutes()).padStart(2, '0');
+            var _phase = _hh < 6 ? '凌晨' : _hh < 9 ? '早上' : _hh < 12 ? '上午' : _hh < 14 ? '中午' : _hh < 17 ? '下午' : _hh < 19 ? '傍晚' : _hh < 22 ? '晚上' : '深夜';
+            var timeAnchor = '[当前时间：' + _phase + _hh + ':' + _mm + '。请以此刻为准回复，不要沿用之前对话的旧时间。]';
+
+            for (var _ti = out.length - 1; _ti >= 0; _ti--) {
+              if (out[_ti].role === 'user') {
+                if (typeof out[_ti].content === 'string') {
+                  out[_ti].content = timeAnchor + '\n' + out[_ti].content;
+                }
+                break;
+              }
+            }
+          }
+        } catch(e) {}
+
         return out;
       }
 
