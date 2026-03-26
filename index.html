@@ -21901,9 +21901,9 @@ const npc = _wxGetChatTargetMeta(npcId);
         var affinityVal = typeof charEx.affinity === 'number' ? charEx.affinity : 20;
         var affinityPct = Math.max(0, Math.min(100, (affinityVal + 100) / 2));
 
-        // 好感心形颜色
+        // 好感心形颜色+填充
         function _heartColor(v) {
-          if (v < -30) return '#aaa';
+          if (v < -30) return '#ccc';
           if (v < 0)   return '#c0a0a0';
           if (v < 30)  return '#d4a0a0';
           if (v < 50)  return '#e08080';
@@ -21912,7 +21912,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           return '#e02060';
         }
         var heartColor = _heartColor(affinityVal);
-        var heartFillPct = affinityPct;
+        var heartFillY = 22 - affinityPct * 0.22; // 液面Y位置
 
         // 关系标签颜色
         var bondLabelColors = {
@@ -21926,6 +21926,9 @@ const npc = _wxGetChatTargetMeta(npcId);
           '同学':'rgba(59,130,246,.1)', '前任':'rgba(0,0,0,.06)', '室友':'rgba(16,185,129,.1)'
         };
 
+        // 内联心形SVG（小尺寸，隐晦）
+        var heartSvg = `<svg viewBox="0 0 24 22" width="16" height="15" style="vertical-align:middle;flex-shrink:0;"><defs><clipPath id="hc_${esc(npcId)}"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></clipPath></defs><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="rgba(0,0,0,.08)" stroke="${heartColor}" stroke-width="0.8"/><g clip-path="url(#hc_${esc(npcId)})"><rect x="0" y="${heartFillY}" width="24" height="${22 - heartFillY}" fill="${heartColor}" opacity="0.8"/><path d="M0 ${heartFillY} Q6 ${heartFillY - 1.2} 12 ${heartFillY} T24 ${heartFillY}" fill="${heartColor}" opacity="0.5"/></g></svg>`;
+
         body.innerHTML = `<div class="wxStateDetailWrap">
 
           <!-- Hero -->
@@ -21934,39 +21937,10 @@ const npc = _wxGetChatTargetMeta(npcId);
             <div style="flex:1;min-width:0;">
               <div class="wxSDName">${esc(npc.name)}</div>
               <div class="wxSDMeta">
+                ${heartSvg}
                 <span class="wxSPCBond" style="color:${bondLabelColors[bondLabelNew]||'#888'};background:${bondLabelBgs[bondLabelNew]||'rgba(0,0,0,.05)'};">${esc(bondLabelNew)}</span>
                 <span style="font-size:12px;color:var(--ph-text-sub);">${moodEmoji[s.moodText||'平静']||'😌'} ${esc(s.moodText||'平静')}</span>
               </div>
-            </div>
-          </div>
-
-          <!-- ★ 好感度心形 -->
-          <div style="margin:0 14px 10px;padding:10px 14px;background:var(--ph-glass, rgba(255,255,255,.5));border-radius:14px;border:1px solid var(--ph-glass-border, rgba(0,0,0,.06));">
-            <div style="display:flex;align-items:center;gap:10px;">
-              <div style="position:relative;width:28px;height:26px;flex-shrink:0;">
-                <svg viewBox="0 0 24 22" width="28" height="26" style="position:absolute;top:0;left:0;">
-                  <defs>
-                    <clipPath id="heartClip_${esc(npcId)}">
-                      <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>
-                    </clipPath>
-                  </defs>
-                  <!-- 空心底 -->
-                  <path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="rgba(0,0,0,.06)" stroke="${heartColor}" stroke-width="0.5"/>
-                  <!-- 液体填充（从底部往上） -->
-                  <g clip-path="url(#heartClip_${esc(npcId)})">
-                    <rect x="0" y="${22 - heartFillPct * 0.22}" width="24" height="${heartFillPct * 0.22}" fill="${heartColor}" opacity="0.85"/>
-                    <!-- 水面波纹 -->
-                    <path d="M0 ${22 - heartFillPct * 0.22} Q4 ${20.5 - heartFillPct * 0.22} 8 ${22 - heartFillPct * 0.22} T16 ${22 - heartFillPct * 0.22} T24 ${22 - heartFillPct * 0.22}" fill="${heartColor}" opacity="0.6"/>
-                  </g>
-                </svg>
-              </div>
-              <div style="flex:1;">
-                <div style="font-size:11px;color:var(--ph-text-sub);margin-bottom:3px;">好感度</div>
-                <div style="height:4px;border-radius:2px;background:rgba(0,0,0,.06);overflow:hidden;">
-                  <div style="height:100%;width:${affinityPct}%;border-radius:2px;background:${heartColor};transition:width .3s;"></div>
-                </div>
-              </div>
-              <span style="font-size:12px;font-weight:600;color:${heartColor};">${affinityVal < -30 ? '厌恶' : affinityVal < -10 ? '反感' : affinityVal < 10 ? '冷淡' : affinityVal < 30 ? '一般' : affinityVal < 50 ? '友好' : affinityVal < 70 ? '亲近' : affinityVal < 85 ? '亲密' : '深厚'}</span>
             </div>
           </div>
 
