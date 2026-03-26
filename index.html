@@ -26300,7 +26300,8 @@ const npc = _wxGetChatTargetMeta(npcId);
             try{ sysP = buildSystemPrompt(npcId); }catch(e){}
             // 追加通话专属覆盖指令（放在最后权重最高，覆盖格式要求）
             sysP += '\n\n【⚠ 当前正在进行'+(isVideo?'视频':'语音')+'通话，以下规则覆盖上方所有格式要求】'
-              + '\n- 口语化说话，每次1~3句，简短自然，像真实打电话一样'
+              + '\n- 口语化说话，每次2~5句，自然流畅，像真实打电话一样'
+              + '\n- 可以多说一点，不用太惜字如金，正常人打电话不会每次只蹦一句'
               + '\n- 禁止输出 ||| 分隔符，禁止输出 [状态:] [属性:] 等任何标记'
               + '\n- 禁止括号动作描写，禁止表情符号，只说话'
               + '\n- 可以用语气词：嗯、啊、哈哈、诶、喂、哦'
@@ -26310,7 +26311,7 @@ const npc = _wxGetChatTargetMeta(npcId);
             var result = await PhoneAI.chat({
               system: sysP,
               messages: recentMsgs.slice(-12),
-              temperature: 0.88, maxTokens: 300, timeout: 50
+              temperature: 0.88, maxTokens: 500, timeout: 50
             });
 
             if(ended) return;
@@ -26329,9 +26330,18 @@ const npc = _wxGetChatTargetMeta(npcId);
               if(va && va.apiUrl && va.apiKey){
                 setWave('active');
                 try{
+                  await new Promise(function(r){ setTimeout(r, 200); });
                   var ttsR = await _callTTSApi(reply, npcId);
-                  if(ttsR.ok && !ended) await _playCallAudio(ttsR.audioUrl);
-                }catch(e){}
+                  if(ttsR.ok && !ended){
+                    await _playCallAudio(ttsR.audioUrl);
+                  } else if(!ttsR.ok) {
+                    console.warn('[Call] TTS failed:', ttsR.error);
+                    await new Promise(function(r){ setTimeout(r, Math.min(3000, reply.length*100+500)); });
+                  }
+                }catch(e){
+                  console.warn('[Call] TTS/playback error:', e);
+                  await new Promise(function(r){ setTimeout(r, 1000); });
+                }
               } else {
                 setWave('active');
                 await new Promise(function(r){ setTimeout(r, Math.min(3000, reply.length*120+500)); });
@@ -26345,7 +26355,7 @@ const npc = _wxGetChatTargetMeta(npcId);
             aiProcessing = false;
             if(!ended){
               setStatus('通话中'); setWave('');
-              if(interactionMode==='auto' && connected) setTimeout(function(){ startAutoListen(); }, 800);
+              if(interactionMode==='auto' && connected) setTimeout(function(){ startAutoListen(); }, 1200);
             }
           }
         }
@@ -26354,12 +26364,30 @@ const npc = _wxGetChatTargetMeta(npcId);
           return new Promise(function(resolve){
             if(ended){ resolve(); return; }
             try{
-              if(currentAudio){ try{currentAudio.pause();}catch(e){} currentAudio=null; }
-              var audio = new Audio(url);
+              if(currentAudio){ try{currentAudio.pause(); currentAudio.src=''; currentAudio.load();}catch(e){} currentAudio=null; }
+              var audio = new Audio();
               currentAudio = audio;
-              audio.onended = function(){ if(currentAudio===audio) currentAudio=null; resolve(); };
-              audio.onerror = function(){ if(currentAudio===audio) currentAudio=null; resolve(); };
-              audio.play().catch(function(){ if(currentAudio===audio) currentAudio=null; resolve(); });
+              var _blobUrl = url;
+
+              audio.onended = function(){
+                if(currentAudio===audio) currentAudio=null;
+                try{ if(_blobUrl && _blobUrl.indexOf('blob:')===0) URL.revokeObjectURL(_blobUrl); }catch(e){}
+                setTimeout(resolve, 300);
+              };
+              audio.onerror = function(e){
+                console.warn('[Call] audio playback error:', e);
+                if(currentAudio===audio) currentAudio=null;
+                try{ if(_blobUrl && _blobUrl.indexOf('blob:')===0) URL.revokeObjectURL(_blobUrl); }catch(e2){}
+                resolve();
+              };
+
+              audio.src = url;
+              audio.play().catch(function(e){
+                console.warn('[Call] audio.play() failed:', e);
+                if(currentAudio===audio) currentAudio=null;
+                try{ if(_blobUrl && _blobUrl.indexOf('blob:')===0) URL.revokeObjectURL(_blobUrl); }catch(e2){}
+                resolve();
+              });
             }catch(e){ currentAudio=null; resolve(); }
           });
         }
