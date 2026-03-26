@@ -245,6 +245,13 @@
     #meow-phone-root .wxChatContent {
       padding-bottom: 60px !important;
     }
+    /* ── 小说模式：确保背景色铺满移动端 ── */
+    #meow-phone-root .wxChatDetailWrap.offlineNovelMode {
+      background: linear-gradient(180deg, rgba(251,248,242,1), rgba(244,238,229,1)) !important;
+    }
+    #meow-phone-root .wxOfflineWrap.offlineNovelMode {
+      background-color: rgba(248,243,235,1) !important;
+    }
   `;
   document.head.appendChild(style);
 
@@ -4577,12 +4584,14 @@ case '🍪': return s('<circle cx="12" cy="12" r="10"/><circle cx="8" cy="9" r="
 #${ID} .wxChatDetailWrap.offlineNovelMode{
   background:linear-gradient(180deg, rgba(251,248,242,.96), rgba(244,238,229,.98));
   min-height:100%; min-height:100vh; min-height:100dvh;
+  height:100%;
 }
 #${ID} .wxOfflineWrap.offlineNovelMode{
   position:relative;
-  background-color:rgba(248,243,235,.92);
+  background-color:rgba(248,243,235,.92) !important;
   background-blend-mode:screen;
-  min-height:100%; min-height:100vh; min-height:100dvh;
+  min-height:100% !important; min-height:100vh !important; min-height:100dvh !important;
+  flex:1;
 }
 #${ID} .wxOfflineWrap.offlineNovelMode::before{
   content:""; position:absolute; inset:0; pointer-events:none; z-index:0;
@@ -20893,6 +20902,19 @@ const npc = _wxGetChatTargetMeta(npcId);
       window.PhoneAI = PhoneAI;
 
       // ===== parseMultiMessages：解析 ||| 分隔的多条消息 =====
+      // ===== _cleanOfflineAIResponse：清理离线回复中的模型思考泄露 =====
+      function _cleanOfflineAIResponse(text){
+        var s = String(text || '');
+        // 清理 Gemini 常见的思考泄露模式
+        s = s.replace(/^\s*\*(?:字数|扩充|检查|修改|确认|时间检查|计划|思考|分析|调整|注意|提醒|总结|回顾|补充|完善|润色)\*\s*[:：]?[^\n]*$/gm, '');
+        // 清理 "引号，没有HTML标签。" 等格式自述
+        s = s.replace(/^\s*(?:引号|星号|格式|标签)[，,]?\s*(?:没有|不含|不用|无).*$/gm, '');
+        // 清理 "好的，我来..." "让我..." 等 AI 自述
+        s = s.replace(/^\s*(?:好的|OK|嗯|让我|我来|接下来我)[，,].{0,30}(?:写|继续|扩充|补充|展开).*$/gm, '');
+        // 清理多余空行
+        s = s.replace(/\n{3,}/g, '\n\n').trim();
+        return s || '…';
+      }
       function parseMultiMessages(responseText){
         var raw = String(responseText || '').trim();
         if (!raw) return [raw || '…'];
@@ -21142,21 +21164,18 @@ const npc = _wxGetChatTargetMeta(npcId);
           }
         } catch(e) {}
 
-        // ★★★ 离线模式：把字数要求注入到最后一条 user 消息里（LLM 对最后 user 消息注意力最高）
+        // ★★★ 离线模式：简短提示注入到最后一条 user 消息（不用 OOC 避免触发模型思考泄露）
         try {
           if (mode === 'offline') {
             var _scCtx = (typeof _loadSceneData === 'function') ? _loadSceneData(npcId) : null;
             var _wcCtx = _scCtx ? (parseInt(_scCtx.wordCount) || 0) : 0;
-            var _wcHint = '';
             if (_wcCtx > 0) {
-              _wcHint = '\n[OOC: 请写约' + _wcCtx + '字的回复，充分展开描写。]';
-            } else {
-              _wcHint = '\n[OOC: 请写充实详细的回复，像小说正文一样展开。]';
-            }
-            for (var _wi = out.length - 1; _wi >= 0; _wi--) {
-              if (out[_wi].role === 'user' && typeof out[_wi].content === 'string') {
-                out[_wi].content += _wcHint;
-                break;
+              // 只在有字数要求时注入，且用最简短的方式
+              for (var _wi = out.length - 1; _wi >= 0; _wi--) {
+                if (out[_wi].role === 'user' && typeof out[_wi].content === 'string') {
+                  out[_wi].content += '\n（请详细描写，约' + _wcCtx + '字）';
+                  break;
+                }
               }
             }
           }
@@ -21708,15 +21727,31 @@ const npc = _wxGetChatTargetMeta(npcId);
         }catch(e){ console.error('[online-bridge] error:', e); }
 
         if (_isOfflineMode){
-          // ★ 简洁的离线格式指令（接近原版，不堆指令避免混淆模型）
+          // ★ 简洁的离线格式指令，按子模式区分
           var _offWcFmt = 0;
-          try{ var _scFmt = _loadSceneData(npcId); _offWcFmt = parseInt(_scFmt.wordCount) || 0; }catch(e){}
+          var _offModeFmt = 'stage';
+          try{ var _scFmt = _loadSceneData(npcId); _offWcFmt = parseInt(_scFmt.wordCount) || 0; _offModeFmt = String(_scFmt.offlineMode || 'stage'); }catch(e){}
           var _wcLine = _offWcFmt > 0
             ? '- 篇幅要求：本次回复约' + _offWcFmt + '字，充分展开环境、动作、心理、对话，不要草草结束'
-            : '- 篇幅充实自然，像小说正文一样展开描写，不要只写一两句';
-          parts.push('---\n【回复格式（线下模式）】\n直接写小说段落，无需任何特殊标记。\n- 旁白/动作/环境：用 *星号包裹*\n- 台词：用"引号"\n- 不要输出任何代码、标签或符号，只有纯文字\n' + _wcLine + '\n- 禁止使用 ||| 分隔符，一次完整输出\n\n【状态同步（末尾必加）】\n[状态:穿着=...,正在=...,心声=...]\n[属性:心情+5]（只写变化的）' + _attrHint + _customEntryHint);
+            : '- 篇幅充实自然，展开描写，不要只写一两句';
 
-          console.log('[OfflinePrompt] mode=stage wordCount=' + _offWcFmt);
+          var _fmtBlock = '---\n【回复格式（线下模式）】\n';
+          if (_offModeFmt === 'novel'){
+            _fmtBlock += '直接写小说段落。对话嵌入叙述中，用"引号"标注。\n';
+          } else if (_offModeFmt === 'game'){
+            _fmtBlock += '视觉小说风格，简洁有镜头感，适合逐句推进。\n';
+          } else {
+            _fmtBlock += '舞台剧格式：动作/旁白用 *星号包裹*，台词用"引号"，动作和台词分行写。\n';
+          }
+          _fmtBlock += '- 不要输出任何代码、标签或符号，只有纯文字\n';
+          _fmtBlock += '- 不要输出思考过程、字数统计、扩充说明等元信息\n';
+          _fmtBlock += _wcLine + '\n';
+          _fmtBlock += '- 禁止使用 ||| 分隔符，一次完整输出\n';
+          _fmtBlock += '\n【状态同步（末尾必加）】\n[状态:穿着=...,正在=...,心声=...]\n[属性:心情+5]（只写变化的）';
+
+          parts.push(_fmtBlock + _attrHint + _customEntryHint);
+
+          console.log('[OfflinePrompt] mode=' + _offModeFmt + ' wordCount=' + _offWcFmt);
         } else {
           // ★ 根据角色"短句比例"参数动态生成格式规则，避免全局硬规则破坏内敛/腼腆角色的人设
           var _bxFmt = _loadCharBehavior(npcId);
@@ -24447,7 +24482,7 @@ const npc = _wxGetChatTargetMeta(npcId);
         // ★ 离线模式不拆分：用 parseMultiMessages 安全清理，再合并为一条
         var replies;
         if (_triggerIsOffline){
-          replies = [parseMultiMessages(result.data).join('\n\n')];
+          replies = [_cleanOfflineAIResponse(parseMultiMessages(result.data).join('\n\n'))];
         } else {
           replies = parseMultiMessages(result.data);
         }
@@ -25517,7 +25552,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           // ★ 离线模式：不拆分消息，用 parseMultiMessages 安全清理后合并
           var replies;
           if (mySendMode === 'offline'){
-            replies = [parseMultiMessages(result.data).join('\n\n')];
+            replies = [_cleanOfflineAIResponse(parseMultiMessages(result.data).join('\n\n'))];
             console.log('[Offline] 合并为单条回复, 长度=' + replies[0].length + '字符');
           } else {
             replies = parseMultiMessages(result.data);
@@ -25792,7 +25827,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           // ★ 离线模式：用 parseMultiMessages 安全清理后合并为单条
           var replies;
           if (_isOffline){
-            replies = [parseMultiMessages(result.data).join('\n\n')];
+            replies = [_cleanOfflineAIResponse(parseMultiMessages(result.data).join('\n\n'))];
             console.log('[Offline] _wxSendChat 合并为单条回复, 长度=' + replies[0].length + '字符');
           } else {
             replies = parseMultiMessages(result.data);
@@ -25990,7 +26025,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           var _isRetryOffline = (_getChatMode(npcId) === 'offline');
           var replies;
           if (_isRetryOffline){
-            replies = [parseMultiMessages(result.data).join('\n\n')];
+            replies = [_cleanOfflineAIResponse(parseMultiMessages(result.data).join('\n\n'))];
           } else {
             replies = parseMultiMessages(result.data);
           }
