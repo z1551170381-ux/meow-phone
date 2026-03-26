@@ -24464,7 +24464,17 @@ const npc = _wxGetChatTargetMeta(npcId);
           return;
         }
 
-        var replies = parseMultiMessages(result.data);
+        // ★ 离线模式不拆分
+        var replies;
+        if (_triggerIsOffline){
+          var _rawT = String(result.data || '').trim()
+            .replace(/<\/?thinking>[\s\S]*?(<\/thinking>|$)/gi, '')
+            .replace(/<\/?think>[\s\S]*?(<\/think>|$)/gi, '')
+            .replace(/\|\|\|/g, '\n\n').trim();
+          replies = [_rawT || '…'];
+        } else {
+          replies = parseMultiMessages(result.data);
+        }
 
         for (var ri = 0; ri < replies.length; ri++){
           if (mySeqId !== PhoneAI._replySeqId || state.chatTarget !== myChatId){
@@ -25528,7 +25538,19 @@ const npc = _wxGetChatTargetMeta(npcId);
 
           if (!result.ok) throw result.error || 'API error';
 
-          const replies = parseMultiMessages(result.data);
+          // ★ 离线模式：不拆分消息，整条回复作为一个完整段落
+          var replies;
+          if (mySendMode === 'offline'){
+            var _rawOff = String(result.data || '').trim()
+              .replace(/<\/?thinking>[\s\S]*?(<\/thinking>|$)/gi, '')
+              .replace(/<\/?think>[\s\S]*?(<\/think>|$)/gi, '')
+              .replace(/\|\|\|/g, '\n\n')  // 把 ||| 转为段落分隔而不是拆条
+              .trim();
+            replies = [_rawOff || '…'];
+            console.log('[Offline] 合并为单条回复, 长度=' + _rawOff.length + '字符');
+          } else {
+            replies = parseMultiMessages(result.data);
+          }
           for (var ri=0; ri<replies.length; ri++){
             if (mySeqId !== PhoneAI._replySeqId || state.chatTarget !== myChatId){
               _hideTypingIndicator(); return;
@@ -25986,7 +26008,18 @@ const npc = _wxGetChatTargetMeta(npcId);
             _markPendingChatReply(npcId, { status:'pending', lastError:err, lastRecoverSource:source });
             return null;
           }
-          var replies = parseMultiMessages(result.data);
+          // ★ 离线模式不拆分
+          var _isRetryOffline = (_getChatMode(npcId) === 'offline');
+          var replies;
+          if (_isRetryOffline){
+            var _rawR = String(result.data || '').trim()
+              .replace(/<\/?thinking>[\s\S]*?(<\/thinking>|$)/gi, '')
+              .replace(/<\/?think>[\s\S]*?(<\/think>|$)/gi, '')
+              .replace(/\|\|\|/g, '\n\n').trim();
+            replies = [_rawR || '…'];
+          } else {
+            replies = parseMultiMessages(result.data);
+          }
           if (!Array.isArray(replies) || !replies.length){
             _markPendingChatReply(npcId, { status:'pending', lastError:'AI 返回空文本', lastRecoverSource:source });
             return null;
