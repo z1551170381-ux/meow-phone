@@ -29472,7 +29472,9 @@ function renderPushSettingsPage(container){
         enable_push: elEnable.classList.contains('on'),
         quiet_hours_start: elQuietStart.value || '23:30',
         quiet_hours_end: elQuietEnd.value || '08:00',
-        enable_voice_chase: elVoiceChase.classList.contains('on')
+        enable_voice_chase: elVoiceChase.classList.contains('on'),
+        // ★ 自动检测用户时区偏移（分钟），如 UTC+8 = -(-480) = 480
+        timezone_offset: -(new Date().getTimezoneOffset())
       };
 
       saveDraft(next);
