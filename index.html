@@ -4576,11 +4576,13 @@ case '🍪': return s('<circle cx="12" cy="12" r="10"/><circle cx="8" cy="9" r="
 /* === 小说模式（纸张感） === */
 #${ID} .wxChatDetailWrap.offlineNovelMode{
   background:linear-gradient(180deg, rgba(251,248,242,.96), rgba(244,238,229,.98));
+  min-height:100%; min-height:100vh; min-height:100dvh;
 }
 #${ID} .wxOfflineWrap.offlineNovelMode{
   position:relative;
-  background-color:rgba(248,243,235,.52);
+  background-color:rgba(248,243,235,.92);
   background-blend-mode:screen;
+  min-height:100%; min-height:100vh; min-height:100dvh;
 }
 #${ID} .wxOfflineWrap.offlineNovelMode::before{
   content:""; position:absolute; inset:0; pointer-events:none; z-index:0;
@@ -4644,6 +4646,18 @@ case '🍪': return s('<circle cx="12" cy="12" r="10"/><circle cx="8" cy="9" r="
 #${ID} .wxOfflineWrap.offlineNovelMode .wxOfflineNovelHead{
   display:flex; align-items:center; gap:8px; margin-bottom:10px;
   font-size:11px; letter-spacing:.12em;
+}
+#${ID} .wxOfflineWrap.offlineNovelMode .wxNovelAvatar{
+  width:32px; height:32px; border-radius:50%; flex-shrink:0;
+  overflow:hidden; display:flex; align-items:center; justify-content:center;
+  font-size:13px; background:rgba(138,114,78,.10); color:rgba(101,77,48,.7);
+  border:1.5px solid rgba(138,114,78,.15);
+}
+#${ID} .wxOfflineWrap.offlineNovelMode .wxNovelAvatar img{
+  width:100%; height:100%; object-fit:cover; border-radius:50%;
+}
+#${ID} .wxOfflineWrap.offlineNovelMode .wxOfflineParagraph.me .wxNovelAvatar{
+  background:rgba(113,125,157,.10); border-color:rgba(113,125,157,.15);
 }
 #${ID} .wxOfflineWrap.offlineNovelMode .wxOfflineNovelRole{
   display:inline-flex; align-items:center; padding:4px 10px; border-radius:999px;
@@ -31721,31 +31735,31 @@ function _getLogForModeBranch(npcId, mode){
 var SCENE_PRESETS = {
   romance: {
     label: '💔 酸涩恋爱',
-    basic: '写作视角：以第一人称"我"进行，*星号内容*是自己的动作、感知与内心，台词用"引号"。\n贴人设要领：严格沿用角色卡中的说话方式和性格，不要因为"线下"就变得更柔或更甜，情绪浓度与线上一致。\n写作手法：用身体感知替代情感直述（余光、停顿、无意识的小动作），情绪藏在细节里，不挑明、不总结，留白比说透更有力。',
+    basic: '贴人设要领：严格沿用角色卡中的说话方式和性格，不要因为"线下"就变得更柔或更甜，情绪浓度与线上一致。\n写作手法：用身体感知替代情感直述（余光、停顿、无意识的小动作），情绪藏在细节里，不挑明、不总结，留白比说透更有力。',
     style: '句式短促，节奏忽快忽慢。感官描写优先（触感、气息、光线、声音），少用抽象形容词（如"心疼""感动"）。内心独白夹在动作之间，点到即止。对话不写满，留给对方接话的空间。',
     special: '每条回复至少包含一处具体微小细节（如指尖碰到杯沿、视线在某处停了一秒）。禁止用旁白直接解释情感（如"他知道她在乎他"）。情绪转折靠行为触发，不靠叙述说明。'
   },
   elite: {
     label: '🏢 高干权贵',
-    basic: '写作视角：第一人称，*星号*写克制的外显动作（整理袖口、放下杯子、沉默片刻），内心戏极少外露。\n贴人设要领：台词精炼，绝不说多余的话；角色卡定义的强势/冷淡/温柔等特质原样保留，不因场景变软或变暖。\n写作手法：镜头感叙事，像电影分镜——先写环境一笔，再写角色动作，最后给台词，节奏干净。',
+    basic: '贴人设要领：台词精炼，绝不说多余的话；角色卡定义的强势/冷淡/温柔等特质原样保留，不因场景变软或变暖。\n写作手法：镜头感叙事，像电影分镜——先写环境一笔，再写角色动作，最后给台词，节奏干净。克制的外显动作（整理袖口、放下杯子、沉默片刻），内心戏极少外露。',
     style: '句子短而有力，段落不拖。肢体动作替代情感表达（推过去一份文件、窗外看了一眼、沉默三秒才开口）。环境细节要有质感但不堆砌，一两笔足够。禁止大段内心独白。',
     special: '场景道具须与身份匹配（办公室、车、酒会等），一个细节胜过大段描述。情感转折须有具体触发点，不能无缘无故变温柔。可用外部事件打断（电话、敲门）制造张力，但别滥用。'
   },
   adventure: {
     label: '⚔️ 冒险小说',
-    basic: '写作视角：第一人称或近第三人称均可，以角色卡为准；动作描写务必精准，有力度有重量感。\n贴人设要领：冒险场景不等于人设变粗糙，角色卡里的幽默、怯懦、执着等特质在危机中反而要放大。\n写作手法：以"行动-反应"推进，每条回复有明确的动态变化，不在原地踏步；紧张场景用短句，缓和时可放长。',
+    basic: '贴人设要领：冒险场景不等于人设变粗糙，角色卡里的幽默、怯懦、执着等特质在危机中反而要放大。\n写作手法：以"行动-反应"推进，每条回复有明确的动态变化，不在原地踏步；紧张场景用短句，缓和时可放长。动作描写务必精准，有力度有重量感。',
     style: '动词优先，少用形容词堆叠。环境描写服务于紧张感（能见度、地形、声音），不做风景散文。对话直接、有信息量，废话在危险场景里没有位置。',
     special: '每场景须有至少一项现实约束（体力/时间/物资/敌情），不能无限开挂。战斗或逃跑以回合推进，给用户留出决策空间。角色会犯错、会受伤，完美应对反而破坏代入感。'
   },
   ancient: {
     label: '🏮 古言古风',
-    basic: '写作视角：第一人称，*星号*写古风化的动作与环境感知（"轻拢衣袖""烛火一晃"），台词用"引号"，措辞雅而不涩。\n贴人设要领：角色卡定义的性格（傲/柔/腹黑/赤诚）一字不改，只是表达方式换成古语；不要因为古风就变得比角色卡更温柔或更疏离。\n写作手法：借景抒情为主，情感藏在环境描写里；诗句或典故点缀即可，不强行堆砌；对话留余韵，说七分留三分。',
+    basic: '贴人设要领：角色卡定义的性格（傲/柔/腹黑/赤诚）一字不改，只是表达方式换成古语；不要因为古风就变得比角色卡更温柔或更疏离。\n写作手法：借景抒情为主，情感藏在环境描写里；诗句或典故点缀即可，不强行堆砌；对话留余韵，说七分留三分。古风化的动作与环境感知（"轻拢衣袖""烛火一晃"），措辞雅而不涩。',
     style: '多四字短语，句式有对偶感，但不必句句工整。景物描写精炼（一句话一个画面），忌散文化铺陈。情感词汇用行为替代（垂眸、停顿、转身），不用现代心理描写词汇。',
     special: '时代细节自洽（称谓、器物、礼仪），一处错误会出戏。严禁出现现代词汇与思维逻辑。重大情感转折可借古言惯用手法（误会/错过/替身/重逢），但须有铺垫。'
   },
   medieval: {
     label: '🔮 中世纪魔法',
-    basic: '写作视角：第一人称，*星号*写异世界化的感知（魔法施放的身体感受、种族特有的感官），台词可带角色种族/职业的语气特色。\n贴人设要领：角色卡里的性格底色在异世界同样适用，世界观不同不代表人设要变；把角色卡的现代语境动作翻译成异世界等价物即可。\n写作手法：用具体的世界细节（货币/地名/节日/魔法规则）建立沉浸感，而不是靠大量描述"这是个奇幻世界"；细节越日常越真实。',
+    basic: '贴人设要领：角色卡里的性格底色在异世界同样适用，世界观不同不代表人设要变；把角色卡的现代语境动作翻译成异世界等价物即可。\n写作手法：用具体的世界细节（货币/地名/节日/魔法规则）建立沉浸感，而不是靠大量描述"这是个奇幻世界"；细节越日常越真实。异世界化的感知（魔法施放的身体感受、种族特有的感官），台词可带角色种族/职业的语气特色。',
     style: '史诗感与生活感并存，不必全程宏大叙事。魔法描写须有独特感官质感（温度、颜色、声音、代价），禁止"发出一道光"式的敷衍。环境描写一两笔奇幻细节足够，不铺满。',
     special: '世界设定前后严格自洽，魔法必须有代价或限制。重要规则一旦建立不能随意推翻。异世界日常细节（吃什么、用什么货币、怎么问路）比战斗描写更能建立代入感。'
   }
@@ -31754,7 +31768,7 @@ var SCENE_PRESETS = {
 var SCENE_PRESET_DEFAULT = { packageId:'', basic:{ enabled:false, text:'' }, style:{ enabled:false, text:'' }, special:{ enabled:false, text:'' } };
 
 function _loadSceneData(npcId){
-  return _phLoad('scene_'+String(npcId), { name:'', location:'', description:'', customPrompt:'', bgImage:'', offlineMode:'stage', npcPerson:'second', userPerson:'first', npcSprite:'', userSprite:'', clickFullscreen:true, presetData: SCENE_PRESET_DEFAULT });
+  return _phLoad('scene_'+String(npcId), { name:'', location:'', description:'', customPrompt:'', bgImage:'', offlineMode:'stage', npcPerson:'second', userPerson:'first', npcSprite:'', userSprite:'', clickFullscreen:true, wordCount:0, presetData: SCENE_PRESET_DEFAULT });
 }
 function _saveSceneData(npcId, data){
   try{
@@ -32233,6 +32247,10 @@ function _renderOfflineParagraph(container, npc, role, text, ts, meta){
         .replace(/&lt;\/?[a-zA-Z][^&]*&gt;/g,'')    // HTML 实体编码的标签
         .replace(/"rp[A-Za-z]+">\s*/g,'')           // "rpXxx"> 格式
         .replace(/rp[A-Za-z]+>\s*/g,'')             // rpXxx> 格式
+        .replace(/"wxNovel[A-Za-z]+"\s*>?\s*/g,'')  // "wxNovelXxx"> 格式
+        .replace(/wxNovel[A-Za-z]+>\s*/g,'')        // wxNovelXxx> 格式
+        .replace(/^\s*"rp[A-Za-z]+"\s*$/gm,'')      // 独立成行的 "rpXxx"
+        .replace(/^\s*"wx[A-Za-z]+"\s*$/gm,'')      // 独立成行的 "wxXxx"
         .replace(/class="[^"]*"\s*/g,'')            // class="..." 残留
         .replace(/>\s*(?=\S)/g,'')                  // 孤立 > 开头
         .replace(/^>\s*/gm,'')                      // 行首 >
@@ -32408,11 +32426,20 @@ function _cleanOfflineDisplayText(text){
     .replace(/"rpText"\s*>?\s*/g, '')
     .replace(/rpAction\s*>?\s*/g, '')
     .replace(/rpDialog\s*>?\s*/g, '')
+    .replace(/"wxNovel[A-Za-z]+"\s*>?\s*/g, '')
+    .replace(/wxNovel[A-Za-z]+>\s*/g, '')
+    // 清理独立成行的 "rpXxx" 或 "wxXxx" 残留
+    .replace(/^\s*"rp[A-Za-z]+"\s*$/gm, '')
+    .replace(/^\s*"wx[A-Za-z]+"\s*$/gm, '')
     .replace(/^>\s*/gm, '')
     .replace(/<\/?em[^>]*>/g, '')
     .replace(/<\/?span[^>]*>/g, '')
+    .replace(/<\/?p[^>]*>/g, '')
+    .replace(/<\/?div[^>]*>/g, '')
     .replace(/class="[^"]*"/g, '')
     .replace(/\r\n?/g, '\n')
+    // 清理多余空行
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
 
@@ -32435,6 +32462,7 @@ function _formatOfflineNovelHTML(text){
 
 function _renderOfflineNovelParagraph(container, npc, role, text, ts, meta){
   var speaker = role === 'me' ? '你' : (npc.name || '对方');
+  var npcId = (npc && npc.id) || (typeof state !== 'undefined' && state.chatTarget) || '';
   var p = doc.createElement('div');
   p.className = 'wxOfflineParagraph wxOfflineNovelCard ' + role;
   p.setAttribute('data-msgts', String(ts||0));
@@ -32442,7 +32470,32 @@ function _renderOfflineNovelParagraph(container, npc, role, text, ts, meta){
   p.setAttribute('data-msgtext', String(text||''));
   if (meta && meta.mode) p.setAttribute('data-mode', meta.mode);
   if (meta && meta.branch) p.setAttribute('data-branch', meta.branch);
-  p.innerHTML = '<div class="wxOfflineNovelHead"><span class="wxOfflineNovelRole">'+ esc(speaker) +'</span></div>'
+
+  // 头像
+  var avatarContent = '';
+  if (role === 'me'){
+    try{
+      var _myAvImg = (typeof phoneGetAvatar === 'function') ? phoneGetAvatar('me') : null;
+      if (_myAvImg) avatarContent = '<img src="' + esc(_myAvImg) + '"/>';
+      else avatarContent = '👤';
+    }catch(e){ avatarContent = '👤'; }
+  } else {
+    try{
+      var _avImg = (typeof phoneGetAvatar === 'function') ? phoneGetAvatar(npcId) : null;
+      if (_avImg) avatarContent = '<img src="' + esc(_avImg) + '"/>';
+      else {
+        var avRaw = npc.avatar || (npc.name||'?').charAt(0);
+        avatarContent = (typeof avRaw === 'string' && avRaw.startsWith('<img')) ? avRaw : esc(avRaw);
+      }
+    }catch(e){ avatarContent = esc((npc.name||'?').charAt(0)); }
+  }
+  var avatarHtml = '<div class="wxCBAvatar wxOfflineAvatar wxNovelAvatar'
+    + (role === 'them'
+      ? '" data-act="wxAvatarTap" data-npcid="' + esc(npcId) + '" style="cursor:pointer;"'
+      : '" data-act="wxMeAvatarTap" style="cursor:pointer;"')
+    + '>' + avatarContent + '</div>';
+
+  p.innerHTML = '<div class="wxOfflineNovelHead">' + avatarHtml + '<span class="wxOfflineNovelRole">'+ esc(speaker) +'</span></div>'
     + '<div class="wxOfflineNovelBody">' + _formatOfflineNovelHTML(text) + '</div>';
   container.appendChild(p);
 }
@@ -32456,9 +32509,15 @@ function _parseTheaterSegments(text, speaker, role){
     .replace(/"rpDialog"\s*>?\s*/g, '')
     .replace(/rpAction\s*>?\s*/g, '')
     .replace(/rpDialog\s*>?\s*/g, '')
+    .replace(/"wxNovel[A-Za-z]+"\s*>?\s*/g, '')
+    .replace(/wxNovel[A-Za-z]+>\s*/g, '')
     .replace(/^>\s*/gm, '')
     .replace(/^\s*"rp[A-Za-z]+"\s*$/gm, '')  // 单独一行的 "rpXxx"
+    .replace(/^\s*"wx[A-Za-z]+"\s*$/gm, '')  // 单独一行的 "wxXxx"
+    .replace(/<\/?[a-zA-Z][^>]*>/g, '')       // 清理任何HTML标签
+    .replace(/class="[^"]*"/g, '')
     .replace(/\r\n?/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
     .trim();
 
   if (!/\n\s*\n/.test(cleaned)){
@@ -32584,22 +32643,44 @@ function _buildOfflinePromptAddition(npcId){
   ];
 
   if (mode === 'stage'){
-    lines.push('格式上的区别仅仅是：动作/旁白用 *星号包裹*，台词用"引号"，这不是让你变成另一个人。');
-    lines.push('其他格式规则：');
-    lines.push('- 不输出任何代码、标签或特殊符号，只有纯文字、星号、引号');
-    lines.push('- 篇幅自然，不必凑段落数，跟线上聊天一样有来有回即可');
+    lines.push('【舞台剧格式规则 — 必须严格遵守】');
+    lines.push('1. 动作/旁白/心理/环境描写 → 用 *星号包裹*，每段动作独立成行');
+    lines.push('2. 台词/对话 → 用"中文引号"包裹，每句台词独立成行');
+    lines.push('3. 动作与台词之间必须换行分隔，绝对不要把动作和台词写在同一行内');
+    lines.push('4. 错误示例（禁止）：*他走过来* "你好" ← 动作和台词粘在一起');
+    lines.push('5. 正确示例：');
+    lines.push('*他慢慢走了过来，目光落在你身上*');
+    lines.push('"你好。"');
+    lines.push('6. 绝对禁止输出任何HTML标签、CSS类名、代码、"rpAction"、"rpDialog"、"wxNovelAside"等技术词汇');
+    lines.push('7. 只输出纯文本 + *星号* + "引号"，不要有其他任何特殊格式符号、>前缀、方括号标签');
+    lines.push('8. 篇幅自然，不必凑段落数，跟线上聊天一样有来有回即可');
   } else if (mode === 'novel'){
-    lines.push('请写成更接近小说正文的回复：同一条回复里可以自然包含旁白、环境、动作、心理与对话。');
-    lines.push('不要写成舞台剧脚本，不要把旁白和台词拆成一行一行的角色表演稿。');
-    lines.push('段落要自然，像酒馆里常见的叙事回复；对话直接嵌在叙述里，必要时放在中文引号中。');
-    lines.push('不要输出 *动作标签*、角色名前缀、项目符号、代码块、说明书口吻。');
+    lines.push('【小说模式格式规则 — 必须严格遵守】');
+    lines.push('1. 写成小说正文风格：同一条回复里自然包含叙述、环境、动作、心理与对话');
+    lines.push('2. 不要写成舞台剧脚本，不要把旁白和台词拆成一行一行的角色表演稿');
+    lines.push('3. 段落要自然连贯，对话直接嵌入叙述中，用中文引号标注');
+    lines.push('4. 绝对禁止输出 *动作标签*、角色名前缀、HTML标签、CSS类名、代码、>前缀、方括号标签');
+    lines.push('5. 绝对禁止输出"rpAction"、"rpDialog"、"wxNovelAside"等技术词汇');
   } else if (mode === 'game'){
     lines.push('请更接近视觉小说/橙光叙事：每一句都尽量简洁、镜头感明确、适合逐句播放。');
     lines.push('旁白与对话分明，一次不要堆太多信息，适合点击逐句推进。');
+    lines.push('绝对禁止输出HTML标签、CSS类名、代码、"rpAction"等技术词汇。');
   }
 
   lines.push('角色人称偏好：' + (npcPersonMap[scene.npcPerson || 'second'] || '第二人称') + '。');
   lines.push('用户人称偏好：' + (userPersonMap[scene.userPerson || 'first'] || '第一人称') + '。');
+
+  // 字数要求 — 放在格式规则之后、场景信息之前，确保高权重
+  var wc = parseInt(scene.wordCount) || 0;
+  if (wc > 0){
+    lines.push('【⚠ 字数硬性要求 ⚠】');
+    lines.push('本次回复必须控制在约' + wc + '字（允许±20%，即' + Math.round(wc*0.8) + '~' + Math.round(wc*1.2) + '字之间）。');
+    if (wc <= 300){
+      lines.push('这是一个短回复要求，请精炼表达，不要铺展过多描写，点到为止。');
+    } else if (wc >= 1500){
+      lines.push('这是一个长回复要求，请充分展开细节、环境、心理和互动，不要草草结束。');
+    }
+  }
 
   if (scene.location) lines.push('当前地点：' + scene.location);
   if (scene.description) lines.push('场景说明：' + scene.description);
@@ -32608,13 +32689,13 @@ function _buildOfflinePromptAddition(npcId){
   if (pd) {
     var presetLines = [];
     if (pd.basic && pd.basic.enabled && String(pd.basic.text||'').trim()){
-      presetLines.push('【角色基础人设】\\n' + String(pd.basic.text).trim());
+      presetLines.push('【角色基础人设】\n' + String(pd.basic.text).trim());
     }
     if (pd.style && pd.style.enabled && String(pd.style.text||'').trim()){
-      presetLines.push('【文风写作风格】\\n' + String(pd.style.text).trim());
+      presetLines.push('【文风写作风格】\n' + String(pd.style.text).trim());
     }
     if (pd.special && pd.special.enabled && String(pd.special.text||'').trim()){
-      presetLines.push('【特殊规则】\\n' + String(pd.special.text).trim());
+      presetLines.push('【特殊规则】\n' + String(pd.special.text).trim());
     }
     if (presetLines.length){
       lines.push('【⚠ 场景预设模块 — 严格遵守以下规则，与人设保持一致 ⚠】');
@@ -32627,7 +32708,12 @@ function _buildOfflinePromptAddition(npcId){
     lines.push(String(scene.customPrompt).trim());
   }
 
-  return lines.join('\\n');
+  // ★ 字数末尾再提醒一次（利用 LLM 尾部注意力高的特性）
+  if (wc > 0){
+    lines.push('再次提醒：本次回复字数要求约' + wc + '字（' + Math.round(wc*0.8) + '~' + Math.round(wc*1.2) + '字），请务必遵守。');
+  }
+
+  return lines.join('\n');
 }
 
 
@@ -32693,6 +32779,7 @@ function _openSceneEditor(npcId){
       npcSprite: (ov.querySelector('[data-el="sceneNpcSprite"]')?.value||'').trim(),
       userSprite: (ov.querySelector('[data-el="sceneUserSprite"]')?.value||'').trim(),
       clickFullscreen: !!(ov.querySelector('[data-el="sceneClickFullscreen"]')?.checked),
+      wordCount: parseInt(ov.querySelector('[data-el="sceneWordCount"]')?.value||'0') || 0,
       presetData: _readPresetDataFromOv(ov)
     };
   }
@@ -32731,7 +32818,19 @@ function _openSceneEditor(npcId){
     + '<div style="font-size:12px;color:rgba(20,24,28,.5);margin-bottom:4px;">场景描述（可选）</div>'
     + '<textarea data-el="sceneDesc" rows="3" placeholder="环境描述、氛围、时间等" style="width:100%;padding:8px 10px;border:1px solid rgba(0,0,0,.1);border-radius:8px;font-size:13px;outline:none;resize:vertical;font-family:inherit;box-sizing:border-box;">'+esc(scene.description||'')+'</textarea>'
     + '</div>'
-    + '<div style="margin-bottom:10px;padding:10px;border:1px solid rgba(0,0,0,.08);border-radius:10px;background:rgba(255,255,255,.55);">'
+    + '<div style="margin-bottom:10px;">'
+    + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
+    + '<div style="font-size:12px;color:rgba(20,24,28,.5);">📏 回复字数</div>'
+    + '<div data-el="sceneWordCountLabel" style="font-size:12px;color:rgba(20,24,28,.7);font-weight:600;">' + (parseInt(scene.wordCount)||0 ? (parseInt(scene.wordCount)||0) + '字' : '不限制') + '</div>'
+    + '</div>'
+    + '<div style="display:flex;align-items:center;gap:8px;">'
+    + '<span style="font-size:10px;color:rgba(20,24,28,.35);">不限</span>'
+    + '<input data-el="sceneWordCount" type="range" min="0" max="5000" step="100" value="'+(parseInt(scene.wordCount)||0)+'" style="flex:1;accent-color:var(--ph-accent,#07c160);"/>'
+    + '<span style="font-size:10px;color:rgba(20,24,28,.35);">5000</span>'
+    + '</div>'
+    + '<div style="font-size:10px;color:rgba(20,24,28,.3);margin-top:4px;">拖动滑块设定每条回复目标字数（0=不限制，200起步）</div>'
+    + '</div>'
+    + '<div data-el="sceneSpriteSection" style="margin-bottom:10px;padding:10px;border:1px solid rgba(0,0,0,.08);border-radius:10px;background:rgba(255,255,255,.55);'+(String(scene.offlineMode||'stage')!=='game'?'display:none;':'')+'">'
     + '<div style="font-size:12px;color:rgba(20,24,28,.6);font-weight:600;margin-bottom:6px;">🖼 游戏模式素材（可选）</div>'
     + '<div style="font-size:10px;color:rgba(20,24,28,.35);margin-bottom:8px;">游戏模式时显示立绘，支持上传 PNG 或粘贴链接。</div>'
     // ---- 角色立绘 ----
@@ -32840,6 +32939,27 @@ function _openSceneEditor(npcId){
   }
   _bindSpriteUrlPreview('[data-el="sceneNpcSprite"]', '[data-el="sceneNpcSpritePreview"]');
   _bindSpriteUrlPreview('[data-el="sceneUserSprite"]', '[data-el="sceneUserSpritePreview"]');
+
+  // ★ 字数滑块实时标签更新
+  var _wcSlider = ov.querySelector('[data-el="sceneWordCount"]');
+  var _wcLabel = ov.querySelector('[data-el="sceneWordCountLabel"]');
+  if(_wcSlider && _wcLabel){
+    _wcSlider.addEventListener('input', function(){
+      var v = parseInt(this.value)||0;
+      // 低于200的值归零（不限制）
+      if(v > 0 && v < 200){ v = 0; this.value = '0'; }
+      _wcLabel.textContent = v > 0 ? (v + '字') : '不限制';
+    });
+  }
+
+  // ★ 模式切换时显示/隐藏游戏模式素材区
+  var _modeSelect = ov.querySelector('[data-el="sceneOfflineMode"]');
+  var _spriteSection = ov.querySelector('[data-el="sceneSpriteSection"]');
+  if(_modeSelect && _spriteSection){
+    _modeSelect.addEventListener('change', function(){
+      _spriteSection.style.display = this.value === 'game' ? '' : 'none';
+    });
+  }
 
   ov.querySelector('[data-el="presetPkg"]')?.addEventListener('change', function(){
     var pkgId = this.value;
