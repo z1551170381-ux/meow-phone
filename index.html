@@ -21147,14 +21147,12 @@ const npc = _wxGetChatTargetMeta(npcId);
           if (mode === 'offline') {
             var _scCtx = (typeof _loadSceneData === 'function') ? _loadSceneData(npcId) : null;
             var _wcCtx = _scCtx ? (parseInt(_scCtx.wordCount) || 0) : 0;
-            var _offModeCtx = _scCtx ? String(_scCtx.offlineMode || 'stage') : 'stage';
             var _wcHint = '';
             if (_wcCtx > 0) {
-              _wcHint = '\n[请写约' + _wcCtx + '字的详细回复，至少' + Math.max(3, Math.round(_wcCtx/120)) + '个段落，充分展开环境描写、动作细节、心理活动和对话内容，不要草草结束。]';
+              _wcHint = '\n[OOC: 请写约' + _wcCtx + '字的回复，充分展开描写。]';
             } else {
-              _wcHint = '\n[请写充实的回复，至少5个段落，包含环境、动作、心理和对话，不要只写一两句就结束。]';
+              _wcHint = '\n[OOC: 请写充实详细的回复，像小说正文一样展开。]';
             }
-            // 追加到最后一条 user 消息
             for (var _wi = out.length - 1; _wi >= 0; _wi--) {
               if (out[_wi].role === 'user' && typeof out[_wi].content === 'string') {
                 out[_wi].content += _wcHint;
@@ -21710,55 +21708,15 @@ const npc = _wxGetChatTargetMeta(npcId);
         }catch(e){ console.error('[online-bridge] error:', e); }
 
         if (_isOfflineMode){
-          // ★ 根据线下子模式和字数设置动态生成格式指令
-          var _offScene = null;
-          var _offSubMode = 'stage';
-          var _offWc = 0;
-          try{
-            _offScene = _loadSceneData(npcId);
-            _offSubMode = String(_offScene.offlineMode || 'stage');
-            _offWc = parseInt(_offScene.wordCount) || 0;
-          }catch(e){}
+          // ★ 简洁的离线格式指令（接近原版，不堆指令避免混淆模型）
+          var _offWcFmt = 0;
+          try{ var _scFmt = _loadSceneData(npcId); _offWcFmt = parseInt(_scFmt.wordCount) || 0; }catch(e){}
+          var _wcLine = _offWcFmt > 0
+            ? '- 篇幅要求：本次回复约' + _offWcFmt + '字，充分展开环境、动作、心理、对话，不要草草结束'
+            : '- 篇幅充实自然，像小说正文一样展开描写，不要只写一两句';
+          parts.push('---\n【回复格式（线下模式）】\n直接写小说段落，无需任何特殊标记。\n- 旁白/动作/环境：用 *星号包裹*\n- 台词：用"引号"\n- 不要输出任何代码、标签或符号，只有纯文字\n' + _wcLine + '\n- 禁止使用 ||| 分隔符，一次完整输出\n\n【状态同步（末尾必加）】\n[状态:穿着=...,正在=...,心声=...]\n[属性:心情+5]（只写变化的）' + _attrHint + _customEntryHint);
 
-          // ★ 篇幅指令：把字数转换为段落要求（LLM 更容易遵守结构要求）
-          var _lenInstruction = '';
-          if (_offWc > 0){
-            var _minParas = Math.max(3, Math.round(_offWc / 120));
-            var _minSents = Math.max(2, Math.round(_offWc / 40));
-            _lenInstruction = '【⚠⚠⚠ 篇幅硬性要求 — 最重要的规则 ⚠⚠⚠】\n' +
-              '本次回复必须达到约' + _offWc + '字（' + Math.round(_offWc*0.8) + '~' + Math.round(_offWc*1.2) + '字）。\n' +
-              '具体要求：至少写' + _minParas + '个段落，包含至少' + _minSents + '个句子。\n' +
-              '每个段落都要有实质内容：环境细节、角色动作、心理活动、对话互动。\n' +
-              '不要草草几句就结束，必须展开描写。如果你觉得写够了，再多写两段。';
-          } else {
-            _lenInstruction = '【篇幅要求】\n' +
-              '回复要充实饱满，至少包含5~8个段落。\n' +
-              '每段有实质内容：环境描写、动作细节、心理活动、对话互动，不要草草结束。';
-          }
-
-          var _offFmt = '---\n【回复格式（线下模式）】\n';
-
-          if (_offSubMode === 'stage'){
-            _offFmt += '舞台剧格式：动作/旁白用 *星号包裹*，台词用"引号"，动作和台词必须分行。\n';
-          } else if (_offSubMode === 'novel'){
-            _offFmt += '小说正文格式：叙述、动作、心理、对话自然融合在段落中，不要拆成脚本条目。\n';
-          } else {
-            _offFmt += '视觉小说格式：简洁有镜头感，适合逐句推进。\n';
-          }
-
-          _offFmt += '- 不要输出任何代码、HTML标签、CSS类名或技术标记\n';
-          _offFmt += '- 把所有内容写在一条完整的回复中，禁止使用 ||| 分隔符拆分\n';
-          _offFmt += '\n';
-          _offFmt += '【状态同步（末尾必加）】\n';
-          _offFmt += '[状态:穿着=...,正在=...,心声=...]\n';
-          _offFmt += '[属性:心情+5]（只写变化的）';
-
-          parts.push(_offFmt + _attrHint + _customEntryHint);
-
-          // ★★★ 篇幅指令放在 prompt 的绝对最后（利用 LLM 尾部注意力最强的特性）
-          parts.push(_lenInstruction);
-
-          console.log('[OfflinePrompt] mode=' + _offSubMode + ' wordCount=' + _offWc + ' maxParas=' + (_offWc > 0 ? Math.round(_offWc/120) : 'default'));
+          console.log('[OfflinePrompt] mode=stage wordCount=' + _offWcFmt);
         } else {
           // ★ 根据角色"短句比例"参数动态生成格式规则，避免全局硬规则破坏内敛/腼腆角色的人设
           var _bxFmt = _loadCharBehavior(npcId);
@@ -32774,64 +32732,29 @@ function _renderSceneBanner(container, sceneName, sceneDesc){
 function _buildOfflinePromptAddition(npcId){
   var scene = _loadSceneData(npcId);
   var mode = String(scene.offlineMode || 'stage');
-  var modeLabel = ({stage:'舞台剧/广播剧', novel:'小说模式', game:'游戏模式'})[mode] || '舞台剧/广播剧';
   var npcPersonMap = { first:'第一人称', second:'第二人称', third:'第三人称' };
   var userPersonMap = { first:'第一人称', second:'第二人称', third:'第三人称' };
 
   var lines = [
     '【线下面对面模式】',
     '你现在进入面对面场景，但你的性格、语气、说话习惯、与用户的关系，完全延续角色卡设定，不要变。',
-    '当前展示模式：' + modeLabel + '。'
+    '格式上的区别仅仅是：动作/旁白用 *星号包裹*，台词用"引号"，这不是让你变成另一个人。',
+    '- 不输出任何代码、标签或特殊符号，只有纯文字、星号、引号',
   ];
 
-  if (mode === 'stage'){
-    lines.push('【舞台剧格式规则 — 必须严格遵守】');
-    lines.push('1. 动作/旁白/心理/环境描写 → 用 *星号包裹*，每段动作独立成行');
-    lines.push('2. 台词/对话 → 用"中文引号"包裹，每句台词独立成行');
-    lines.push('3. 动作与台词之间必须换行分隔，绝对不要把动作和台词写在同一行内');
-    lines.push('4. 错误示例（禁止）：*他走过来* "你好" ← 动作和台词粘在一起');
-    lines.push('5. 正确示例：');
-    lines.push('*他慢慢走了过来，目光落在你身上*');
-    lines.push('"你好。"');
-    lines.push('6. 绝对禁止输出任何HTML标签、CSS类名、代码、"rpAction"、"rpDialog"、"wxNovelAside"等技术词汇');
-    lines.push('7. 只输出纯文本 + *星号* + "引号"，不要有其他任何特殊格式符号、>前缀、方括号标签');
-    lines.push('8. 重要：把所有内容写在一条完整回复里，包含多段动作和多句台词，不要拆成零碎的小片段');
-    lines.push('9. 不要使用 ||| 分隔符，一次性输出完整的场景互动');
-  } else if (mode === 'novel'){
-    lines.push('【小说模式格式规则 — 必须严格遵守】');
-    lines.push('1. 写成小说正文风格：同一条回复里自然包含叙述、环境、动作、心理与对话');
-    lines.push('2. 不要写成舞台剧脚本，不要把旁白和台词拆成一行一行的角色表演稿');
-    lines.push('3. 段落要自然连贯，对话直接嵌入叙述中，用中文引号标注');
-    lines.push('4. 绝对禁止输出 *动作标签*、角色名前缀、HTML标签、CSS类名、代码、>前缀、方括号标签');
-    lines.push('5. 绝对禁止输出"rpAction"、"rpDialog"、"wxNovelAside"等技术词汇');
-    lines.push('6. 把所有内容写在一条完整回复里，不要拆分成多个小段独立发送');
-    lines.push('7. 不要使用 ||| 分隔符');
-  } else if (mode === 'game'){
-    lines.push('请更接近视觉小说/橙光叙事：每一句都尽量简洁、镜头感明确、适合逐句播放。');
-    lines.push('旁白与对话分明，一次不要堆太多信息，适合点击逐句推进。');
-    lines.push('绝对禁止输出HTML标签、CSS类名、代码、"rpAction"等技术词汇。');
-  }
+  // 角色/用户人称
+  lines.push('角色人称：' + (npcPersonMap[scene.npcPerson || 'second'] || '第二人称') + '，用户人称：' + (userPersonMap[scene.userPerson || 'first'] || '第一人称') + '。');
 
-  lines.push('角色人称偏好：' + (npcPersonMap[scene.npcPerson || 'second'] || '第二人称') + '。');
-  lines.push('用户人称偏好：' + (userPersonMap[scene.userPerson || 'first'] || '第一人称') + '。');
-
-  // 字数要求 — 放在格式规则之后、场景信息之前，确保高权重
+  // 字数
   var wc = parseInt(scene.wordCount) || 0;
   if (wc > 0){
-    lines.push('【⚠ 字数硬性要求 ⚠】');
-    lines.push('本次回复必须达到约' + wc + '字（允许±20%，即' + Math.round(wc*0.8) + '~' + Math.round(wc*1.2) + '字之间）。');
-    if (wc <= 300){
-      lines.push('这是一个短回复要求，请精炼表达，不要铺展过多描写，点到为止。');
-    } else if (wc >= 1500){
-      lines.push('这是一个长回复要求，请充分展开细节、环境、心理和互动，不要草草结束。');
-    } else {
-      lines.push('请充实描写：环境氛围、人物动作、表情细节、心理活动、对话内容都要展开，不要省略。');
-    }
+    lines.push('篇幅要求：本次回复约' + wc + '字，充分展开描写，不要草草结束。');
   }
 
   if (scene.location) lines.push('当前地点：' + scene.location);
   if (scene.description) lines.push('场景说明：' + scene.description);
 
+  // 预设模块注入
   var pd = scene.presetData;
   if (pd) {
     var presetLines = [];
@@ -32845,19 +32768,14 @@ function _buildOfflinePromptAddition(npcId){
       presetLines.push('【特殊规则】\n' + String(pd.special.text).trim());
     }
     if (presetLines.length){
-      lines.push('【⚠ 场景预设模块 — 严格遵守以下规则，与人设保持一致 ⚠】');
+      lines.push('【场景预设模块】');
       presetLines.forEach(function(l){ lines.push(l); });
     }
   }
 
   if (scene.customPrompt && String(scene.customPrompt).trim()){
-    lines.push('【⚠⚠⚠ 用户指定的场景专属指令 — 最高优先级，必须逐条严格执行，不可忽略或变通 ⚠⚠⚠】');
+    lines.push('【用户场景指令】');
     lines.push(String(scene.customPrompt).trim());
-  }
-
-  // ★ 字数末尾再提醒一次（利用 LLM 尾部注意力高的特性）
-  if (wc > 0){
-    lines.push('再次提醒：本次回复字数要求约' + wc + '字（' + Math.round(wc*0.8) + '~' + Math.round(wc*1.2) + '字），请务必遵守。');
   }
 
   return lines.join('\n');
