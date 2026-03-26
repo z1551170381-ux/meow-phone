@@ -20905,12 +20905,9 @@ const npc = _wxGetChatTargetMeta(npcId);
       // ===== _cleanOfflineAIResponse：清理离线回复中的模型思考泄露 =====
       function _cleanOfflineAIResponse(text){
         var s = String(text || '');
-        // ★ 清理 AI 输出的 CSS 类名标签（"wxNovelAside">内容 → 内容）
-        s = s.replace(/["""]wxNovel[A-Za-z]+["""]?\s*>?\s*/g, '');
-        s = s.replace(/["""]rp[A-Za-z]+["""]?\s*>?\s*/g, '');
-        s = s.replace(/wxNovel[A-Za-z]+>\s*/g, '');
-        s = s.replace(/rpAction\s*>?\s*/g, '');
-        s = s.replace(/rpDialog\s*>?\s*/g, '');
+        // ★ 清理 AI 输出的 CSS 类名标签（任何引号变体 + wxNovelAside + > → 删除）
+        s = s.replace(/\W?wxNovel[A-Za-z]+\W?\s*>?\s*/g, '');
+        s = s.replace(/\W?rp(?:Action|Dialog|Speaker|Text)\W?\s*>?\s*/g, '');
         // 清理 HTML 标签残留
         s = s.replace(/<\/?(?:span|em|p|div)[^>]*>/g, '');
         // 清理 Gemini 常见的思考泄露模式
@@ -32389,7 +32386,7 @@ function _renderOfflineParagraph(container, npc, role, text, ts, meta){
         .replace(/&lt;\/?[a-zA-Z][^&]*&gt;/g,'')    // HTML 实体编码的标签
         .replace(/"rp[A-Za-z]+">\s*/g,'')           // "rpXxx"> 格式
         .replace(/rp[A-Za-z]+>\s*/g,'')             // rpXxx> 格式
-        .replace(/"wxNovel[A-Za-z]+"\s*>?\s*/g,'')  // "wxNovelXxx"> 格式
+        .replace(/[^a-zA-Z]?wxNovel[A-Za-z]+.?\s*>?\s*/g,'')  // "wxNovelXxx"> 格式
         .replace(/wxNovel[A-Za-z]+>\s*/g,'')        // wxNovelXxx> 格式
         .replace(/^\s*"rp[A-Za-z]+"\s*$/gm,'')      // 独立成行的 "rpXxx"
         .replace(/^\s*"wx[A-Za-z]+"\s*$/gm,'')      // 独立成行的 "wxXxx"
@@ -32562,15 +32559,12 @@ function _autoParagraphizeOfflineText(text){
 
 function _cleanOfflineDisplayText(text){
   return String(text || '').trim()
-    // ★ 最高优先：清理 AI 输出的 "wxNovelAside">内容 模式（保留内容，只删标签部分）
-    .replace(/["""]wxNovel[A-Za-z]+["""]?\s*>?\s*/g, '')
-    .replace(/["""]rp[A-Za-z]+["""]?\s*>?\s*/g, '')
-    .replace(/wxNovel[A-Za-z]+>\s*/g, '')
-    .replace(/rpAction\s*>?\s*/g, '')
-    .replace(/rpDialog\s*>?\s*/g, '')
+    // ★ 最高优先：清理 AI 输出的 wxNovelAside/rpAction 等标签（任何引号变体）
+    .replace(/\W?wxNovel[A-Za-z]+\W?\s*>?\s*/g, '')
+    .replace(/\W?rp(?:Action|Dialog|Speaker|Text)\W?\s*>?\s*/g, '')
     // 清理独立成行的残留
-    .replace(/^\s*["""]rp[A-Za-z]+["""]?\s*$/gm, '')
-    .replace(/^\s*["""]wx[A-Za-z]+["""]?\s*$/gm, '')
+    .replace(/^\s*\W?rp[A-Za-z]+\W?\s*$/gm, '')
+    .replace(/^\s*\W?wx[A-Za-z]+\W?\s*$/gm, '')
     .replace(/^>\s*/gm, '')
     .replace(/<\/?em[^>]*>/g, '')
     .replace(/<\/?span[^>]*>/g, '')
@@ -32651,7 +32645,7 @@ function _parseTheaterSegments(text, speaker, role){
     .replace(/"rpDialog"\s*>?\s*/g, '')
     .replace(/rpAction\s*>?\s*/g, '')
     .replace(/rpDialog\s*>?\s*/g, '')
-    .replace(/"wxNovel[A-Za-z]+"\s*>?\s*/g, '')
+    .replace(/[^a-zA-Z]?wxNovel[A-Za-z]+.?\s*>?\s*/g, '')
     .replace(/wxNovel[A-Za-z]+>\s*/g, '')
     .replace(/^>\s*/gm, '')
     .replace(/^\s*"rp[A-Za-z]+"\s*$/gm, '')  // 单独一行的 "rpXxx"
