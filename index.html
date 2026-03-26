@@ -4696,7 +4696,7 @@ case '🍪': return s('<circle cx="12" cy="12" r="10"/><circle cx="8" cy="9" r="
   color:rgba(116,95,67,.78); font-style:italic;
 }
 #${ID} .wxOfflineWrap.offlineNovelMode .wxOfflineNovelBody em{
-  color:rgba(116,95,67,.78); font-style:italic;
+  color:rgba(66,52,35,.92); font-style:normal;
 }
 #${ID} .wxOfflineWrap.offlineNovelMode .wxOfflineNovelBody b{
   color:rgba(81,63,39,.97); font-weight:600; font-style:normal;
@@ -32606,7 +32606,7 @@ function _formatOfflineNovelHTML(text){
       // ★ 清理 esc() 转义后的残留标签
       .replace(/&quot;(?:wxNovel|rp)[A-Za-z]+&quot;\s*(?:&gt;)?\s*/g, '')
       .replace(/&lt;\/?(?:span|em|p|div)[^&]*&gt;/g, '')
-      .replace(/\*([^*]+)\*/g, '<em>$1</em>')
+      .replace(/\*([^*]+)\*/g, '$1')
       .replace(/"([^"]+)"/g, '<b>"$1"</b>')
       .replace(/「([^」]+)」/g, '<b>「$1」</b>')
       .replace(/\n/g, '<br/>');
