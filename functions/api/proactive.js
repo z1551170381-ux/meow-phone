@@ -1,10 +1,7 @@
-// functions/api/proactive.js — v2.1 状态机版
-// 变更：
-//   - 查询 state='planned' 替代 is_sent=false & is_cancelled=false
-//   - 到时间后先检查是否过期（→ expired）
-//   - 发送成功 → state='sent'，失败 → state='skipped' + skip_reason
-//   - 清理时按 state 而非 is_sent/is_cancelled
-//   - 兼容期同时写旧字段
+// functions/api/proactive.js — Cloudflare Pages Functions (v4 — 定时推送版)
+// 由 cron 定期调用（每 2~5 分钟一次）
+// ★ 不再调 AI API，不再存 API Key
+// ★ 只检查 meow_scheduled_push 表中到时间的消息，发 Web Push
 
 // ─────────── Supabase REST ───────────
 
@@ -23,14 +20,15 @@ async function sbSelect(env, table, extra) {
   return r.json();
 }
 
-async function sbPatchById(env, table, id, data) {
-  const url = `${env.SUPABASE_URL}/rest/v1/${table}?id=eq.${encodeURIComponent(id)}`;
+async function sbPatch(env, table, filters, data) {
+  let url = `${env.SUPABASE_URL}/rest/v1/${table}?`;
+  for (const k of Object.keys(filters)) url += `${k}=eq.${encodeURIComponent(filters[k])}&`;
   const r = await fetch(url, {
     method: 'PATCH',
     headers: sbHeaders(env),
     body: JSON.stringify(data)
   });
-  if (!r.ok) throw new Error(`sbPatchById ${table} ${r.status}`);
+  if (!r.ok) throw new Error(`sbPatch ${table} ${r.status}`);
 }
 
 async function sbInsert(env, table, data) {
@@ -127,15 +125,15 @@ async function sendWebPush(device, npcName, npcId, text, env) {
       Authorization: 'vapid t=' + jwt + ',k=' + env.VAPID_PUBLIC_KEY,
       TTL: '86400', Urgency: 'normal'
     };
-    let pushBody;
+    let body;
     if (device.p256dh && device.auth) {
-      pushBody = await encryptPayload(payload, device.p256dh, device.auth);
+      body = await encryptPayload(payload, device.p256dh, device.auth);
       headers['Content-Type']     = 'application/octet-stream';
       headers['Content-Encoding'] = 'aes128gcm';
     } else {
       headers['Content-Length'] = '0';
     }
-    const resp = await fetch(device.endpoint, { method:'POST', headers, body: pushBody || undefined });
+    const resp = await fetch(device.endpoint, { method:'POST', headers, body: body || undefined });
     if (resp.status === 410 || resp.status === 404) return { result:'expired', status:resp.status };
     if (resp.ok || resp.status === 201)             return { result:'ok',      status:resp.status };
     return { result:'fail', status:resp.status, text:(await resp.text()).slice(0,200) };
@@ -154,36 +152,13 @@ export async function onRequestGet(context) {
   if (env.CRON_SECRET && secret !== env.CRON_SECRET)
     return new Response('Unauthorized', { status: 401 });
 
-  const now = new Date();
-  const nowIso = now.toISOString();
+  const now = new Date().toISOString();
   const results = [];
 
   try {
-    // ── 1. 先把过期的 planned 标记为 expired ──
-    try {
-      const expireUrl =
-        `${env.SUPABASE_URL}/rest/v1/meow_scheduled_push` +
-        `?state=eq.planned` +
-        `&expires_at=lt.${encodeURIComponent(nowIso)}`;
-
-      await fetch(expireUrl, {
-        method: 'PATCH',
-        headers: sbHeaders(env),
-        body: JSON.stringify({
-          state:         'expired',
-          cancel_reason: 'auto_expired',
-          is_cancelled:  true,
-          cancelled_at:  nowIso,
-          updated_at:    nowIso
-        })
-      });
-    } catch(e) {
-      console.error('[proactive] expire sweep error:', e);
-    }
-
-    // ── 2. 查找所有到时间的 planned 消息 ──
+    // ── 查找所有到时间、未发送、未取消的消息 ──
     const pending = await sbSelect(env, 'meow_scheduled_push',
-      `&state=eq.planned&push_at=lte.${encodeURIComponent(nowIso)}&order=push_at.asc&limit=20`
+      `&is_sent=eq.false&is_cancelled=eq.false&push_at=lte.${encodeURIComponent(now)}&order=push_at.asc&limit=20`
     );
 
     if (!pending || !pending.length) {
@@ -191,7 +166,7 @@ export async function onRequestGet(context) {
     }
 
     for (const msg of pending) {
-      const { id, uid, npc_id, npc_name, text, slot, batch_id } = msg;
+      const { id, uid, npc_id, npc_name, text } = msg;
 
       // 获取该用户的设备
       const devices = await sbSelect(env, 'meow_devices', `&uid=eq.${encodeURIComponent(uid)}`);
@@ -206,45 +181,28 @@ export async function onRequestGet(context) {
         }
       }
 
-      if (pushed > 0) {
-        // ★ 发送成功 → state='sent'
-        await sbPatchById(env, 'meow_scheduled_push', id, {
-          state:      'sent',
-          is_sent:    true,
-          sent_at:    nowIso,
-          updated_at: nowIso
-        });
-      } else {
-        // 没有有效设备，标记为 skipped
-        await sbPatchById(env, 'meow_scheduled_push', id, {
-          state:       'skipped',
-          skip_reason: 'no_valid_device',
-          updated_at:  nowIso
-        });
-      }
+      // 标记为已发送
+      const patchUrl = `${env.SUPABASE_URL}/rest/v1/meow_scheduled_push?id=eq.${encodeURIComponent(id)}`;
+      await fetch(patchUrl, {
+        method: 'PATCH',
+        headers: sbHeaders(env),
+        body: JSON.stringify({ is_sent: true, sent_at: new Date().toISOString() })
+      });
 
-      // 存到 pending_messages 供前端拉取（无论是否推送成功）
+      // 也存到 pending_messages 供前端拉取
       try {
         await sbInsert(env, 'meow_pending_messages', {
           uid, npc_id, npc_name, text, kind: 'bgpush', ts: Date.now(), is_pulled: false
         });
       } catch(e) {}
 
-      results.push({
-        id, npc_id, npc_name, pushed, slot: slot || null,
-        state: pushed > 0 ? 'sent' : 'skipped',
-        preview: text.slice(0, 30),
-        batch_id: batch_id || null
-      });
+      results.push({ id, npc_id, npc_name, pushed, preview: text.slice(0, 30), batch_id: msg.batch_id || null });
     }
 
-    // ── 3. 清理：删除 7 天前的终态记录 ──
+    // ── 清理：删除 7 天前的已发送/已取消记录 ──
     try {
       const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
-      const cleanUrl =
-        `${env.SUPABASE_URL}/rest/v1/meow_scheduled_push` +
-        `?created_at=lt.${encodeURIComponent(cutoff)}` +
-        `&state=in.(sent,expired,cancelled,skipped)`;
+      const cleanUrl = `${env.SUPABASE_URL}/rest/v1/meow_scheduled_push?created_at=lt.${encodeURIComponent(cutoff)}&or=(is_sent.eq.true,is_cancelled.eq.true)`;
       await fetch(cleanUrl, { method: 'DELETE', headers: sbHeaders(env) });
     } catch(e) {}
 
