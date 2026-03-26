@@ -18811,13 +18811,24 @@ const npc = _wxGetChatTargetMeta(npcId);
           if (v < 85)  return '亲密';
           return '深厚';
         }
+        var isFamily = bondLabel === '家人';
         function affinityColor(v) {
+          if (isFamily) {
+            if (v < 0) return '#b0a0c0';
+            if (v < 50) return '#8B7CB0';
+            return '#6D40B0';
+          }
           if (v < -10) return '#e07060';
           if (v < 30)  return 'var(--ph-text-dim)';
-          if (v < 60)  return 'var(--ph-accent, #07c160)';
-          return '#e06090';
+          if (v < 60)  return '#e08080';
+          return '#e04070';
         }
+        var heartCaps = { '同事':40,'同学':40,'室友':50,'朋友':60,'前任':70,'暧昧':80,'恋人':100,'伴侣':100,'家人':100 };
+        var heartCap = heartCaps[bondLabel] || 60;
         var affinityPct = Math.max(0, Math.min(100, (affinity + 100) / 2));
+        var visualPct = Math.min(affinityPct, heartCap);
+        var heartFillY = 22 - visualPct * 0.22;
+        var hColor = affinityColor(affinity);
 
         var VALID_LABELS = ['朋友','家人','暧昧','恋人','伴侣','同事','同学','前任','室友'];
         var FREQ_OPTIONS = [
@@ -21901,18 +21912,42 @@ const npc = _wxGetChatTargetMeta(npcId);
         var affinityVal = typeof charEx.affinity === 'number' ? charEx.affinity : 20;
         var affinityPct = Math.max(0, Math.min(100, (affinityVal + 100) / 2));
 
-        // 好感心形颜色+填充
-        function _heartColor(v) {
-          if (v < -30) return '#ccc';
-          if (v < 0)   return '#c0a0a0';
-          if (v < 30)  return '#d4a0a0';
-          if (v < 50)  return '#e08080';
-          if (v < 70)  return '#e06080';
-          if (v < 85)  return '#e04070';
-          return '#e02060';
+        // ★ 心形颜色按标签区分
+        var heartColorMap = {
+          '朋友':'#5090d0', '家人':'#8B5CF6', '暧昧':'#e8a020',
+          '恋人':'#e04070', '伴侣':'#c01e50', '同事':'#3B82F6',
+          '同学':'#3B82F6', '前任':'#999', '室友':'#10B981'
+        };
+        var heartColor = heartColorMap[bondLabelNew] || '#5090d0';
+        // 好感低时心形颜色变灰
+        if (affinityVal < -30) heartColor = '#ccc';
+        else if (affinityVal < 0) heartColor = '#b0a0a0';
+
+        var heartFillY = 22 - affinityPct * 0.22;
+
+        // ★ 好感刻度名（标签×档位）
+        var affinityScaleNames = {
+          '朋友':  ['仇人','反感','点头之交','普通朋友','好朋友','挚友','知己'],
+          '家人':  ['决裂','疏远','客气','家常','亲近','依赖','至亲'],
+          '暧昧':  ['厌恶','幻灭','初识','微妙','暗涌','心动','沉沦'],
+          '恋人':  ['怨恨','冷战','磨合','甜蜜','热恋','浓情','灵魂伴侣'],
+          '伴侣':  ['破碎','裂痕','平淡','日常','默契','相守','此生不换'],
+          '同事':  ['敌对','不合','同事','搭档','信赖','知己','莫逆之交'],
+          '同学':  ['敌对','不合','同学','搭档','信赖','知己','莫逆之交'],
+          '前任':  ['死敌','怨念','陌路','释然','余温','牵挂','放不下'],
+          '室友':  ['仇视','嫌隙','邻居','熟人','好室友','亲如家人','家人']
+        };
+        function getAffinityScaleName(label, val) {
+          var names = affinityScaleNames[label] || affinityScaleNames['朋友'];
+          if (val < -30) return names[0];
+          if (val < 0)   return names[1];
+          if (val < 20)  return names[2];
+          if (val < 40)  return names[3];
+          if (val < 60)  return names[4];
+          if (val < 80)  return names[5];
+          return names[6];
         }
-        var heartColor = _heartColor(affinityVal);
-        var heartFillY = 22 - affinityPct * 0.22; // 液面Y位置
+        var scaleName = getAffinityScaleName(bondLabelNew, affinityVal);
 
         // 关系标签颜色
         var bondLabelColors = {
@@ -21926,8 +21961,8 @@ const npc = _wxGetChatTargetMeta(npcId);
           '同学':'rgba(59,130,246,.1)', '前任':'rgba(0,0,0,.06)', '室友':'rgba(16,185,129,.1)'
         };
 
-        // 内联心形SVG（小尺寸，隐晦）
-        var heartSvg = `<svg viewBox="0 0 24 22" width="16" height="15" style="vertical-align:middle;flex-shrink:0;"><defs><clipPath id="hc_${esc(npcId)}"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></clipPath></defs><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="rgba(0,0,0,.08)" stroke="${heartColor}" stroke-width="0.8"/><g clip-path="url(#hc_${esc(npcId)})"><rect x="0" y="${heartFillY}" width="24" height="${22 - heartFillY}" fill="${heartColor}" opacity="0.8"/><path d="M0 ${heartFillY} Q6 ${heartFillY - 1.2} 12 ${heartFillY} T24 ${heartFillY}" fill="${heartColor}" opacity="0.5"/></g></svg>`;
+        // 内联心形SVG（可点击）
+        var heartSvg = `<svg viewBox="0 0 24 22" width="16" height="15" style="vertical-align:middle;flex-shrink:0;cursor:pointer;" data-act="showAffinityBubble"><defs><clipPath id="hc_${esc(npcId)}"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></clipPath></defs><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="rgba(0,0,0,.08)" stroke="${heartColor}" stroke-width="0.8"/><g clip-path="url(#hc_${esc(npcId)})"><rect x="0" y="${heartFillY}" width="24" height="${22 - heartFillY}" fill="${heartColor}" opacity="0.8"/><path d="M0 ${heartFillY} Q6 ${heartFillY - 1.2} 12 ${heartFillY} T24 ${heartFillY}" fill="${heartColor}" opacity="0.5"/></g></svg>`;
 
         body.innerHTML = `<div class="wxStateDetailWrap">
 
@@ -21940,6 +21975,17 @@ const npc = _wxGetChatTargetMeta(npcId);
                 ${heartSvg}
                 <span class="wxSPCBond" style="color:${bondLabelColors[bondLabelNew]||'#888'};background:${bondLabelBgs[bondLabelNew]||'rgba(0,0,0,.05)'};">${esc(bondLabelNew)}</span>
                 <span style="font-size:12px;color:var(--ph-text-sub);">${moodEmoji[s.moodText||'平静']||'😌'} ${esc(s.moodText||'平静')}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 好感气泡（隐藏，点心形显示/隐藏） -->
+          <div id="affinityBubble_${esc(npcId)}" style="display:none;margin:0 14px 8px;padding:10px 14px;background:var(--ph-glass, rgba(255,255,255,.85));border-radius:12px;border:1px solid ${heartColor}30;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <svg viewBox="0 0 24 22" width="24" height="22"><defs><clipPath id="hcb_${esc(npcId)}"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></clipPath></defs><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="rgba(0,0,0,.06)" stroke="${heartColor}" stroke-width="0.6"/><g clip-path="url(#hcb_${esc(npcId)})"><rect x="0" y="${heartFillY}" width="24" height="${22 - heartFillY}" fill="${heartColor}" opacity="0.8"/><path d="M0 ${heartFillY} Q6 ${heartFillY-1.2} 12 ${heartFillY} T24 ${heartFillY}" fill="${heartColor}" opacity="0.5"/></g></svg>
+              <div>
+                <div style="font-size:15px;font-weight:600;color:${heartColor};">${esc(scaleName)}</div>
+                <div style="font-size:11px;color:var(--ph-text-sub);margin-top:1px;">${esc(bondLabelNew)}</div>
               </div>
             </div>
           </div>
@@ -21979,6 +22025,25 @@ const npc = _wxGetChatTargetMeta(npcId);
           try{ toast('状态已重置'); }catch(e){}
           _renderStateDetailPage(nid);
         });
+
+        // ★ 心形点击 → 显示/隐藏好感气泡
+        var heartEl = body.querySelector('[data-act="showAffinityBubble"]');
+        if (heartEl) {
+          heartEl.addEventListener('click', function() {
+            var bubble = body.querySelector('#affinityBubble_' + npcId.replace(/[^a-zA-Z0-9_]/g, ''));
+            if (!bubble) bubble = body.querySelector('[id^="affinityBubble_"]');
+            if (bubble) {
+              if (bubble.style.display === 'none') {
+                bubble.style.display = 'block';
+                // 3秒后自动隐藏
+                setTimeout(function() { if (bubble) bubble.style.display = 'none'; }, 3000);
+              } else {
+                bubble.style.display = 'none';
+              }
+            }
+          });
+        }
+
         body.querySelector('[data-act="cbSetMood"]')?.addEventListener('click', function(){
           var nid = this.getAttribute('data-npcid') || npcId;
           _openManualStateEditor(nid, function(){ _renderStateDetailPage(nid); });
