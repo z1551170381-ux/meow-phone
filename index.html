@@ -21142,6 +21142,28 @@ const npc = _wxGetChatTargetMeta(npcId);
           }
         } catch(e) {}
 
+        // ★★★ 离线模式：把字数要求注入到最后一条 user 消息里（LLM 对最后 user 消息注意力最高）
+        try {
+          if (mode === 'offline') {
+            var _scCtx = (typeof _loadSceneData === 'function') ? _loadSceneData(npcId) : null;
+            var _wcCtx = _scCtx ? (parseInt(_scCtx.wordCount) || 0) : 0;
+            var _offModeCtx = _scCtx ? String(_scCtx.offlineMode || 'stage') : 'stage';
+            var _wcHint = '';
+            if (_wcCtx > 0) {
+              _wcHint = '\n[请写约' + _wcCtx + '字的详细回复，至少' + Math.max(3, Math.round(_wcCtx/120)) + '个段落，充分展开环境描写、动作细节、心理活动和对话内容，不要草草结束。]';
+            } else {
+              _wcHint = '\n[请写充实的回复，至少5个段落，包含环境、动作、心理和对话，不要只写一两句就结束。]';
+            }
+            // 追加到最后一条 user 消息
+            for (var _wi = out.length - 1; _wi >= 0; _wi--) {
+              if (out[_wi].role === 'user' && typeof out[_wi].content === 'string') {
+                out[_wi].content += _wcHint;
+                break;
+              }
+            }
+          }
+        } catch(e) {}
+
         return out;
       }
 
