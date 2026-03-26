@@ -69,13 +69,20 @@ function checkReadNoReply(bondLabel, slot, allowChaseOnRead) {
 }
 
 // ─────────── 勿扰时段判断 ───────────
-function isInQuietHours(nowDate, quietStart, quietEnd) {
+// ─────────── 勿扰时段判断（支持时区） ───────────
+function isInQuietHours(nowDate, quietStart, quietEnd, timezoneOffsetMin) {
   const startParts = String(quietStart || '23:30').split(':');
   const endParts   = String(quietEnd   || '08:00').split(':');
   const startMin = (parseInt(startParts[0]) || 23) * 60 + (parseInt(startParts[1]) || 30);
   const endMin   = (parseInt(endParts[0])   || 8)  * 60 + (parseInt(endParts[1])   || 0);
 
-  const nowMin = nowDate.getHours() * 60 + nowDate.getMinutes();
+  // ★ 把 UTC 时间转为用户本地时间
+  // timezoneOffsetMin: 用户时区偏移（分钟），如 UTC+8 = 480, UTC+9 = 540
+  // 如果没有传入，降级为 UTC+8（中国时间）
+  const offset = typeof timezoneOffsetMin === 'number' ? timezoneOffsetMin : 480;
+  const userLocalMs = nowDate.getTime() + offset * 60000;
+  const userLocal = new Date(userLocalMs);
+  const nowMin = userLocal.getUTCHours() * 60 + userLocal.getUTCMinutes();
 
   if (startMin === endMin) return false;
   if (startMin < endMin) {
@@ -312,9 +319,12 @@ export async function onRequestGet(context) {
 
     const quietStart = (globalSettings && globalSettings.quiet_hours_start) || '23:30';
     const quietEnd   = (globalSettings && globalSettings.quiet_hours_end)   || '08:00';
+    // ★ 读取用户时区偏移（分钟），默认 UTC+8
+    const userTzOffset = (globalSettings && typeof globalSettings.timezone_offset === 'number')
+      ? globalSettings.timezone_offset : 480;
 
-    // 勿扰时段检查（全局，所有消息一起跳过）
-    if (isInQuietHours(now, quietStart, quietEnd)) {
+    // 勿扰时段检查（用用户本地时间判断）
+    if (isInQuietHours(now, quietStart, quietEnd, userTzOffset)) {
       // 全部标记为 skipped
       for (const msg of pending) {
         await sbPatchById(env, 'meow_scheduled_push', msg.id, {

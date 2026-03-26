@@ -46,6 +46,9 @@ function sanitizePayload(input) {
     quiet_hours_end: normTimeStr(src.quiet_hours_end, DEFAULTS.quiet_hours_end),
     daily_windows: normWindowList(src.daily_windows, DEFAULTS.daily_windows),
     random_windows: normWindowList(src.random_windows, DEFAULTS.random_windows),
+    // ★ 新字段
+    timezone_offset: typeof src.timezone_offset === 'number' ? Math.max(-720, Math.min(840, Math.round(src.timezone_offset))) : 480,
+    enable_voice_chase: !!src.enable_voice_chase,
     updated_at: new Date().toISOString()
   };
 }
