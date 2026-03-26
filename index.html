@@ -2367,7 +2367,6 @@ function phoneApplyWallpaper(base64OrEmpty, target){
         case '🔗': return s('<path d="M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z"/>');
         case '🎙': return s('<path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3zm-1-9c0-.55.45-1 1-1s1 .45 1 1v6c0 .55-.45 1-1 1s-1-.45-1-1V5zm6 6c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>');
         case '⏰': return s('<path d="M22 5.72l-4.6-3.86-1.29 1.53 4.6 3.86L22 5.72zM7.88 3.39L6.6 1.86 2 5.71l1.29 1.53 4.59-3.85zM12.5 8H11v6l4.75 2.85.75-1.23-4-2.37V8zM12 4c-4.97 0-9 4.03-9 9s4.02 9 9 9c4.97 0 9-4.03 9-9s-4.03-9-9-9zm0 16c-3.87 0-7-3.13-7-7s3.13-7 7-7 7 3.13 7 7-3.13 7-7 7z"/>');
-          case '🕐': return s('<path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10 10-4.5 10-10S17.5 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm.5-13H11v6l5.2 3.2.8-1.3-4.5-2.7V7z"/>');
         case '👆': return s('<path d="M9 11.24V7.5C9 6.12 10.12 5 11.5 5S14 6.12 14 7.5v3.74c1.21-.81 2-2.18 2-3.74C16 5.01 13.99 3 11.5 3S7 5.01 7 7.5c0 1.56.79 2.93 2 3.74zm9.84 4.63l-4.54-2.26c-.17-.07-.35-.11-.54-.11H13v-6c0-.83-.67-1.5-1.5-1.5S10 6.67 10 7.5v10.74l-3.43-.72c-.08-.01-.15-.03-.24-.03-.31 0-.59.13-.79.33l-.79.8 4.94 4.94c.27.27.65.44 1.06.44h6.79c.75 0 1.33-.55 1.44-1.28l.75-5.27c.01-.07.02-.14.02-.2 0-.62-.38-1.16-.91-1.38z"/>');
         case '💔': return s('<path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/>');
         case '⚡': return s('<path d="M7 2v11h3v9l7-12h-4l4-8z"/>');
@@ -8117,7 +8116,6 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
             else if (cspage === 'reminders') _renderRemindersPage(nid);
             else if (cspage === 'pokeSettings') _renderPokeSettingsPage(nid);
             else if (cspage === 'proactiveDebug') _renderProactiveDebugPage(nid);
-            else if (cspage === 'proactiveSettings') _renderProactiveSettingsPage(nid);
             return;
           }
           if (act === 'wxCSBack'){
@@ -18506,16 +18504,13 @@ const npc = _wxGetChatTargetMeta(npcId);
                 </div>
                 <button class="wxReminderToggle ${charEx.quickChat?'on':'off'}" data-act="wxCSToggleQuickChat" data-npcid="${esc(contactId)}" style="margin-left:auto;flex-shrink:0;"></button>
               </div>
-              <div class="wxCSItem" data-act="wxCSNav" data-cspage="proactiveSettings" data-npcid="${esc(contactId)}">
+              <div class="wxCSItem" style="cursor:default;">
                 <div class="wxCSIco">${_phFlatIcon('🔔')}</div>
                 <div class="wxCSName">
                   主动找你
-                  <div style="font-size:11px;color:rgba(20,24,28,.4);margin-top:1px;">频率、关系、好感度</div>
+                  <div style="font-size:11px;color:rgba(20,24,28,.4);margin-top:1px;">角色根据状态主动发消息+弹窗</div>
                 </div>
-                <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
-                  <span style="font-size:12px;color:rgba(20,24,28,.35);">${charEx.enableLifePush!==false?'已开启':'已关闭'}</span>
-                  <div class="wxCSArrow">›</div>
-                </div>
+                <button class="wxReminderToggle ${charEx.enableLifePush!==false?'on':'off'}" data-act="wxCSToggleLifePush" data-npcid="${esc(contactId)}" style="margin-left:auto;flex-shrink:0;"></button>
               </div>
               <div class="wxCSItem" data-act="wxCSNav" data-cspage="proactiveDebug" data-npcid="${esc(contactId)}">
                 <div class="wxCSIco">${_phFlatIcon('🧪')}</div>
@@ -18769,227 +18764,6 @@ const npc = _wxGetChatTargetMeta(npcId);
         body.querySelector('[data-act="schManualEdit"]')?.addEventListener('click', function(){
           var nid = this.getAttribute('data-npcid') || npcId;
           _openScheduleEditor(nid);
-        });
-      }
-
-      // ═══════════════════════════════════════════
-      //  主动找你 — 角色级设置面板
-      // ═══════════════════════════════════════════
-      function _renderProactiveSettingsPage(npcId) {
-        var body = root.querySelector('.phAppBody');
-        if (!body) return;
-
-        // 读取角色配置
-        var charEx = {};
-        try { charEx = JSON.parse(localStorage.getItem('meow_phone_c_standalone_main_charex_' + npcId) || '{}'); } catch(e){}
-
-        var npcName = npcId;
-        try {
-          if (typeof _meowCollectNpcs === 'function') {
-            var npcs = _meowCollectNpcs();
-            for (var i = 0; i < npcs.length; i++) {
-              if (npcs[i] && npcs[i].id === npcId) { npcName = npcs[i].name || npcId; break; }
-            }
-          }
-        } catch(e) {}
-
-        // 读取后端配置（如果有）
-        var bondLabel = charEx.bondLabel || charEx.bond || '朋友';
-        var pushFreq = charEx.pushFrequency || 'auto';
-        var enablePush = charEx.enableLifePush !== false;
-        var allowChase = !!charEx.allowChaseOnRead;
-
-        // 好感模糊描述
-        var affinity = typeof charEx.affinity === 'number' ? charEx.affinity : 20;
-        function affinityDesc(v) {
-          if (v < -30) return '厌恶';
-          if (v < -10) return '反感';
-          if (v < 10)  return '冷淡';
-          if (v < 30)  return '一般';
-          if (v < 50)  return '友好';
-          if (v < 70)  return '亲近';
-          if (v < 85)  return '亲密';
-          return '深厚';
-        }
-        var isFamily = bondLabel === '家人';
-        function affinityColor(v) {
-          if (isFamily) {
-            if (v < 0) return '#b0a0c0';
-            if (v < 50) return '#8B7CB0';
-            return '#6D40B0';
-          }
-          if (v < -10) return '#e07060';
-          if (v < 30)  return 'var(--ph-text-dim)';
-          if (v < 60)  return '#e08080';
-          return '#e04070';
-        }
-        var heartCaps = { '同事':40,'同学':40,'室友':50,'朋友':60,'前任':70,'暧昧':80,'恋人':100,'伴侣':100,'家人':100 };
-        var heartCap = heartCaps[bondLabel] || 60;
-        var affinityPct = Math.max(0, Math.min(100, (affinity + 100) / 2));
-        var visualPct = Math.min(affinityPct, heartCap);
-        var heartFillY = 22 - visualPct * 0.22;
-        var hColor = affinityColor(affinity);
-
-        var VALID_LABELS = ['朋友','家人','暧昧','恋人','伴侣','同事','同学','前任','室友'];
-        var FREQ_OPTIONS = [
-          { val: 'auto', label: 'AI 自动', desc: '根据角色性格决定' },
-          { val: 'low', label: '少', desc: '每轮最多 2 次' },
-          { val: 'normal', label: '正常', desc: '每轮最多 3 次' },
-          { val: 'high', label: '频繁', desc: '每轮最多 5 次' }
-        ];
-
-        var showChaseOption = ['暧昧','恋人','伴侣'].indexOf(bondLabel) >= 0;
-
-        body.innerHTML = ''
-          + '<div class="phTopBar"><button data-act="wxCSBack" class="phBackBtn">‹</button><div class="phTitle">主动找你</div><div style="width:32px;"></div></div>'
-          + '<div class="phScroll" style="padding:12px 14px 80px;">'
-
-          // 总开关
-          + '<div class="phCard" style="margin-bottom:12px;padding:14px;">'
-          + '<div style="display:flex;align-items:center;justify-content:space-between;">'
-          + '<div><div style="font-size:14px;font-weight:600;color:var(--ph-text);">' + esc(npcName) + ' 主动找你</div>'
-          + '<div style="font-size:11px;color:var(--ph-text-sub);margin-top:2px;">开启后角色会在聊天结束后主动发消息给你</div></div>'
-          + '<button class="sToggle' + (enablePush ? ' on' : '') + '" data-el="ps_enable" style="flex-shrink:0;"></button>'
-          + '</div></div>'
-
-          // 好感度条
-          + '<div class="phCard" style="margin-bottom:12px;padding:14px;">'
-          + '<div style="font-size:12px;font-weight:600;color:var(--ph-text);margin-bottom:8px;">好感度</div>'
-          + '<div style="display:flex;align-items:center;gap:10px;">'
-          + '<div style="flex:1;height:6px;border-radius:3px;background:var(--ph-sep,rgba(0,0,0,.06));overflow:hidden;">'
-          + '<div style="height:100%;width:' + affinityPct + '%;border-radius:3px;background:' + affinityColor(affinity) + ';transition:width .3s;"></div>'
-          + '</div>'
-          + '<span style="font-size:12px;font-weight:600;color:' + affinityColor(affinity) + ';min-width:36px;text-align:right;">' + affinityDesc(affinity) + '</span>'
-          + '</div>'
-          + '</div>'
-
-          // 关系标签
-          + '<div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:6px 2px 4px;">关系标签</div>'
-          + '<div class="phCard" style="margin-bottom:12px;padding:4px 6px;">'
-          + '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 4px;">'
-          + VALID_LABELS.map(function(lb) {
-              var sel = lb === bondLabel;
-              return '<button data-el="ps_bond" data-val="' + lb + '" style="padding:6px 14px;border-radius:16px;border:1px solid ' + (sel ? 'var(--ph-accent,#07c160)' : 'rgba(0,0,0,.08)') + ';background:' + (sel ? 'var(--ph-accent,#07c160)' : 'rgba(255,255,255,.7)') + ';color:' + (sel ? '#fff' : 'var(--ph-text)') + ';font-size:12px;font-weight:500;cursor:pointer;">' + lb + '</button>';
-            }).join('')
-          + '</div></div>'
-
-          // 消息频率
-          + '<div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:6px 2px 4px;">消息频率</div>'
-          + '<div class="phCard" style="margin-bottom:12px;padding:4px 6px;">'
-          + FREQ_OPTIONS.map(function(opt) {
-              var sel = opt.val === pushFreq;
-              return '<div data-el="ps_freq" data-val="' + opt.val + '" style="display:flex;align-items:center;padding:10px 8px;cursor:pointer;border-bottom:1px solid var(--ph-sep,rgba(0,0,0,.04));">'
-                + '<div style="width:18px;height:18px;border-radius:50%;border:2px solid ' + (sel ? 'var(--ph-accent,#07c160)' : 'rgba(0,0,0,.15)') + ';margin-right:10px;display:flex;align-items:center;justify-content:center;">'
-                + (sel ? '<div style="width:10px;height:10px;border-radius:50%;background:var(--ph-accent,#07c160);"></div>' : '')
-                + '</div>'
-                + '<div><div style="font-size:13px;font-weight:500;color:var(--ph-text);">' + opt.label + '</div>'
-                + '<div style="font-size:11px;color:var(--ph-text-sub);">' + opt.desc + '</div></div>'
-                + '</div>';
-            }).join('')
-          + '</div>'
-
-          // 已读不回可追发（仅暧昧/恋人/伴侣显示）
-          + (showChaseOption
-            ? '<div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:6px 2px 4px;">已读不回行为</div>'
-              + '<div class="phCard" style="margin-bottom:12px;padding:14px;">'
-              + '<div style="display:flex;align-items:center;justify-content:space-between;">'
-              + '<div><div style="font-size:13px;font-weight:500;color:var(--ph-text);">已读不回时可追发</div>'
-              + '<div style="font-size:11px;color:var(--ph-text-sub);margin-top:2px;">角色发现你看了没回，会再找你一次</div></div>'
-              + '<button class="sToggle' + (allowChase ? ' on' : '') + '" data-el="ps_chase" style="flex-shrink:0;"></button>'
-              + '</div></div>'
-            : '')
-
-          // 保存按钮
-          + '<button data-el="ps_proactive_save" style="width:100%;appearance:none;border:none;background:var(--ph-accent,#07c160);color:#fff;padding:12px;border-radius:14px;font-size:14px;font-weight:700;margin-top:8px;cursor:pointer;">保存</button>'
-
-          + '</div>';
-
-        // 事件绑定
-        var elEnable = body.querySelector('[data-el="ps_enable"]');
-        var elChase = body.querySelector('[data-el="ps_chase"]');
-        var elSave = body.querySelector('[data-el="ps_proactive_save"]');
-
-        if (elEnable) elEnable.addEventListener('click', function() { elEnable.classList.toggle('on'); });
-        if (elChase) elChase.addEventListener('click', function() { elChase.classList.toggle('on'); });
-
-        // 关系标签选择
-        body.querySelectorAll('[data-el="ps_bond"]').forEach(function(btn) {
-          btn.addEventListener('click', function() {
-            body.querySelectorAll('[data-el="ps_bond"]').forEach(function(b) {
-              b.style.border = '1px solid rgba(0,0,0,.08)';
-              b.style.background = 'rgba(255,255,255,.7)';
-              b.style.color = 'var(--ph-text)';
-            });
-            btn.style.border = '1px solid var(--ph-accent,#07c160)';
-            btn.style.background = 'var(--ph-accent,#07c160)';
-            btn.style.color = '#fff';
-          });
-        });
-
-        // 频率选择
-        body.querySelectorAll('[data-el="ps_freq"]').forEach(function(row) {
-          row.addEventListener('click', function() {
-            body.querySelectorAll('[data-el="ps_freq"]').forEach(function(r) {
-              var dot = r.querySelector('div > div');
-              var circle = r.querySelector('div:first-child');
-              if (circle) circle.style.borderColor = 'rgba(0,0,0,.15)';
-              if (dot) dot.innerHTML = '';
-            });
-            var dot = row.querySelector('div > div');
-            var circle = row.querySelector('div:first-child');
-            if (circle) circle.style.borderColor = 'var(--ph-accent,#07c160)';
-            if (dot) dot.innerHTML = '<div style="width:10px;height:10px;border-radius:50%;background:var(--ph-accent,#07c160);"></div>';
-          });
-        });
-
-        // 保存
-        if (elSave) elSave.addEventListener('click', function() {
-          var newEnable = elEnable && elEnable.classList.contains('on');
-          var newChase = elChase ? elChase.classList.contains('on') : false;
-
-          var newBond = bondLabel;
-          var selBondBtn = body.querySelector('[data-el="ps_bond"][style*="var(--ph-accent"]');
-          if (selBondBtn) newBond = selBondBtn.getAttribute('data-val') || bondLabel;
-
-          var newFreq = pushFreq;
-          body.querySelectorAll('[data-el="ps_freq"]').forEach(function(r) {
-            var circle = r.querySelector('div:first-child');
-            if (circle && circle.style.borderColor && circle.style.borderColor.indexOf('accent') >= 0) {
-              newFreq = r.getAttribute('data-val') || pushFreq;
-            }
-          });
-
-          // 保存到 charEx
-          charEx.enableLifePush = newEnable;
-          charEx.bondLabel = newBond;
-          charEx.bond = newBond;
-          charEx.pushFrequency = newFreq;
-          charEx.allowChaseOnRead = newChase;
-          try { localStorage.setItem('meow_phone_c_standalone_main_charex_' + npcId, JSON.stringify(charEx)); } catch(e) {}
-
-          // 同步到后端
-          try {
-            var uid = localStorage.getItem('meow_phone_uid') || 'standalone_main';
-            fetch('/api/subscribe', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                uid: uid,
-                subscription: { endpoint: 'dummy' },
-                npcs: [{
-                  id: npcId,
-                  name: npcName,
-                  bond: newBond,
-                  enableLifePush: newEnable,
-                  pushFrequency: newFreq,
-                  allowChaseOnRead: newChase
-                }]
-              })
-            }).catch(function(){});
-          } catch(e) {}
-
-          try { toast('已保存'); } catch(e) {}
-          try { goBack(); } catch(e) {}
         });
       }
 
@@ -19374,9 +19148,7 @@ const npc = _wxGetChatTargetMeta(npcId);
         var cur = _loadCharState(nid);
         var curDefs = _getAttrDefs(cur);
         var moodOptHtml = MOOD_ORDER.map(function(m){ return `<option value="${m}"${m===(cur.moodText||'平静')?' selected':''}>${m}</option>`; }).join('');
-        var charExForEditor = {};
-        try { charExForEditor = JSON.parse(localStorage.getItem('meow_phone_c_standalone_main_charex_' + nid) || '{}'); } catch(e) {}
-        var bondOptHtml = ['朋友','家人','暧昧','恋人','伴侣','同事','同学','前任','室友'].map(function(bd){ return `<option value="${bd}"${bd===(charExForEditor.bondLabel||charExForEditor.bond||cur.bond||'朋友')?' selected':''}>${bd}</option>`; }).join('');
+        var bondOptHtml = ['疏远','普通','亲近','暧昧','冷战中'].map(function(bd){ return `<option value="${bd}"${bd===cur.bond?' selected':''}>${bd}</option>`; }).join('');
         var attrSliders = curDefs.map(function(d){
           var v = (cur.attrs && cur.attrs[d.key] != null) ? cur.attrs[d.key] : d.init;
           return `<div style="margin-bottom:5px;display:flex;align-items:center;gap:6px;">
@@ -19407,15 +19179,7 @@ const npc = _wxGetChatTargetMeta(npcId);
         ov.querySelector('[data-el="moodSave"]').addEventListener('click', function(){
           var sNew = _loadCharState(nid);
           sNew.moodText = ov.querySelector('[data-el="moodSel"]').value;
-          var newBondVal = ov.querySelector('[data-el="bondSel"]').value;
-          sNew.bond = newBondVal;
-          // ★ 同步写入 charEx.bondLabel
-          try {
-            var _cex = JSON.parse(localStorage.getItem('meow_phone_c_standalone_main_charex_' + nid) || '{}');
-            _cex.bondLabel = newBondVal;
-            _cex.bond = newBondVal;
-            localStorage.setItem('meow_phone_c_standalone_main_charex_' + nid, JSON.stringify(_cex));
-          } catch(_e) {}
+          sNew.bond = ov.querySelector('[data-el="bondSel"]').value;
           var nd = _getAttrDefs(sNew);
           nd.forEach(function(d){ var inp = ov.querySelector('[data-el="attr_'+d.key+'"]'); if(inp) sNew.attrs[d.key] = Number(inp.value); });
           sNew.silentUntil = 0; sNew.silentReason = ''; sNew.lastCalcAt = Date.now();
@@ -21905,65 +21669,6 @@ const npc = _wxGetChatTargetMeta(npcId);
           silentBanner = `<div style="margin:0 14px 10px;padding:9px 12px;background:rgba(231,76,60,.08);border:1px solid rgba(231,76,60,.15);border-radius:12px;font-size:12px;color:#e74c3c;display:flex;align-items:center;gap:6px;">🤐 冷静中，约 ${leftM2} 分钟后恢复</div>`;
         }
 
-        // 读取 charEx 里的新关系数据
-        var charEx = {};
-        try { charEx = JSON.parse(localStorage.getItem('meow_phone_c_standalone_main_charex_' + npcId) || '{}'); } catch(e) {}
-        var bondLabelNew = charEx.bondLabel || charEx.bond || s.bond || '普通';
-        var affinityVal = typeof charEx.affinity === 'number' ? charEx.affinity : 20;
-        var affinityPct = Math.max(0, Math.min(100, (affinityVal + 100) / 2));
-
-        // ★ 心形颜色按标签区分
-        var heartColorMap = {
-          '朋友':'#5090d0', '家人':'#8B5CF6', '暧昧':'#e8a020',
-          '恋人':'#e04070', '伴侣':'#c01e50', '同事':'#3B82F6',
-          '同学':'#3B82F6', '前任':'#999', '室友':'#10B981'
-        };
-        var heartColor = heartColorMap[bondLabelNew] || '#5090d0';
-        // 好感低时心形颜色变灰
-        if (affinityVal < -30) heartColor = '#ccc';
-        else if (affinityVal < 0) heartColor = '#b0a0a0';
-
-        var heartFillY = 22 - affinityPct * 0.22;
-
-        // ★ 好感刻度名（标签×档位）
-        var affinityScaleNames = {
-          '朋友':  ['仇人','反感','点头之交','普通朋友','好朋友','挚友','知己'],
-          '家人':  ['决裂','疏远','客气','家常','亲近','依赖','至亲'],
-          '暧昧':  ['厌恶','幻灭','初识','微妙','暗涌','心动','沉沦'],
-          '恋人':  ['怨恨','冷战','磨合','甜蜜','热恋','浓情','灵魂伴侣'],
-          '伴侣':  ['破碎','裂痕','平淡','日常','默契','相守','此生不换'],
-          '同事':  ['敌对','不合','同事','搭档','信赖','知己','莫逆之交'],
-          '同学':  ['敌对','不合','同学','搭档','信赖','知己','莫逆之交'],
-          '前任':  ['死敌','怨念','陌路','释然','余温','牵挂','放不下'],
-          '室友':  ['仇视','嫌隙','邻居','熟人','好室友','亲如家人','家人']
-        };
-        function getAffinityScaleName(label, val) {
-          var names = affinityScaleNames[label] || affinityScaleNames['朋友'];
-          if (val < -30) return names[0];
-          if (val < 0)   return names[1];
-          if (val < 20)  return names[2];
-          if (val < 40)  return names[3];
-          if (val < 60)  return names[4];
-          if (val < 80)  return names[5];
-          return names[6];
-        }
-        var scaleName = getAffinityScaleName(bondLabelNew, affinityVal);
-
-        // 关系标签颜色
-        var bondLabelColors = {
-          '朋友':'rgba(20,24,28,.45)', '家人':'#8B5CF6', '暧昧':'#f39c12',
-          '恋人':'#e06090', '伴侣':'#e02060', '同事':'#3B82F6',
-          '同学':'#3B82F6', '前任':'#888', '室友':'#10B981'
-        };
-        var bondLabelBgs = {
-          '朋友':'rgba(0,0,0,.06)', '家人':'rgba(139,92,246,.1)', '暧昧':'rgba(243,156,18,.1)',
-          '恋人':'rgba(224,96,144,.1)', '伴侣':'rgba(224,32,96,.1)', '同事':'rgba(59,130,246,.1)',
-          '同学':'rgba(59,130,246,.1)', '前任':'rgba(0,0,0,.06)', '室友':'rgba(16,185,129,.1)'
-        };
-
-        // 内联心形SVG（可点击）
-        var heartSvg = `<svg viewBox="0 0 24 22" width="16" height="15" style="vertical-align:middle;flex-shrink:0;cursor:pointer;" data-act="showAffinityBubble"><defs><clipPath id="hc_${esc(npcId)}"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></clipPath></defs><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="rgba(0,0,0,.08)" stroke="${heartColor}" stroke-width="0.8"/><g clip-path="url(#hc_${esc(npcId)})"><rect x="0" y="${heartFillY}" width="24" height="${22 - heartFillY}" fill="${heartColor}" opacity="0.8"/><path d="M0 ${heartFillY} Q6 ${heartFillY - 1.2} 12 ${heartFillY} T24 ${heartFillY}" fill="${heartColor}" opacity="0.5"/></g></svg>`;
-
         body.innerHTML = `<div class="wxStateDetailWrap">
 
           <!-- Hero -->
@@ -21972,20 +21677,8 @@ const npc = _wxGetChatTargetMeta(npcId);
             <div style="flex:1;min-width:0;">
               <div class="wxSDName">${esc(npc.name)}</div>
               <div class="wxSDMeta">
-                ${heartSvg}
-                <span class="wxSPCBond" style="color:${bondLabelColors[bondLabelNew]||'#888'};background:${bondLabelBgs[bondLabelNew]||'rgba(0,0,0,.05)'};">${esc(bondLabelNew)}</span>
+                <span class="wxSPCBond" style="color:${bondColor[s.bond]||'#888'};background:${bondBg[s.bond]||'rgba(0,0,0,.05)'};">${esc(s.bond||'普通')}</span>
                 <span style="font-size:12px;color:var(--ph-text-sub);">${moodEmoji[s.moodText||'平静']||'😌'} ${esc(s.moodText||'平静')}</span>
-              </div>
-            </div>
-          </div>
-
-          <!-- 好感气泡（隐藏，点心形显示/隐藏） -->
-          <div id="affinityBubble_${esc(npcId)}" style="display:none;margin:0 14px 8px;padding:10px 14px;background:var(--ph-glass, rgba(255,255,255,.85));border-radius:12px;border:1px solid ${heartColor}30;">
-            <div style="display:flex;align-items:center;gap:10px;">
-              <svg viewBox="0 0 24 22" width="24" height="22"><defs><clipPath id="hcb_${esc(npcId)}"><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z"/></clipPath></defs><path d="M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z" fill="rgba(0,0,0,.06)" stroke="${heartColor}" stroke-width="0.6"/><g clip-path="url(#hcb_${esc(npcId)})"><rect x="0" y="${heartFillY}" width="24" height="${22 - heartFillY}" fill="${heartColor}" opacity="0.8"/><path d="M0 ${heartFillY} Q6 ${heartFillY-1.2} 12 ${heartFillY} T24 ${heartFillY}" fill="${heartColor}" opacity="0.5"/></g></svg>
-              <div>
-                <div style="font-size:15px;font-weight:600;color:${heartColor};">${esc(scaleName)}</div>
-                <div style="font-size:11px;color:var(--ph-text-sub);margin-top:1px;">${esc(bondLabelNew)}</div>
               </div>
             </div>
           </div>
@@ -22025,25 +21718,6 @@ const npc = _wxGetChatTargetMeta(npcId);
           try{ toast('状态已重置'); }catch(e){}
           _renderStateDetailPage(nid);
         });
-
-        // ★ 心形点击 → 显示/隐藏好感气泡
-        var heartEl = body.querySelector('[data-act="showAffinityBubble"]');
-        if (heartEl) {
-          heartEl.addEventListener('click', function() {
-            var bubble = body.querySelector('#affinityBubble_' + npcId.replace(/[^a-zA-Z0-9_]/g, ''));
-            if (!bubble) bubble = body.querySelector('[id^="affinityBubble_"]');
-            if (bubble) {
-              if (bubble.style.display === 'none') {
-                bubble.style.display = 'block';
-                // 3秒后自动隐藏
-                setTimeout(function() { if (bubble) bubble.style.display = 'none'; }, 3000);
-              } else {
-                bubble.style.display = 'none';
-              }
-            }
-          });
-        }
-
         body.querySelector('[data-act="cbSetMood"]')?.addEventListener('click', function(){
           var nid = this.getAttribute('data-npcid') || npcId;
           _openManualStateEditor(nid, function(){ _renderStateDetailPage(nid); });
@@ -26300,7 +25974,8 @@ const npc = _wxGetChatTargetMeta(npcId);
             try{ sysP = buildSystemPrompt(npcId); }catch(e){}
             // 追加通话专属覆盖指令（放在最后权重最高，覆盖格式要求）
             sysP += '\n\n【⚠ 当前正在进行'+(isVideo?'视频':'语音')+'通话，以下规则覆盖上方所有格式要求】'
-              + '\n- 口语化说话，每次1~3句，简短自然，像真实打电话一样'
+              + '\n- 口语化说话，每次2~5句，自然流畅，像真实打电话一样'
+              + '\n- 可以多说一点，不用太惜字如金，正常人打电话不会每次只蹦一句'
               + '\n- 禁止输出 ||| 分隔符，禁止输出 [状态:] [属性:] 等任何标记'
               + '\n- 禁止括号动作描写，禁止表情符号，只说话'
               + '\n- 可以用语气词：嗯、啊、哈哈、诶、喂、哦'
@@ -26310,7 +25985,7 @@ const npc = _wxGetChatTargetMeta(npcId);
             var result = await PhoneAI.chat({
               system: sysP,
               messages: recentMsgs.slice(-12),
-              temperature: 0.88, maxTokens: 300, timeout: 50
+              temperature: 0.88, maxTokens: 500, timeout: 50
             });
 
             if(ended) return;
@@ -26329,9 +26004,20 @@ const npc = _wxGetChatTargetMeta(npcId);
               if(va && va.apiUrl && va.apiKey){
                 setWave('active');
                 try{
+                  // ★ TTS 请求前短暂延迟，避免 API 限流
+                  await new Promise(function(r){ setTimeout(r, 200); });
                   var ttsR = await _callTTSApi(reply, npcId);
-                  if(ttsR.ok && !ended) await _playCallAudio(ttsR.audioUrl);
-                }catch(e){}
+                  if(ttsR.ok && !ended){
+                    await _playCallAudio(ttsR.audioUrl);
+                  } else if(!ttsR.ok) {
+                    console.warn('[Call] TTS failed:', ttsR.error);
+                    // ★ TTS 失败时模拟等待，不要直接跳过
+                    await new Promise(function(r){ setTimeout(r, Math.min(3000, reply.length*100+500)); });
+                  }
+                }catch(e){
+                  console.warn('[Call] TTS/playback error:', e);
+                  await new Promise(function(r){ setTimeout(r, 1000); });
+                }
               } else {
                 setWave('active');
                 await new Promise(function(r){ setTimeout(r, Math.min(3000, reply.length*120+500)); });
@@ -26345,7 +26031,7 @@ const npc = _wxGetChatTargetMeta(npcId);
             aiProcessing = false;
             if(!ended){
               setStatus('通话中'); setWave('');
-              if(interactionMode==='auto' && connected) setTimeout(function(){ startAutoListen(); }, 800);
+              if(interactionMode==='auto' && connected) setTimeout(function(){ startAutoListen(); }, 1200);
             }
           }
         }
@@ -26354,12 +26040,33 @@ const npc = _wxGetChatTargetMeta(npcId);
           return new Promise(function(resolve){
             if(ended){ resolve(); return; }
             try{
-              if(currentAudio){ try{currentAudio.pause();}catch(e){} currentAudio=null; }
-              var audio = new Audio(url);
+              if(currentAudio){ try{currentAudio.pause(); currentAudio.src=''; currentAudio.load();}catch(e){} currentAudio=null; }
+              var audio = new Audio();
               currentAudio = audio;
-              audio.onended = function(){ if(currentAudio===audio) currentAudio=null; resolve(); };
-              audio.onerror = function(){ if(currentAudio===audio) currentAudio=null; resolve(); };
-              audio.play().catch(function(){ if(currentAudio===audio) currentAudio=null; resolve(); });
+              var _blobUrl = url;
+
+              audio.onended = function(){
+                if(currentAudio===audio) currentAudio=null;
+                // ★ 释放 blob URL 防泄漏
+                try{ if(_blobUrl && _blobUrl.indexOf('blob:')===0) URL.revokeObjectURL(_blobUrl); }catch(e){}
+                // ★ 播放结束后短暂延迟，避免 STT 拾到尾音
+                setTimeout(resolve, 300);
+              };
+              audio.onerror = function(e){
+                console.warn('[Call] audio playback error:', e);
+                if(currentAudio===audio) currentAudio=null;
+                try{ if(_blobUrl && _blobUrl.indexOf('blob:')===0) URL.revokeObjectURL(_blobUrl); }catch(e2){}
+                resolve();
+              };
+
+              // ★ 设置 src 后再 play，比 new Audio(url) 更可靠
+              audio.src = url;
+              audio.play().catch(function(e){
+                console.warn('[Call] audio.play() failed:', e);
+                if(currentAudio===audio) currentAudio=null;
+                try{ if(_blobUrl && _blobUrl.indexOf('blob:')===0) URL.revokeObjectURL(_blobUrl); }catch(e2){}
+                resolve();
+              });
             }catch(e){ currentAudio=null; resolve(); }
           });
         }
@@ -29205,7 +28912,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           ]},
           { title:'功能', rows:[
             {icon:'📢',label:'通知推送',type:'custom',key:'pushNotify'},
-                 {icon:'🕐',label:'通知设置',value:'勿扰 / 语音通话',type:'nav',subpage:'pushSettings'},
+                 {icon:'⏳',label:'后台推送节奏',value:'保底 / 随机 / 时间窗',type:'nav',subpage:'pushSettings'},
             {icon:'💬',label:'聊天同步到主线',type:'toggle',key:'syncToMain',val:!!cfg.syncToMain},
             {icon:'🤖',label:'自动回复',type:'toggle',key:'autoReply',val:cfg.autoReply!==false},
             {icon:'📝',label:'上下文条数',value:(cfg.chatContextN||10)+'条',type:'nav',subpage:'chatContextN'},
@@ -29309,111 +29016,115 @@ function renderPushSettingsPage(container){
 
   const DEFAULTS = {
     enable_push: true,
+    daily_guaranteed_count: 1,
+    random_max_count: 1,
+    random_cooldown_minutes: 240,
     quiet_hours_start: '23:30',
     quiet_hours_end: '08:00',
-    enable_voice_chase: false
+    daily_windows: ['11:00-13:00'],
+    random_windows: ['19:30-22:30']
   };
 
   function getDraft(){
     try{
-      var raw = JSON.parse(localStorage.getItem('meow_push_settings_draft_v1') || 'null') || {};
-      return {
-        enable_push: raw.enable_push !== false,
-        quiet_hours_start: raw.quiet_hours_start || DEFAULTS.quiet_hours_start,
-        quiet_hours_end: raw.quiet_hours_end || DEFAULTS.quiet_hours_end,
-        enable_voice_chase: !!raw.enable_voice_chase
-      };
+      return JSON.parse(localStorage.getItem('meow_push_settings_draft_v1') || 'null') || { ...DEFAULTS };
     }catch(e){
       return { ...DEFAULTS };
     }
   }
 
   function saveDraft(v){
-    // 保留旧字段兼容，只更新我们关心的
-    try {
-      var existing = JSON.parse(localStorage.getItem('meow_push_settings_draft_v1') || '{}');
-      Object.assign(existing, v);
-      localStorage.setItem('meow_push_settings_draft_v1', JSON.stringify(existing));
-    } catch(e) {
-      localStorage.setItem('meow_push_settings_draft_v1', JSON.stringify(v));
-    }
+    localStorage.setItem('meow_push_settings_draft_v1', JSON.stringify(v));
+  }
+
+  function buildSummary(cfg){
+    const dailyWin = (cfg.daily_windows && cfg.daily_windows[0]) || '11:00-13:00';
+    const randomWin = (cfg.random_windows && cfg.random_windows[0]) || '19:30-22:30';
+    return `当前策略：保底 ${cfg.daily_guaranteed_count} 条 / 随机最多 ${cfg.random_max_count} 条 / 冷却 ${cfg.random_cooldown_minutes} 分钟 / 静默 ${cfg.quiet_hours_start}-${cfg.quiet_hours_end} / 保底窗 ${dailyWin} / 随机窗 ${randomWin}\n后台推送：每次推送(slot)计 1 次，静默期内消息自动错开推迟`;
   }
 
   async function loadRemote(){
     const resp = await fetch('/api/push-settings?uid=' + encodeURIComponent(uid), { cache:'no-store' });
     const data = await resp.json();
     if (!resp.ok || !data.ok) throw new Error(data.error || '读取失败');
-    var s = data.settings || {};
-    return {
-      enable_push: s.enable_push !== false,
-      quiet_hours_start: s.quiet_hours_start || DEFAULTS.quiet_hours_start,
-      quiet_hours_end: s.quiet_hours_end || DEFAULTS.quiet_hours_end,
-      enable_voice_chase: !!s.enable_voice_chase
-    };
+    return { ...DEFAULTS, ...(data.settings || {}) };
   }
 
   async function saveRemote(cfg){
-    // 保留旧字段兼容
-    var existing = getDraft();
-    var payload = { uid, ...existing, ...cfg };
     const resp = await fetch('/api/push-settings', {
       method: 'POST',
       headers: { 'Content-Type':'application/json' },
-      body: JSON.stringify(payload)
+      body: JSON.stringify({ uid, ...cfg })
     });
     const data = await resp.json();
     if (!resp.ok || !data.ok) throw new Error(data.error || '保存失败');
-    return cfg;
+    return { ...DEFAULTS, ...(data.settings || {}) };
   }
 
-  function rowInput(label, desc, el){
+  function rowInput(label, el){
     return `
       <div class="settingRow" style="align-items:center;">
         <span class="sIcon"></span>
-        <div style="flex:1;">
-          <span class="sLabel">${label}</span>
-          ${desc ? '<div style="font-size:11px;color:var(--ph-text-dim);margin-top:1px;">' + desc + '</div>' : ''}
-        </div>
+        <span class="sLabel">${label}</span>
         <span class="sValue" style="display:flex;align-items:center;gap:8px;">${el}</span>
       </div>
     `;
   }
 
   function renderUI(cfg){
+    const dailyWindow = (cfg.daily_windows && cfg.daily_windows[0]) || DEFAULTS.daily_windows[0];
+    const randomWindow = (cfg.random_windows && cfg.random_windows[0]) || DEFAULTS.random_windows[0];
+    const dailyStart = dailyWindow.split('-')[0] || '11:00';
+    const dailyEnd = dailyWindow.split('-')[1] || '13:00';
+    const randomStart = randomWindow.split('-')[0] || '19:30';
+    const randomEnd = randomWindow.split('-')[1] || '22:30';
+
     container.innerHTML = `
       <div class="phTopBar">
         <button data-act="settingsBack" class="phBackBtn">‹</button>
-        <div class="phTitle">通知设置</div>
+        <div class="phTitle">后台推送节奏</div>
         <div style="width:32px;"></div>
       </div>
 
       <div class="phScroll" style="padding:12px 14px 24px;">
+        <div class="phCard" style="margin-bottom:10px;">
+          <div style="font-size:13px;font-weight:700;color:var(--ph-text);margin-bottom:6px;">当前策略</div>
+          <div style="font-size:12px;line-height:1.6;color:var(--ph-text-sub);">${esc(buildSummary(cfg))}</div>
+        </div>
 
-        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:6px 2px 4px;">推送</div>
+        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:6px 2px 4px;">总开关</div>
         <div class="settingSection">
-          ${rowInput('启用主动消息推送', '关闭后所有角色都不会主动发通知', `<button class="sToggle${cfg.enable_push ? ' on' : ''}" data-el="ps_enable_push"></button>`)}
+          ${rowInput('启用后台推送', `<button class="sToggle${cfg.enable_push ? ' on' : ''}" data-el="ps_enable_push"></button>`)}
         </div>
 
-        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:10px 2px 4px;">勿扰时段</div>
+        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:10px 2px 4px;">保底消息</div>
         <div class="settingSection">
-          ${rowInput('开始时间', '', `<input data-el="ps_quiet_start" type="time" value="${cfg.quiet_hours_start}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
-          ${rowInput('结束时间', '', `<input data-el="ps_quiet_end" type="time" value="${cfg.quiet_hours_end}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
-        </div>
-        <div style="font-size:11px;color:var(--ph-text-dim);padding:4px 2px 0;">
-          此时段内所有角色的主动消息都不会推送。
+          ${rowInput('每天保底条数', `<input data-el="ps_daily_count" type="number" min="0" max="10" value="${cfg.daily_guaranteed_count}" style="width:64px;padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('保底时间窗开始', `<input data-el="ps_daily_start" type="time" value="${dailyStart}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('保底时间窗结束', `<input data-el="ps_daily_end" type="time" value="${dailyEnd}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
         </div>
 
-        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:10px 2px 4px;">语音通话</div>
+        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:10px 2px 4px;">随机消息</div>
         <div class="settingSection">
-          ${rowInput('已读不回时可来电', '恋人/伴侣发现你已读不回，可能会打电话给你', `<button class="sToggle${cfg.enable_voice_chase ? ' on' : ''}" data-el="ps_voice_chase"></button>`)}
+          ${rowInput('每天随机上限', `<input data-el="ps_random_count" type="number" min="0" max="20" value="${cfg.random_max_count}" style="width:64px;padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('随机最小间隔(分钟)', `<input data-el="ps_random_cd" type="number" min="10" max="1440" value="${cfg.random_cooldown_minutes}" style="width:84px;padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('随机时间窗开始', `<input data-el="ps_random_start" type="time" value="${randomStart}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('随机时间窗结束', `<input data-el="ps_random_end" type="time" value="${randomEnd}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
         </div>
 
-        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:10px 2px 4px;">热备状态</div>
+        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:10px 2px 4px;">静默时段</div>
+        <div class="settingSection">
+          ${rowInput('静默开始', `<input data-el="ps_quiet_start" type="time" value="${cfg.quiet_hours_start}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+          ${rowInput('静默结束', `<input data-el="ps_quiet_end" type="time" value="${cfg.quiet_hours_end}" style="padding:6px 8px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.75);">`)}
+        </div>
+
+        <div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:10px 2px 4px;">后台热备推送状态</div>
         <div class="settingSection" id="ps_bgpush_status_area">
           <div style="padding:10px 12px;font-size:12px;color:var(--ph-text-sub);">加载中…</div>
         </div>
-        <div style="font-size:11px;color:var(--ph-text-dim);padding:4px 2px 0;">
-          每次聊天后自动生成主动消息。每个角色的频率和行为在聊天设置里的「主动找你」中单独配置。
+        <div style="font-size:11px;line-height:1.6;color:var(--ph-text-dim);padding:4px 2px 0;">
+          <span style="opacity:.7;">说明：每个时段（soon / later / nextDay）算 1 次推送。</span><br>
+          <span style="opacity:.7;">静默期内的消息自动推迟并错开，不会堆到同一时间。nextDay 锁定在明天保底窗内。</span>
         </div>
 
         <div style="display:flex;gap:10px;margin-top:14px;">
@@ -29424,14 +29135,21 @@ function renderPushSettingsPage(container){
     `;
 
     const elEnable = container.querySelector('[data-el="ps_enable_push"]');
-    const elVoiceChase = container.querySelector('[data-el="ps_voice_chase"]');
+    const elDailyCount = container.querySelector('[data-el="ps_daily_count"]');
+    const elDailyStart = container.querySelector('[data-el="ps_daily_start"]');
+    const elDailyEnd = container.querySelector('[data-el="ps_daily_end"]');
+    const elRandomCount = container.querySelector('[data-el="ps_random_count"]');
+    const elRandomCd = container.querySelector('[data-el="ps_random_cd"]');
+    const elRandomStart = container.querySelector('[data-el="ps_random_start"]');
+    const elRandomEnd = container.querySelector('[data-el="ps_random_end"]');
     const elQuietStart = container.querySelector('[data-el="ps_quiet_start"]');
     const elQuietEnd = container.querySelector('[data-el="ps_quiet_end"]');
     const elSave = container.querySelector('[data-el="ps_save"]');
     const elReset = container.querySelector('[data-el="ps_reset"]');
 
-    elEnable.addEventListener('click', function(){ elEnable.classList.toggle('on'); });
-    elVoiceChase.addEventListener('click', function(){ elVoiceChase.classList.toggle('on'); });
+    elEnable.addEventListener('click', function(){
+      elEnable.classList.toggle('on');
+    });
 
     elReset.addEventListener('click', function(){
       saveDraft({ ...DEFAULTS });
@@ -29442,9 +29160,13 @@ function renderPushSettingsPage(container){
     elSave.addEventListener('click', async function(){
       const next = {
         enable_push: elEnable.classList.contains('on'),
+        daily_guaranteed_count: Number(elDailyCount.value || 0),
+        random_max_count: Number(elRandomCount.value || 0),
+        random_cooldown_minutes: Number(elRandomCd.value || 240),
         quiet_hours_start: elQuietStart.value || '23:30',
         quiet_hours_end: elQuietEnd.value || '08:00',
-        enable_voice_chase: elVoiceChase.classList.contains('on')
+        daily_windows: [`${elDailyStart.value || '11:00'}-${elDailyEnd.value || '13:00'}`],
+        random_windows: [`${elRandomStart.value || '19:30'}-${elRandomEnd.value || '22:30'}`],
       };
 
       saveDraft(next);
@@ -29452,8 +29174,10 @@ function renderPushSettingsPage(container){
       try{
         elSave.disabled = true;
         elSave.textContent = '保存中...';
-        await saveRemote(next);
-        try{ toast('已保存'); }catch(e){}
+        const saved = await saveRemote(next);
+        saveDraft(saved);
+        renderUI(saved);
+        try{ toast('后台推送节奏已保存'); }catch(e){}
       }catch(err){
         try{ toast('保存失败: ' + err.message); }catch(e){}
       }finally{
@@ -29462,7 +29186,7 @@ function renderPushSettingsPage(container){
       }
     });
 
-    // 热备状态
+    // ★ 填充后台热备推送状态
     try {
       const statusArea = container.querySelector('#ps_bgpush_status_area');
       if (statusArea && typeof window._meowBgPushStatus === 'function') {
@@ -29475,16 +29199,21 @@ function renderPushSettingsPage(container){
             const n = st[nid];
             const hotLabel = n.hasHotMsg ? '✓ 已备好' : '✗ 无热备';
             const hotColor = n.hasHotMsg ? 'var(--ph-accent,#07c160)' : 'var(--ph-text-dim,#aaa)';
-            const syncLabel = n.syncStatus === 'ok' ? '✓ 已同步' : (n.syncStatus === 'fail' ? '✗ 失败' : '— 未同步');
+            const syncLabel = n.syncStatus === 'ok' ? '✓ 已同步' : (n.syncStatus === 'fail' ? '✗ 上传失败' : (n.syncStatus === 'syncing' ? '⏳ 同步中' : '— 未同步'));
             const syncColor = n.syncStatus === 'ok' ? 'var(--ph-accent,#07c160)' : (n.syncStatus === 'fail' ? '#e07060' : 'var(--ph-text-dim,#aaa)');
             return '<div style="padding:10px 12px;border-bottom:1px solid var(--ph-sep,rgba(0,0,0,.05));">'
-              + '<div style="display:flex;align-items:center;justify-content:space-between;">'
+              + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">'
               + '<span style="font-size:13px;font-weight:600;color:var(--ph-text);">' + (n.name || nid) + '</span>'
-              + '<div style="display:flex;gap:8px;font-size:11px;">'
+              + '<span style="font-size:11px;color:var(--ph-text-sub);">' + n.bond + '</span>'
+              + '</div>'
+              + '<div style="display:flex;align-items:center;gap:12px;font-size:11px;color:var(--ph-text-dim);flex-wrap:wrap;">'
               + '<span style="color:' + hotColor + ';">' + hotLabel + '</span>'
+              + (n.hotAge ? '<span>' + n.hotAge + '</span>' : '')
               + '<span style="color:' + syncColor + ';">' + syncLabel + '</span>'
-              + '</div></div>'
-              + (n.hotAge ? '<div style="font-size:10px;color:var(--ph-text-dim);margin-top:3px;">' + n.hotAge + '</div>' : '')
+              + (n.syncAt ? '<span>' + n.syncAt + '</span>' : '')
+              + '</div>'
+              + (n.syncError ? '<div style="font-size:10px;color:#e07060;margin-top:4px;word-break:break-all;">' + n.syncError + '</div>' : '')
+              + (n.syncInserted != null ? '<div style="font-size:10px;color:var(--ph-text-dim);margin-top:2px;">已排 ' + n.syncInserted + ' 条 · 取消旧 ' + (n.syncCancelled || 0) + ' 条</div>' : '')
               + '</div>';
           }).join('');
         }
