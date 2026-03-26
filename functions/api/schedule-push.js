@@ -1,13 +1,18 @@
-// functions/api/schedule-push.js — 接收定时推送请求（支持批量）
-// 新版：同一 uid + npc_id 只保留“最新一批”未发送消息
-// POST { uid, messages: [{npcId, npcName, text, pushAt, slot}, ...] }  → 先取消旧 pending，再批量插入
-// POST { uid, action: 'cancel' }  → 取消该用户所有未发的 pending
+// functions/api/schedule-push.js — v2.1 状态机版
+// 变更：
+//   - 新增 state 字段替代 is_sent/is_cancelled（兼容期同时写入旧字段）
+//   - 新增 expires_at、source_batch_id、channel、cancel_reason、skip_reason、behavior_type
+//   - 取消旧 pending 时保留有效的 promised slot
+// POST { uid, messages: [{npcId, npcName, text, pushAt, slot}, ...] }
+// POST { uid, action: 'cancel' }
+// POST { uid, action: 'replace_npc_pending', npcId, messages: [...] }
+
+const EXPIRES_HOURS = 2;
 
 export async function onRequestPost(context) {
   const { request, env } = context;
 
   try {
-    // sendBeacon 可能发 text/plain，需要兼容
     let body;
     const ct = request.headers.get('content-type') || '';
     if (ct.includes('json')) {
@@ -20,21 +25,13 @@ export async function onRequestPost(context) {
     const uid = String(body.uid || '').trim();
     if (!uid) return jsonResp({ ok: false, error: 'missing uid' }, 400);
 
-    // ── 取消模式：取消该 uid 下所有未发、未取消消息 ──
+    // ── 取消模式 ──
     if (body.action === 'cancel') {
-      const url = `${env.SUPABASE_URL}/rest/v1/meow_scheduled_push?uid=eq.${encodeURIComponent(uid)}&is_sent=eq.false&is_cancelled=eq.false`;
-      await fetch(url, {
-        method: 'PATCH',
-        headers: sbHeaders(env),
-        body: JSON.stringify({
-          is_cancelled: true,
-          cancelled_at: new Date().toISOString()
-        })
-      });
+      await cancelAllPending(env, uid, 'manual_cancel');
       return jsonResp({ ok: true, action: 'cancelled' });
     }
 
-    // ── ★ 新模式：替换该 NPC 的旧 pending，插入新 batch ──
+    // ── 替换模式：取消旧 pending（保留 promised），插入新 batch ──
     if (body.action === 'replace_npc_pending') {
       const npcId = String(body.npcId || '').trim();
       if (!npcId) return jsonResp({ ok: false, error: 'missing npcId' }, 400);
@@ -49,94 +46,36 @@ export async function onRequestPost(context) {
       const source    = String(body.source     || 'chat_update');
       const now       = Date.now();
 
-      // 第一步：取消该 NPC 旧的未发 pending
+      // 第一步：取消该 NPC 旧的 planned（★ 保留 promised）
       let cancelledCount = 0;
       try {
-        const cancelUrl =
-          `${env.SUPABASE_URL}/rest/v1/meow_scheduled_push` +
-          `?uid=eq.${encodeURIComponent(uid)}` +
-          `&npc_id=eq.${encodeURIComponent(npcId)}` +
-          `&is_sent=eq.false` +
-          `&is_cancelled=eq.false`;
-
-        const cancelResp = await fetch(cancelUrl, {
-          method: 'PATCH',
-          headers: { ...sbHeaders(env), Prefer: 'return=representation' },
-          body: JSON.stringify({
-            is_cancelled: true,
-            cancelled_at: new Date().toISOString()
-          })
-        });
-
-        if (cancelResp.ok) {
-          try {
-            const cancelledRows = await cancelResp.json();
-            cancelledCount = Array.isArray(cancelledRows) ? cancelledRows.length : 0;
-          } catch(_) {}
-        }
+        cancelledCount = await cancelNpcPending(env, uid, npcId, 'new_batch_replace');
       } catch(e) {
-        // 取消失败不阻塞插入
         console.error('[schedule-push] cancel old pending failed:', e);
       }
 
       // 第二步：构建新 rows
-      const rows = [];
-      for (const msg of messages) {
-        const msgNpcId  = String(msg.npcId   || npcId).trim();
-        const npcName   = String(msg.npcName || body.npcName || '').trim();
-        const text      = String(msg.text    || '').trim();
-        const pushAt    = Number(msg.pushAt  || 0);
-
-        if (!text || !pushAt) continue;
-        if (pushAt < now - 60000) continue;
-        if (pushAt - now > 48 * 60 * 60 * 1000) continue;
-
-        rows.push({
-          uid,
-          npc_id:       msgNpcId,
-          npc_name:     npcName,
-          text:         text.slice(0, 200),
-          push_at:      new Date(pushAt).toISOString(),
-          slot:         String(msg.slot || ''),
-          batch_id:     batchId,
-          batch_kind:   batchKind,
-          source:       source,
-          is_sent:      false,
-          is_cancelled: false,
-          created_at:   new Date().toISOString(),
-          updated_at:   new Date().toISOString()
-        });
-      }
+      const rows = buildRows(messages, { uid, npcId, npcName: body.npcName, batchId, batchKind, source, now });
 
       if (!rows.length) {
         return jsonResp({ ok: false, error: 'no valid messages after filter' }, 400);
       }
 
-      // 第三步：插入新 batch
-      const insertResp = await fetch(`${env.SUPABASE_URL}/rest/v1/meow_scheduled_push`, {
-        method: 'POST',
-        headers: { ...sbHeaders(env), Prefer: 'return=minimal' },
-        body: JSON.stringify(rows)
-      });
-
-      if (!insertResp.ok) {
-        const errText = await insertResp.text();
-        throw new Error('Supabase insert failed: ' + insertResp.status + ' ' + errText.slice(0, 200));
-      }
+      // 第三步：插入
+      await insertRows(env, rows);
 
       return jsonResp({
         ok: true,
         action: 'replace_npc_pending',
         cancelled: cancelledCount,
         inserted: rows.length,
-        batchId: batchId
+        batchId
       });
     }
 
-    // ── 批量创建定时推送 ──
+    // ── 批量创建 ──
     const messages = body.messages;
     if (!Array.isArray(messages) || !messages.length) {
-      // 兼容旧的单条格式
       if (body.npcId && body.text && body.pushAt) {
         return await insertSingle(env, uid, body);
       }
@@ -144,8 +83,8 @@ export async function onRequestPost(context) {
     }
 
     const now = Date.now();
-    const rows = [];
     const npcIdSet = new Set();
+    const rows = [];
 
     for (const msg of messages) {
       const npcId   = String(msg.npcId   || '').trim();
@@ -154,21 +93,13 @@ export async function onRequestPost(context) {
       const pushAt  = Number(msg.pushAt  || 0);
 
       if (!npcId || !text || !pushAt) continue;
-      if (pushAt < now - 60000) continue;                    // 过去的跳过（允许 1 分钟误差）
-      if (pushAt - now > 48 * 60 * 60 * 1000) continue;     // 超过 48 小时的跳过
+      if (pushAt < now - 60000) continue;
+      if (pushAt - now > 48 * 60 * 60 * 1000) continue;
 
-      rows.push({
-        uid,
-        npc_id: npcId,
-        npc_name: npcName,
-        text: text.slice(0, 200),
-        push_at: new Date(pushAt).toISOString(),
-        slot: String(msg.slot || ''),
-        is_sent: false,
-        is_cancelled: false,
-        created_at: new Date().toISOString()
-      });
-
+      rows.push(makeRow({
+        uid, npcId, npcName, text, pushAt,
+        slot: msg.slot, batchId: null, batchKind: null, source: 'batch_insert'
+      }));
       npcIdSet.add(npcId);
     }
 
@@ -176,19 +107,11 @@ export async function onRequestPost(context) {
       return jsonResp({ ok: false, error: 'no valid messages' }, 400);
     }
 
-    // ★ 关键：插入新批次前，先把这些 npc 的旧 pending 全取消
-    await cancelPendingByNpcIds(env, uid, Array.from(npcIdSet));
-
-    const resp = await fetch(`${env.SUPABASE_URL}/rest/v1/meow_scheduled_push`, {
-      method: 'POST',
-      headers: { ...sbHeaders(env), Prefer: 'return=minimal' },
-      body: JSON.stringify(rows)
-    });
-
-    if (!resp.ok) {
-      const errText = await resp.text();
-      throw new Error('Supabase insert failed: ' + resp.status + ' ' + errText.slice(0, 200));
+    for (const nid of npcIdSet) {
+      await cancelNpcPending(env, uid, nid, 'new_batch_replace');
     }
+
+    await insertRows(env, rows);
 
     return jsonResp({
       ok: true,
@@ -201,74 +124,131 @@ export async function onRequestPost(context) {
   }
 }
 
+// ═══════════════════════════════════════════
+//  核心函数
+// ═══════════════════════════════════════════
+
+function makeRow({ uid, npcId, npcName, text, pushAt, slot, batchId, batchKind, source }) {
+  const pushAtMs = Number(pushAt);
+  const expiresAt = new Date(pushAtMs + EXPIRES_HOURS * 60 * 60 * 1000).toISOString();
+
+  return {
+    uid,
+    npc_id:          String(npcId).trim(),
+    npc_name:        String(npcName || '').trim(),
+    text:            String(text || '').trim().slice(0, 200),
+    push_at:         new Date(pushAtMs).toISOString(),
+    slot:            String(slot || ''),
+    // ★ 状态机字段
+    state:           'planned',
+    expires_at:      expiresAt,
+    source_batch_id: batchId || null,
+    channel:         'backend-push',
+    skip_reason:     null,
+    cancel_reason:   null,
+    behavior_type:   null,
+    // 兼容旧字段
+    is_sent:         false,
+    is_cancelled:    false,
+    batch_id:        batchId || null,
+    batch_kind:      batchKind || null,
+    source:          source || 'chat_update',
+    created_at:      new Date().toISOString(),
+    updated_at:      new Date().toISOString()
+  };
+}
+
+function buildRows(messages, opts) {
+  const { uid, npcId, npcName, batchId, batchKind, source, now } = opts;
+  const rows = [];
+  for (const msg of messages) {
+    const msgNpcId  = String(msg.npcId   || npcId).trim();
+    const name      = String(msg.npcName || npcName || '').trim();
+    const text      = String(msg.text    || '').trim();
+    const pushAt    = Number(msg.pushAt  || 0);
+    if (!text || !pushAt) continue;
+    if (pushAt < now - 60000) continue;
+    if (pushAt - now > 48 * 60 * 60 * 1000) continue;
+    rows.push(makeRow({ uid, npcId: msgNpcId, npcName: name, text, pushAt, slot: msg.slot, batchId, batchKind, source }));
+  }
+  return rows;
+}
+
+async function insertRows(env, rows) {
+  const resp = await fetch(`${env.SUPABASE_URL}/rest/v1/meow_scheduled_push`, {
+    method: 'POST',
+    headers: { ...sbHeaders(env), Prefer: 'return=minimal' },
+    body: JSON.stringify(rows)
+  });
+  if (!resp.ok) {
+    const errText = await resp.text();
+    throw new Error('Supabase insert failed: ' + resp.status + ' ' + errText.slice(0, 200));
+  }
+}
+
 async function insertSingle(env, uid, body) {
   const npcId   = String(body.npcId   || '').trim();
   const npcName = String(body.npcName || '').trim();
   const text    = String(body.text    || '').trim();
   const pushAt  = Number(body.pushAt  || 0);
-
   if (!npcId || !text || !pushAt) {
     return jsonResp({ ok: false, error: 'invalid single payload' }, 400);
   }
-
-  // 单条也走“只保留最新一批”逻辑
-  await cancelPendingByNpcIds(env, uid, [npcId]);
-
-  const row = {
-    uid,
-    npc_id: npcId,
-    npc_name: npcName,
-    text: text.slice(0, 200),
-    push_at: new Date(pushAt).toISOString(),
-    slot: String(body.slot || ''),
-    is_sent: false,
-    is_cancelled: false,
-    created_at: new Date().toISOString()
-  };
-
-  const resp = await fetch(`${env.SUPABASE_URL}/rest/v1/meow_scheduled_push`, {
-    method: 'POST',
-    headers: { ...sbHeaders(env), Prefer: 'return=minimal' },
-    body: JSON.stringify(row)
-  });
-
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error('Supabase insert failed: ' + resp.status + ' ' + errText.slice(0, 200));
-  }
-
+  await cancelNpcPending(env, uid, npcId, 'new_single_replace');
+  const row = makeRow({ uid, npcId, npcName, text, pushAt, slot: body.slot, batchId: null, batchKind: null, source: 'single_insert' });
+  await insertRows(env, [row]);
   return jsonResp({ ok: true, inserted: 1, replaced_npc_ids: [npcId] });
 }
 
-async function cancelPendingByNpcIds(env, uid, npcIds) {
-  const cleanNpcIds = (npcIds || [])
-    .map(x => String(x || '').trim())
-    .filter(Boolean);
-
-  if (!cleanNpcIds.length) return;
-
-  // Supabase PostgREST 的 in 语法：npc_id=in.(a,b,c)
-  const inList = cleanNpcIds.map(x => '"' + x.replace(/"/g, '\\"') + '"').join(',');
-  const url =
+// ★ 取消旧 pending 时保留 promised slot
+async function cancelNpcPending(env, uid, npcId, reason) {
+  const cancelUrl =
     `${env.SUPABASE_URL}/rest/v1/meow_scheduled_push` +
     `?uid=eq.${encodeURIComponent(uid)}` +
-    `&npc_id=in.(${encodeURIComponent(inList)})` +
-    `&is_sent=eq.false` +
-    `&is_cancelled=eq.false`;
+    `&npc_id=eq.${encodeURIComponent(npcId)}` +
+    `&state=eq.planned` +
+    `&slot=neq.promised`;
 
-  const resp = await fetch(url, {
+  const cancelResp = await fetch(cancelUrl, {
     method: 'PATCH',
-    headers: sbHeaders(env),
+    headers: { ...sbHeaders(env), Prefer: 'return=representation' },
     body: JSON.stringify({
-      is_cancelled: true,
-      cancelled_at: new Date().toISOString()
+      state:         'cancelled',
+      cancel_reason: reason,
+      is_cancelled:  true,
+      cancelled_at:  new Date().toISOString(),
+      updated_at:    new Date().toISOString()
     })
   });
 
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error('Supabase cancel pending failed: ' + resp.status + ' ' + errText.slice(0, 200));
+  if (!cancelResp.ok) {
+    const errText = await cancelResp.text();
+    throw new Error('cancel pending failed: ' + cancelResp.status + ' ' + errText.slice(0, 200));
   }
+
+  try {
+    const rows = await cancelResp.json();
+    return Array.isArray(rows) ? rows.length : 0;
+  } catch(_) { return 0; }
+}
+
+async function cancelAllPending(env, uid, reason) {
+  const url =
+    `${env.SUPABASE_URL}/rest/v1/meow_scheduled_push` +
+    `?uid=eq.${encodeURIComponent(uid)}` +
+    `&state=eq.planned`;
+
+  await fetch(url, {
+    method: 'PATCH',
+    headers: sbHeaders(env),
+    body: JSON.stringify({
+      state:         'cancelled',
+      cancel_reason: reason,
+      is_cancelled:  true,
+      cancelled_at:  new Date().toISOString(),
+      updated_at:    new Date().toISOString()
+    })
+  });
 }
 
 function sbHeaders(env) {
