@@ -44167,7 +44167,7 @@ var userPrompt = [
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.85,
-        maxTokens: 500,
+        maxTokens: 800,
         timeout: 30,
         channel: 'proactive'
       });
@@ -44287,16 +44287,7 @@ var userPrompt = [
 
       var pushAt;
       if (key === 'nextDay') {
-        // ★ nextDay 去重：如果 4 小时内已为该角色生成过 nextDay，跳过
-        var lastNextDayKey = 'meow_bgpush_lastNextDay_' + hot.npcId;
-        var lastNextDay = 0;
-        try { lastNextDay = parseInt(lsGet(lastNextDayKey, 0)) || 0; } catch(e){}
-        if (nowMs - lastNextDay < 4 * 3600 * 1000) {
-          console.log('[BgPush] nextDay 4小时内已生成过，跳过', hot.npcId);
-          return;
-        }
         pushAt = _bgPushScheduleNextDay(nowMs, dailyWindow, quietStart, quietEnd);
-        try { lsSet(lastNextDayKey, nowMs); } catch(e){}
       } else {
         var minMin = Math.max(1, parseInt(slot.minMin) || 10);
         var maxMin = Math.max(minMin, parseInt(slot.maxMin) || 60);
