@@ -25818,7 +25818,19 @@ const npc = _wxGetChatTargetMeta(npcId);
           }
 
           // 4. 解析多条消息
-          const replies = parseMultiMessages(result.data);
+          // ★ 离线模式：不拆分，合并为单条完整回复
+          var replies;
+          if (_isOffline){
+            var _rawMain = String(result.data || '').trim()
+              .replace(/<\/?thinking>[\s\S]*?(<\/thinking>|$)/gi, '')
+              .replace(/<\/?think>[\s\S]*?(<\/think>|$)/gi, '')
+              .replace(/\|\|\|/g, '\n\n')
+              .trim();
+            replies = [_rawMain || '…'];
+            console.log('[Offline] _wxSendChat 合并为单条回复, 长度=' + _rawMain.length + '字符');
+          } else {
+            replies = parseMultiMessages(result.data);
+          }
 
           // 5. 逐条写入 —— 每条消息独立节奏：typing → 气泡 → 停顿 → typing → ...
           for (var ri=0; ri<replies.length; ri++){
