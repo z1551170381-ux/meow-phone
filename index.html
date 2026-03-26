@@ -24464,8 +24464,8 @@ const npc = _wxGetChatTargetMeta(npcId);
           try{
             var _scT = _loadSceneData(npcId);
             var _wcT = parseInt(_scT.wordCount) || 0;
-            _trigMaxTk = _wcT > 0 ? Math.max(2048, Math.round(_wcT * 1.5 * 1.3)) : 2048;
-          }catch(e){ _trigMaxTk = 2048; }
+            _trigMaxTk = _wcT > 0 ? Math.max(4096, Math.round(_wcT * 3)) : 4096;
+          }catch(e){ _trigMaxTk = 4096; }
         }
         var result = await PhoneAI.chat({ messages: contextMessages, system: systemPrompt, timeout: _triggerIsOffline ? 180 : 60, maxTokens: _trigMaxTk });
 
@@ -25526,11 +25526,11 @@ const npc = _wxGetChatTargetMeta(npcId);
               var _wantWords = parseInt(_scWc.wordCount) || 0;
               if (_wantWords > 0){
                 // 中文约 1.5 token/字，加 30% 余量
-                _offlineMaxTokens = Math.max(2048, Math.round(_wantWords * 1.5 * 1.3));
+                _offlineMaxTokens = Math.max(4096, Math.round(_wantWords * 3));
               } else {
-                _offlineMaxTokens = 2048; // 离线默认给 2048
+                _offlineMaxTokens = 4096; // 离线默认给 4096
               }
-            }catch(e){ _offlineMaxTokens = 2048; }
+            }catch(e){ _offlineMaxTokens = 4096; }
           }
 
           const result = await PhoneAI.chat({
@@ -25794,8 +25794,8 @@ const npc = _wxGetChatTargetMeta(npcId);
             try{
               var _scSend = _loadSceneData(npcId);
               var _wcSend = parseInt(_scSend.wordCount) || 0;
-              _sendMaxTk = _wcSend > 0 ? Math.max(2048, Math.round(_wcSend * 1.5 * 1.3)) : 2048;
-            }catch(e){ _sendMaxTk = 2048; }
+              _sendMaxTk = _wcSend > 0 ? Math.max(4096, Math.round(_wcSend * 3)) : 4096;
+            }catch(e){ _sendMaxTk = 4096; }
           }
           const result = await PhoneAI.chat({
             messages: contextMessages,
@@ -26011,8 +26011,8 @@ const npc = _wxGetChatTargetMeta(npcId);
             try{
               var _scR = _loadSceneData(npcId);
               var _wcR = parseInt(_scR.wordCount) || 0;
-              _retryMaxTk = _wcR > 0 ? Math.max(2048, Math.round(_wcR * 1.5 * 1.3)) : 2048;
-            }catch(e){ _retryMaxTk = 2048; }
+              _retryMaxTk = _wcR > 0 ? Math.max(4096, Math.round(_wcR * 3)) : 4096;
+            }catch(e){ _retryMaxTk = 4096; }
           }
           var result = await PhoneAI.chat({ messages: contextMessages, system: systemPrompt, timeout: (_getChatMode(npcId) === 'offline') ? 180 : 60, maxTokens: _retryMaxTk });
           try{ _hideTypingIndicator(); }catch(e){}
@@ -32783,14 +32783,21 @@ function _buildOfflinePromptAddition(npcId){
   var lines = [
     '【线下面对面模式】',
     '你现在进入面对面场景，但你的性格、语气、说话习惯、与用户的关系，完全延续角色卡设定，不要变。',
-    '格式上的区别仅仅是：动作/旁白用 *星号包裹*，台词用"引号"，这不是让你变成另一个人。',
-    '- 不输出任何代码、标签或特殊符号，只有纯文字、星号、引号',
   ];
 
-  // 角色/用户人称
+  if (mode === 'novel'){
+    lines.push('用小说正文的方式写回复，叙述、动作、心理、对话自然融合在段落里。');
+  } else if (mode === 'game'){
+    lines.push('用视觉小说风格写回复，简洁有镜头感。');
+  } else {
+    lines.push('用舞台剧/小说混合格式写：动作/旁白用 *星号包裹*，台词用"引号"。');
+    lines.push('每次回复要像写一整段小说场景一样，包含：详细的环境描写、角色的表情动作细节、心理活动、以及多轮对话互动。');
+  }
+
+  lines.push('不输出任何代码、标签或特殊符号，只有纯文字。');
+
   lines.push('角色人称：' + (npcPersonMap[scene.npcPerson || 'second'] || '第二人称') + '，用户人称：' + (userPersonMap[scene.userPerson || 'first'] || '第一人称') + '。');
 
-  // 字数
   var wc = parseInt(scene.wordCount) || 0;
   if (wc > 0){
     lines.push('篇幅要求：本次回复约' + wc + '字，充分展开描写，不要草草结束。');
@@ -32799,7 +32806,6 @@ function _buildOfflinePromptAddition(npcId){
   if (scene.location) lines.push('当前地点：' + scene.location);
   if (scene.description) lines.push('场景说明：' + scene.description);
 
-  // 预设模块注入
   var pd = scene.presetData;
   if (pd) {
     var presetLines = [];
