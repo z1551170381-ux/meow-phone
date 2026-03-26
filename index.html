@@ -39364,9 +39364,26 @@ async function _meowPullOfflineMessages() {
       if (!npcId || !rawText) return;
 
       // ★ text 可能是 JSON 数组（连发多条），拆开逐条插入
+      // ★ 也可能是 voice_call 指令
       var textList = [rawText];
       try {
         var parsed = JSON.parse(rawText);
+        // voice_call 指令：触发来电弹窗，不写入聊天记录
+        if (parsed && parsed.type === 'voice_call') {
+          try {
+            var vcNpcId = String(parsed.npcId || npcId);
+            var vcNpcName = String(parsed.npcName || msg.npcName || npcId);
+            if (typeof _showIncomingCall === 'function' || typeof window._meowIncomingCall === 'function') {
+              var _callFn = typeof _showIncomingCall === 'function' ? _showIncomingCall : window._meowIncomingCall;
+              setTimeout(function() {
+                _callFn(vcNpcId, vcNpcName, '', 'voice', null, null);
+              }, 2000 + Math.random() * 3000);
+              console.log('[MeowPush] 触发语音通话来电:', vcNpcName);
+            }
+          } catch(ce) { console.warn('[MeowPush] voice_call error:', ce); }
+          if (ts > maxTs) maxTs = ts;
+          continue; // 不写入聊天记录
+        }
         if (Array.isArray(parsed) && parsed.length) {
           textList = parsed.map(function(t){ return String(t || '').trim(); }).filter(function(t){ return t.length > 0; });
         }
