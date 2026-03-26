@@ -4696,7 +4696,7 @@ case '🍪': return s('<circle cx="12" cy="12" r="10"/><circle cx="8" cy="9" r="
   color:rgba(116,95,67,.78); font-style:italic;
 }
 #${ID} .wxOfflineWrap.offlineNovelMode .wxOfflineNovelBody em{
-  color:rgba(66,52,35,.92); font-style:normal;
+  color:rgba(116,95,67,.78); font-style:normal;
 }
 #${ID} .wxOfflineWrap.offlineNovelMode .wxOfflineNovelBody b{
   color:rgba(81,63,39,.97); font-weight:600; font-style:normal;
@@ -44287,18 +44287,37 @@ var userPrompt = [
 
       var pushAt;
       if (key === 'nextDay') {
+        // ★ nextDay 去重：如果 4 小时内已为该角色生成过 nextDay，跳过
+        var lastNextDayKey = 'meow_bgpush_lastNextDay_' + hot.npcId;
+        var lastNextDay = 0;
+        try { lastNextDay = parseInt(lsGet(lastNextDayKey, 0)) || 0; } catch(e){}
+        if (nowMs - lastNextDay < 4 * 3600 * 1000) {
+          console.log('[BgPush] nextDay 4小时内已生成过，跳过', hot.npcId);
+          return;
+        }
         pushAt = _bgPushScheduleNextDay(nowMs, dailyWindow, quietStart, quietEnd);
+        try { lsSet(lastNextDayKey, nowMs); } catch(e){}
       } else {
         var minMin = Math.max(1, parseInt(slot.minMin) || 10);
         var maxMin = Math.max(minMin, parseInt(slot.maxMin) || 60);
         pushAt = nowMs + randInt(minMin, maxMin) * 60 * 1000;
 
+        // ★ 提前检查：如果距离静默期开始不到30分钟，soon直接不生成
+        // 避免生成了推上去但来不及发就进静默期的情况
+        if (key === 'soon') {
+          var nowDate = new Date(nowMs);
+          var nowMin = nowDate.getHours() * 60 + nowDate.getMinutes();
+          var minToQuiet = quietStart - nowMin;
+          if (minToQuiet < 0) minToQuiet += 1440; // 跨午夜
+          if (minToQuiet <= 30) {
+            console.log('[BgPush] soon 距静默期仅', minToQuiet, '分钟，跳过不生成');
+            return;
+          }
+        }
+
         if (_bgPushIsInQuiet(pushAt, quietStart, quietEnd)) {
-          // ★ soon / later 落入静默期 → 直接丢弃
-          // soon 是即时消息，过了静默期就没意义
-          // later 的内容基于当时语境，推到次日会出戏
-          // 次日由 nextDay 专门负责
-          console.log('[BgPush]', key, '落入静默期，丢弃');
+          // ★ soon / later 落入静默期 → 直接丢弃，不推到次日
+          console.log('[BgPush]', key, '落入静默期，丢弃（不推到nextDay）');
           return;
         }
       }
@@ -44312,12 +44331,24 @@ var userPrompt = [
         }
       }
 
+      // ★ soon 消息加过期时间 = 今天静默期开始，后端到期自动取消
+      var expiresAt = null;
+      if (key === 'soon' || key === 'later') {
+        var _expDate = new Date(nowMs);
+        var _quietH = Math.floor(quietStart / 60);
+        var _quietM = quietStart % 60;
+        _expDate.setHours(_quietH, _quietM, 0, 0);
+        if (_expDate.getTime() <= nowMs) _expDate.setDate(_expDate.getDate() + 1);
+        expiresAt = _expDate.getTime();
+      }
+
       rows.push({
         npcId:   hot.npcId,
         npcName: hot.npcName || hot.npcId,
         text:    JSON.stringify(texts),
         pushAt:  pushAt,
-        slot:    key
+        slot:    key,
+        expiresAt: expiresAt
       });
       scheduledTimes.push(pushAt);
     });
