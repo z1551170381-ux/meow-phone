@@ -214,6 +214,25 @@ export async function onRequestGet(context) {
           sent_at:    nowIso,
           updated_at: nowIso
         });
+
+        // ★ Step2: 更新会话状态 last_push_sent_at
+        try {
+          const sessionUrl =
+            `${env.SUPABASE_URL}/rest/v1/meow_npc_push_config` +
+            `?uid=eq.${encodeURIComponent(uid)}` +
+            `&npc_id=eq.${encodeURIComponent(npc_id)}`;
+
+          await fetch(sessionUrl, {
+            method: 'PATCH',
+            headers: sbHeaders(env),
+            body: JSON.stringify({
+              last_push_sent_at: nowIso,
+              updated_at: nowIso
+            })
+          });
+        } catch(e) {
+          console.warn('[proactive] update last_push_sent_at failed:', e);
+        }
       } else {
         // 没有有效设备，标记为 skipped
         await sbPatchById(env, 'meow_scheduled_push', id, {
