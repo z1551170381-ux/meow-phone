@@ -24486,14 +24486,10 @@ const npc = _wxGetChatTargetMeta(npcId);
           return;
         }
 
-        // ★ 离线模式不拆分
+        // ★ 离线模式不拆分：用 parseMultiMessages 安全清理，再合并为一条
         var replies;
         if (_triggerIsOffline){
-          var _rawT = String(result.data || '').trim()
-            .replace(/<\/?thinking>[\s\S]*?(<\/thinking>|$)/gi, '')
-            .replace(/<\/?think>[\s\S]*?(<\/think>|$)/gi, '')
-            .replace(/\|\|\|/g, '\n\n').trim();
-          replies = [_rawT || '…'];
+          replies = [parseMultiMessages(result.data).join('\n\n')];
         } else {
           replies = parseMultiMessages(result.data);
         }
@@ -25560,16 +25556,11 @@ const npc = _wxGetChatTargetMeta(npcId);
 
           if (!result.ok) throw result.error || 'API error';
 
-          // ★ 离线模式：不拆分消息，整条回复作为一个完整段落
+          // ★ 离线模式：不拆分消息，用 parseMultiMessages 安全清理后合并
           var replies;
           if (mySendMode === 'offline'){
-            var _rawOff = String(result.data || '').trim()
-              .replace(/<\/?thinking>[\s\S]*?(<\/thinking>|$)/gi, '')
-              .replace(/<\/?think>[\s\S]*?(<\/think>|$)/gi, '')
-              .replace(/\|\|\|/g, '\n\n')  // 把 ||| 转为段落分隔而不是拆条
-              .trim();
-            replies = [_rawOff || '…'];
-            console.log('[Offline] 合并为单条回复, 长度=' + _rawOff.length + '字符');
+            replies = [parseMultiMessages(result.data).join('\n\n')];
+            console.log('[Offline] 合并为单条回复, 长度=' + replies[0].length + '字符');
           } else {
             replies = parseMultiMessages(result.data);
           }
@@ -25840,16 +25831,11 @@ const npc = _wxGetChatTargetMeta(npcId);
           }
 
           // 4. 解析多条消息
-          // ★ 离线模式：不拆分，合并为单条完整回复
+          // ★ 离线模式：用 parseMultiMessages 安全清理后合并为单条
           var replies;
           if (_isOffline){
-            var _rawMain = String(result.data || '').trim()
-              .replace(/<\/?thinking>[\s\S]*?(<\/thinking>|$)/gi, '')
-              .replace(/<\/?think>[\s\S]*?(<\/think>|$)/gi, '')
-              .replace(/\|\|\|/g, '\n\n')
-              .trim();
-            replies = [_rawMain || '…'];
-            console.log('[Offline] _wxSendChat 合并为单条回复, 长度=' + _rawMain.length + '字符');
+            replies = [parseMultiMessages(result.data).join('\n\n')];
+            console.log('[Offline] _wxSendChat 合并为单条回复, 长度=' + replies[0].length + '字符');
           } else {
             replies = parseMultiMessages(result.data);
           }
@@ -26046,11 +26032,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           var _isRetryOffline = (_getChatMode(npcId) === 'offline');
           var replies;
           if (_isRetryOffline){
-            var _rawR = String(result.data || '').trim()
-              .replace(/<\/?thinking>[\s\S]*?(<\/thinking>|$)/gi, '')
-              .replace(/<\/?think>[\s\S]*?(<\/think>|$)/gi, '')
-              .replace(/\|\|\|/g, '\n\n').trim();
-            replies = [_rawR || '…'];
+            replies = [parseMultiMessages(result.data).join('\n\n')];
           } else {
             replies = parseMultiMessages(result.data);
           }
