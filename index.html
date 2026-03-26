@@ -20905,11 +20905,18 @@ const npc = _wxGetChatTargetMeta(npcId);
       // ===== _cleanOfflineAIResponse：清理离线回复中的模型思考泄露 =====
       function _cleanOfflineAIResponse(text){
         var s = String(text || '');
+        // ★ 清理 AI 输出的 CSS 类名标签（"wxNovelAside">内容 → 内容）
+        s = s.replace(/["""]wxNovel[A-Za-z]+["""]?\s*>?\s*/g, '');
+        s = s.replace(/["""]rp[A-Za-z]+["""]?\s*>?\s*/g, '');
+        s = s.replace(/wxNovel[A-Za-z]+>\s*/g, '');
+        s = s.replace(/rpAction\s*>?\s*/g, '');
+        s = s.replace(/rpDialog\s*>?\s*/g, '');
+        // 清理 HTML 标签残留
+        s = s.replace(/<\/?(?:span|em|p|div)[^>]*>/g, '');
         // 清理 Gemini 常见的思考泄露模式
         s = s.replace(/^\s*\*(?:字数|扩充|检查|修改|确认|时间检查|计划|思考|分析|调整|注意|提醒|总结|回顾|补充|完善|润色)\*\s*[:：]?[^\n]*$/gm, '');
-        // 清理 "引号，没有HTML标签。" 等格式自述
+        // 清理格式自述和 AI 自述
         s = s.replace(/^\s*(?:引号|星号|格式|标签)[，,]?\s*(?:没有|不含|不用|无).*$/gm, '');
-        // 清理 "好的，我来..." "让我..." 等 AI 自述
         s = s.replace(/^\s*(?:好的|OK|嗯|让我|我来|接下来我)[，,].{0,30}(?:写|继续|扩充|补充|展开).*$/gm, '');
         // 清理多余空行
         s = s.replace(/\n{3,}/g, '\n\n').trim();
@@ -32555,17 +32562,15 @@ function _autoParagraphizeOfflineText(text){
 
 function _cleanOfflineDisplayText(text){
   return String(text || '').trim()
-    .replace(/"rpAction"\s*>?\s*/g, '')
-    .replace(/"rpDialog"\s*>?\s*/g, '')
-    .replace(/"rpSpeaker"\s*>?\s*/g, '')
-    .replace(/"rpText"\s*>?\s*/g, '')
+    // ★ 最高优先：清理 AI 输出的 "wxNovelAside">内容 模式（保留内容，只删标签部分）
+    .replace(/["""]wxNovel[A-Za-z]+["""]?\s*>?\s*/g, '')
+    .replace(/["""]rp[A-Za-z]+["""]?\s*>?\s*/g, '')
+    .replace(/wxNovel[A-Za-z]+>\s*/g, '')
     .replace(/rpAction\s*>?\s*/g, '')
     .replace(/rpDialog\s*>?\s*/g, '')
-    .replace(/"wxNovel[A-Za-z]+"\s*>?\s*/g, '')
-    .replace(/wxNovel[A-Za-z]+>\s*/g, '')
-    // 清理独立成行的 "rpXxx" 或 "wxXxx" 残留
-    .replace(/^\s*"rp[A-Za-z]+"\s*$/gm, '')
-    .replace(/^\s*"wx[A-Za-z]+"\s*$/gm, '')
+    // 清理独立成行的残留
+    .replace(/^\s*["""]rp[A-Za-z]+["""]?\s*$/gm, '')
+    .replace(/^\s*["""]wx[A-Za-z]+["""]?\s*$/gm, '')
     .replace(/^>\s*/gm, '')
     .replace(/<\/?em[^>]*>/g, '')
     .replace(/<\/?span[^>]*>/g, '')
@@ -32573,7 +32578,6 @@ function _cleanOfflineDisplayText(text){
     .replace(/<\/?div[^>]*>/g, '')
     .replace(/class="[^"]*"/g, '')
     .replace(/\r\n?/g, '\n')
-    // 清理多余空行
     .replace(/\n{3,}/g, '\n\n')
     .trim();
 }
