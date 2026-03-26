@@ -43505,9 +43505,15 @@ var userPrompt = [
   '- 要像这个人现在真的会发出来的话，不要像AI写出来的"自然句子"。',
   '',
   (h < 18
-    ? '你要生成两个时间点的主动消息（白天聊天，不需要准备明天的）：\n- soon：聊完后不久。\n- later：几小时后。你在过自己的生活，某个瞬间又想到对方。'
-    : '你要生成两个时间点的主动消息（晚上聊天，几小时后太晚了不需要）：\n- soon：聊完后不久。\n- nextDay：第二天，你根据当前时间自然判断更合适的时段。'
+    ? '你要生成两到三个时间点的主动消息（白天聊天）：\n- soon：聊完后不久（5~30分钟）。\n- later：几小时后（1~6小时）。你在过自己的生活，某个瞬间又想到对方。\n- promised（可选）：如果刚才对话中你说了要去做某件事（洗澡、做饭、出门、下班等），做完之后来报到。'
+    : '你要生成两到三个时间点的主动消息（晚上聊天）：\n- soon：聊完后不久（5~30分钟）。\n- nextDay：第二天，你根据当前时间自然判断更合适的时段。\n- promised（可选）：如果刚才对话中你说了要去做某件事（洗澡、做饭、出门等），做完之后来报到。'
   ),
+  '',
+  '★★★ 内容时效性规则 ★★★',
+  '- soon 和 promised 可以紧接上下文写，引用「刚才」「你说的那个」都行。',
+  '- later 和 nextDay 的内容必须「时间模糊」：不要用「刚才」「今晚」「现在」等精确时间词。',
+  '  要写成「突然想起」「路上看到」「想到你之前说的」这种不绑定具体时刻的触发。',
+  '  因为这些消息可能在生成后几小时甚至第二天才发出，写太精确会出戏。',
   '',
   '每个时间点都这样思考：',
   '- 这个时间点你为什么会突然想联系对方？只能选一个最自然的动机。',
@@ -43534,18 +43540,21 @@ var userPrompt = [
   '- 宁可短一点、偏一点、像真人一点，也不要平滑、工整、正确但假。',
   '',
   '时机规则：',
-  '- soon：由你判断是 3~60 分钟内更合适，给出 minMin / maxMin。',
+  '- soon：5~30 分钟内，给出 minMin / maxMin。',
   (h < 18
-    ? '- later：由你判断是 120~480 分钟内更合适，给出 minMin / maxMin。'
-    : '- nextDay：由你判断是第二天更自然的时间段，给出 minMin / maxMin。'
+    ? '- later：60~360 分钟内，给出 minMin / maxMin。'
+    : '- nextDay：由你判断第二天更自然的时间段，给出 minMin / maxMin。'
   ),
+  '- promised（如果有约定）：根据约定的事情需要多久，给出 minMin / maxMin。比如洗澡约20~40分钟，做饭约30~60分钟。',
+  '- 如果没有约定任何事情，不要硬凑 promised，直接不输出这个字段。',
   '- 如果某个时间点根本不适合发，就让 text 为 null。',
   '',
   '直接返回 JSON，不要解释，不要加代码块：',
   (h < 18
-    ? '{"soon":{"text":["消息1","消息2"],"minMin":10,"maxMin":40},"later":{"text":["消息1"],"minMin":120,"maxMin":360}}'
-    : '{"soon":{"text":["消息1","消息2"],"minMin":10,"maxMin":40},"nextDay":{"text":["消息1"],"minMin":720,"maxMin":1440}}'
+    ? '{"soon":{"text":["消息1","消息2"],"minMin":5,"maxMin":20},"later":{"text":["消息1"],"minMin":60,"maxMin":240},"promised":{"text":["洗完啦"],"minMin":20,"maxMin":40}}'
+    : '{"soon":{"text":["消息1","消息2"],"minMin":5,"maxMin":20},"nextDay":{"text":["消息1"],"minMin":720,"maxMin":1440},"promised":{"text":["洗完啦"],"minMin":20,"maxMin":40}}'
   ),
+  '注意：promised 只在对话中有明确约定时才输出，没有约定就不要这个字段。',
   '',
   '硬性要求：',
   '- text 是数组，1~3条；不发就 text 设 null。',
@@ -43591,7 +43600,7 @@ var userPrompt = [
       };
       lsSet(HOT_MSG_KEY_PREFIX + npcId, hotPayload);
 
-      var count = [parsed.soon, parsed.later, parsed.nextDay].filter(function(s){ return s && s.text; }).length;
+      var count = [parsed.soon, parsed.later, parsed.nextDay, parsed.promised].filter(function(s){ return s && s.text; }).length;
       console.log('[BgPush] ✓', npcName, '生成了', count, '次热备（每次可含多条连发消息）');
 
       // ★ 生成即上传：立刻 replace 该 NPC 的旧 pending
@@ -43617,7 +43626,7 @@ var userPrompt = [
       if (!obj || typeof obj !== 'object') return null;
 
       var result = {};
-      ['soon', 'later', 'nextDay'].forEach(function(key) {
+      ['soon', 'later', 'nextDay', 'promised'].forEach(function(key) {
         var slot = obj[key];
         if (!slot) { result[key] = null; return; }
 
@@ -43645,7 +43654,7 @@ var userPrompt = [
         };
       });
 
-      if (!result.soon && !result.later && !result.nextDay) return null;
+      if (!result.soon && !result.later && !result.nextDay && !result.promised) return null;
       return result;
     } catch(e) {
       return null;
@@ -43671,7 +43680,7 @@ var userPrompt = [
     var rows = [];
     var scheduledTimes = [];
 
-    ['soon', 'later', 'nextDay'].forEach(function(key) {
+    ['soon', 'later', 'nextDay', 'promised'].forEach(function(key) {
       var slot = hot.slots[key];
       if (!slot || !slot.text) return;
 
@@ -43679,7 +43688,13 @@ var userPrompt = [
       if (!texts.length) return;
 
       var pushAt;
-      if (key === 'nextDay') {
+      if (key === 'promised') {
+        // promised：AI 给出的是相对分钟数，直接用
+        var minMin = Math.max(1, parseInt(slot.minMin) || 20);
+        var maxMin = Math.max(minMin, parseInt(slot.maxMin) || 60);
+        pushAt = nowMs + randInt(minMin, maxMin) * 60 * 1000;
+        // promised 不受静默期限制（约定就是约定）
+      } else if (key === 'nextDay') {
         pushAt = _bgPushScheduleNextDay(nowMs, dailyWindow, quietStart, quietEnd);
       } else {
         var minMin = Math.max(1, parseInt(slot.minMin) || 10);
@@ -43809,32 +43824,10 @@ var userPrompt = [
 
 
   // ═══════════════════════════════════════════
-  //  App 打开时兜底生成（用户没聊天就走的情况）
+  //  ★ 兜底生成已移除
+  //  热备消息只在 NPC 回复后（meow:chat-updated）触发生成
+  //  打开 app 不再自动生成，避免没聊天却产生新消息
   // ═══════════════════════════════════════════
-
-  setTimeout(function() {
-    try {
-      if (typeof _meowCollectNpcs !== 'function') return;
-      if (typeof PhoneAI === 'undefined' || !PhoneAI || typeof PhoneAI.chat !== 'function') return;
-      var npcs = _meowCollectNpcs();
-
-      // 找第一个有开启推送、没有热备消息的角色
-      for (var i = 0; i < npcs.length; i++) {
-        var npc = npcs[i];
-        if (!npc || !npc.id || npc.enableLifePush === false) continue;
-        var reserved = {player:1,system:1,user:1,me:1,self:1};
-        if (reserved[String(npc.id).toLowerCase()]) continue;
-
-        var existing = lsGet(HOT_MSG_KEY_PREFIX + npc.id, null);
-        // 没有热备 或者 热备超过 6 小时了（过期）
-        if (!existing || (Date.now() - (existing.generatedAt || 0) > 6 * 60 * 60 * 1000)) {
-          console.log('[BgPush] 兜底生成:', npc.name);
-          generateHotMessages(npc.id).catch(function(){});
-          break; // 一次只生成一个，不占太多资源
-        }
-      }
-    } catch(e) {}
-  }, 8000); // 打开 8 秒后
 
 
   // ═══════════════════════════════════════════
@@ -43930,28 +43923,61 @@ function _bgPushMoveOutOfQuiet(ts, quietStartMin, quietEndMin) {
   return dayStartMs + 24 * 60 * 60000 + quietEndMin * 60000;
 }
 
-// nextDay 调度：放在明天的 daily_window 内，并锁定在"明天"不漂移
+// nextDay 调度：放在"下一个白天"的 daily_window 内
+// ★ 修复：凌晨（静默期后半段，0:00~quietEnd）聊天时，"nextDay"应该是今天白天，不是明天
 function _bgPushScheduleNextDay(nowMs, dailyWindow, quietStartMin, quietEndMin) {
+  var d = new Date(nowMs);
+  var nowMin = d.getHours() * 60 + d.getMinutes();
+
   var dayStart = new Date(nowMs);
   dayStart.setHours(0, 0, 0, 0);
-  var tomorrowStart = dayStart.getTime() + 24 * 60 * 60000;
+  var dayStartMs = dayStart.getTime();
 
-  // 在明天的 daily_window 内随机挑一个时间
+  // 判断当前是否在"凌晨静默后半段"（0:00 ~ quietEnd）
+  // 如果是，"下一个白天"就是今天，不需要 +24h
+  var isLateNight = false;
+  if (quietStartMin > quietEndMin) {
+    // 跨午夜静默（如 23:30~08:00）
+    // 凌晨段 = 0:00 ~ quietEnd
+    if (nowMin < quietEndMin) {
+      isLateNight = true;
+    }
+  }
+
+  // 也检查：如果当前时间早于 daily_window 开始，说明白天还没到
+  // 这种情况也应该用"今天"
   var winStart = dailyWindow.start;
   var winEnd   = dailyWindow.end;
-  if (winStart >= winEnd) winEnd = winStart + 60;  // 保底至少 1 小时窗口
+  if (winStart >= winEnd) winEnd = winStart + 60;
+
+  var targetDayMs;
+  if (isLateNight || nowMin < winStart) {
+    // 今天白天还没到，nextDay = 今天的 daily_window
+    targetDayMs = dayStartMs;
+    console.log('[BgPush] nextDay → 今天白天（凌晨/早晨生成）');
+  } else {
+    // 正常情况：白天或晚上，nextDay = 明天
+    targetDayMs = dayStartMs + 24 * 60 * 60000;
+    console.log('[BgPush] nextDay → 明天');
+  }
+
   var pickMin = randInt(winStart, Math.max(winStart, winEnd - 1));
-  var pushAt = tomorrowStart + pickMin * 60000;
+  var pushAt = targetDayMs + pickMin * 60000;
 
   // 如果落入静默期，推到静默结束后 5~45 分钟
   if (_bgPushIsInQuiet(pushAt, quietStartMin, quietEndMin)) {
     pushAt = _bgPushMoveOutOfQuiet(pushAt, quietStartMin, quietEndMin) + randInt(5, 45) * 60000;
   }
 
-  // 确保不漂到后天：如果推偏了，强制拉回明天
-  var tomorrowEnd = tomorrowStart + 24 * 60 * 60000;
-  if (pushAt >= tomorrowEnd) {
-    pushAt = tomorrowStart + Math.max(quietEndMin, winStart) * 60000 + randInt(5, 30) * 60000;
+  // 确保不漂到目标日之后的第二天
+  var targetDayEnd = targetDayMs + 24 * 60 * 60000;
+  if (pushAt >= targetDayEnd) {
+    pushAt = targetDayMs + Math.max(quietEndMin, winStart) * 60000 + randInt(5, 30) * 60000;
+  }
+
+  // 最后兜底：pushAt 不能在过去
+  if (pushAt <= nowMs) {
+    pushAt = nowMs + randInt(30, 90) * 60000;
   }
 
   return pushAt;
@@ -44023,7 +44049,7 @@ window.addEventListener('pagehide', function() {
   onUserLeave();
 });
 
-// ★ 启动时检查有没有失败的同步需要补传
+// ★ 启动时检查有没有失败的同步需要补传（仅限未过期的热备）
 setTimeout(function() {
   try {
     if (typeof _meowCollectNpcs !== 'function') return;
@@ -44034,10 +44060,14 @@ setTimeout(function() {
       var syncState = _bgPushGetSyncState(npc.id);
       if (syncState && syncState.status === 'fail') {
         var hot = lsGet(HOT_MSG_KEY_PREFIX + npc.id, null);
-        if (hot && hot.slots) {
+        // 只补传 6 小时内的热备，过期的直接清掉
+        if (hot && hot.slots && (Date.now() - (hot.generatedAt || 0) < 6 * 60 * 60 * 1000)) {
           console.log('[BgPush] 启动补传:', npc.name);
           _bgPushSyncToServer(npc.id, hot, 'boot_retry').catch(function(){});
           break; // 一次只补传一个
+        } else if (hot && (Date.now() - (hot.generatedAt || 0) >= 6 * 60 * 60 * 1000)) {
+          console.log('[BgPush] 热备已过期，清除:', npc.name);
+          _bgPushSetSyncState(npc.id, { status: 'expired', at: Date.now() });
         }
       }
     }
@@ -44151,6 +44181,140 @@ setTimeout(function() {
     return { configured: !!cfg.token, autoSync: isAutoSync(), lastSync: cfg.lastSync ? new Date(cfg.lastSync).toLocaleString() : '从未' };
   };
   console.log('[GistSync] 后台自动同步已加载');
+})();
+(function() {
+  'use strict';
+
+  var MARK_READ_DEBOUNCE = 2000;  // 防抖：2秒内多次打开只报一次
+  var _markReadTimers = {};
+
+  // ═══════════════════════════════════════════
+  //  1. 用户打开角色聊天 → 上报 mark-read
+  // ═══════════════════════════════════════════
+
+  // 钩入 openChat：在原始 openChat 执行后上报
+  var _origOpenChat = window._meowOpenChat;
+  window._meowOpenChat = function(contactId) {
+    // 先调原始逻辑
+    if (typeof _origOpenChat === 'function') {
+      _origOpenChat(contactId);
+    }
+    // 上报已读
+    _reportMarkRead(contactId);
+  };
+
+  // 也监听 chatDetail 渲染事件（覆盖从通知点进来的情况）
+  window.addEventListener('meow:chat-updated', function(e) {
+    try {
+      var detail = e.detail || {};
+      var npcId = String(detail.npcId || '').trim();
+      var source = String(detail.source || '');
+
+      // 只在用户主动打开聊天时上报（不是后台推送触发的）
+      if (source === 'pushLog' || source === 'bumpThread') return;
+      if (!npcId) return;
+
+      // 检查当前是否在看这个角色的聊天
+      try {
+        if (typeof PhoneAI !== 'undefined' && PhoneAI && PhoneAI._state) {
+          if (PhoneAI._state.app === 'chatDetail' && PhoneAI._state.chatTarget === npcId) {
+            _reportMarkRead(npcId);
+          }
+        }
+      } catch(_) {}
+    } catch(_) {}
+  });
+
+  function _reportMarkRead(npcId) {
+    if (!npcId) return;
+    npcId = String(npcId).trim();
+
+    // 防抖
+    if (_markReadTimers[npcId]) clearTimeout(_markReadTimers[npcId]);
+    _markReadTimers[npcId] = setTimeout(function() {
+      delete _markReadTimers[npcId];
+      _doMarkRead(npcId);
+    }, MARK_READ_DEBOUNCE);
+  }
+
+  function _doMarkRead(npcId) {
+    var uid = '';
+    try {
+      uid = localStorage.getItem('meow_phone_uid') || 'standalone_main';
+    } catch(_) {
+      uid = 'standalone_main';
+    }
+
+    try {
+      fetch('/api/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid: uid, npcId: npcId })
+      }).then(function(resp) {
+        if (resp.ok) {
+          console.log('[SessionState] mark-read:', npcId);
+        }
+      }).catch(function(e) {
+        console.warn('[SessionState] mark-read failed:', e);
+      });
+    } catch(e) {}
+  }
+
+
+  // ═══════════════════════════════════════════
+  //  2. 用户发消息 → 上报 last_user_replied_at
+  // ═══════════════════════════════════════════
+
+  var _replyDebounce = {};
+
+  window.addEventListener('meow:chat-updated', function(e) {
+    try {
+      var detail = e.detail || {};
+      var npcId = String(detail.npcId || '').trim();
+      var role  = String(detail.role || '').trim().toLowerCase();
+
+      // 只在用户自己发消息时触发
+      if (!npcId) return;
+      if (role !== 'me' && role !== 'user') return;
+
+      // 防抖：连发多条只报一次
+      if (_replyDebounce[npcId]) clearTimeout(_replyDebounce[npcId]);
+      _replyDebounce[npcId] = setTimeout(function() {
+        delete _replyDebounce[npcId];
+        _doReportReply(npcId);
+      }, 3000);
+    } catch(_) {}
+  });
+
+  function _doReportReply(npcId) {
+    var uid = '';
+    try {
+      uid = localStorage.getItem('meow_phone_uid') || 'standalone_main';
+    } catch(_) {
+      uid = 'standalone_main';
+    }
+
+    // 上报 last_user_replied_at（复用 mark-read 接口，加 replied 标记）
+    try {
+      fetch('/api/mark-read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          uid: uid,
+          npcId: npcId,
+          userReplied: true  // 告诉后端这是用户回复，不只是打开
+        })
+      }).then(function(resp) {
+        if (resp.ok) {
+          console.log('[SessionState] user-replied:', npcId);
+        }
+      }).catch(function(e) {
+        console.warn('[SessionState] user-replied failed:', e);
+      });
+    } catch(e) {}
+  }
+
+  console.log('[SessionState] 会话状态上报模块已加载 v2.1');
 })();
 </script>
 </body>
