@@ -31557,10 +31557,11 @@ function bindPageScroll(){
           var _fgPushTimer = setInterval(function(){
             try{
               var prefix2 = _phUID() + '_charstate_';
+              var _fgReserved = {player:1,system:1,user:1,me:1,self:1,chat:1,chatdetail:1,contacts:1,discover:1,settings:1};
               Object.keys(localStorage).forEach(function(k){
                 if (k.indexOf(prefix2) !== 0) return;
                 var npcId = k.slice(prefix2.length);
-                if (!npcId) return;
+                if (!npcId || _fgReserved[npcId.toLowerCase()]) return;
 
                 // 检查开关
                 try{
@@ -37073,7 +37074,7 @@ function renderMapApp(body){
         '<input type="checkbox" data-npcid="__user__" checked style="width:16px;height:16px;accent-color:#07c160;"/>'+
         '<span style="font-size:13px;color:var(--ph-text);font-weight:500;">👤 '+esc(_userName9)+' (你自己)</span></label>';
       // NPC 列表
-      npcCheckboxes += _threadList9.filter(function(t){return t.id;}).map(function(t){
+      npcCheckboxes += _threadList9.filter(function(t){return t.id && String(t.id).indexOf('npc_')===0;}).map(function(t){
         return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;">'+
           '<input type="checkbox" data-npcid="'+esc(t.id)+'" checked style="width:16px;height:16px;accent-color:#07c160;"/>'+
           '<span style="font-size:13px;color:var(--ph-text);">'+esc(t.name||t.id)+'</span></label>';
@@ -41032,13 +41033,11 @@ function _meowUrlBase64ToUint8Array(base64String) {
         }
       }
 
-      // 如果一个都没找到（首次运行），写一个默认 key
+      // 如果一个都没找到（首次运行），写到 userstate 即可，不创建幽灵 charstate_player
       if (!updated) {
-        var defaultKey = uid + '_charstate_player';
-        lsSet(defaultKey, {
-          energy: p.energy, mood: p.mood, health: p.health,
-          hunger: p.hunger, money: p.money, location: p.location,
-        });
+        // ★ 修复：不再创建 charstate_player，避免幽灵角色
+        // 直接写到 userstate_v1 同步即可
+        console.log('[MeowWorld] syncToPhone: 无 charstate key，跳过（已通过 userstate 同步）');
       }
 
       // ★ 同步到"我的状态"页面的 userstate_v1（关键桥接）
@@ -46732,6 +46731,35 @@ setTimeout(function() {
     generateWorld:generateWorld, bindNewNpc:bindNewNpc, worldApiCall:worldApiCall,
     _getApiConfig:_getApiConfig, _autoLayoutLandmarks:_autoLayoutLandmarks
   };
+  // ★ 启动清理：删除幽灵 player 的残留数据
+  try {
+    var _uid = 'standalone_main';
+    try { if(typeof meowGetChatUID==='function') _uid = meowGetChatUID()||'standalone_main'; } catch(e){}
+    // 删除 charstate_player（根源 key）
+    var _ghostKeys = [
+      _uid+'_charstate_player',                          // lsSet 直接写的
+      'meow_phone_c_'+_uid+'_charstate_player'           // phoneSetC 写的
+    ];
+    _ghostKeys.forEach(function(gk){ try{ if(localStorage.getItem(gk)) { localStorage.removeItem(gk); console.log('[MeowWorldEngine] 已删除幽灵 key:', gk); } }catch(e){} });
+    // 从 threads 里移除 player（尝试两种 key 格式）
+    ['meow_phone_c_'+_uid+'_im_threads_v1', _uid+'_threads_v1'].forEach(function(_thKey){
+      try {
+        var _thRaw = localStorage.getItem(_thKey);
+        if (!_thRaw) return;
+        var _thData = JSON.parse(_thRaw);
+        if (_thData && Array.isArray(_thData.list)) {
+          var _before = _thData.list.length;
+          _thData.list = _thData.list.filter(function(t){ return t.id !== 'player' && String(t.id||'').indexOf('npc_')===0; });
+          if (_thData.list.length < _before) { localStorage.setItem(_thKey, JSON.stringify(_thData)); console.log('[MeowWorldEngine] 已清除幽灵 player thread (key:'+_thKey+')'); }
+        }
+      } catch(e){}
+    });
+    // 删除 player 相关的 trace/lifelog
+    try{ localStorage.removeItem('meow_npc_trace_player'); }catch(e){}
+    try{ localStorage.removeItem('meow_phone_c_'+_uid+'_lifelog_player'); }catch(e){}
+    try{ localStorage.removeItem(_uid+'_lifelog_player'); }catch(e){}
+  } catch(e){}
+
   console.log('[MeowWorldEngine] 世界引擎已加载 v1.0');
 })();
 </script>
