@@ -9963,6 +9963,7 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
       window._meowState = state; // ★ 暴露 state 给迷你聊天设置 chatTarget
       window._meowOpenChat = function(contactId){ try{ openChat(contactId); }catch(e){} };
       window._meowLoadContactsDB = function(){ try{ return loadContactsDB(); }catch(e){ return null; } };
+      window._meowLoadThreads = function(){ try{ return loadThreads(); }catch(e){ return {list:[]}; } };
       // ★ 暴露状态读取函数给心声系统使用
       window._meowLoadCharState = function(npcId){ try{ return _loadCharState(npcId); }catch(e){ return null; } };
       window._meowLoadCharExtra = function(npcId){ try{ return _loadCharExtra(npcId); }catch(e){ return {}; } };
@@ -35628,6 +35629,7 @@ window._meowMapLoad = _mapLoad;
 window._meowMapSave = _mapSave;
 window._meowMapEnsure = _mapEnsure;
 window._meowMapPointInIsland = _mapPointInIsland;
+window._meowMapPointInIsland = _mapPointInIsland;
 
 // ---- SVG 构建 ----
 function _mapBuildSVG(mapData){
@@ -37061,14 +37063,20 @@ function renderMapApp(body){
     if(!act2) return;
     var a = act2.getAttribute('data-act');
     if(a==='mapWorldGen'){
-      // ★ 生成世界 UI 面板
-      var _db9 = null; try{ _db9 = (typeof loadContactsDB==='function') ? loadContactsDB() : (window._meowLoadContactsDB ? window._meowLoadContactsDB() : null); }catch(e){}
-      var _contacts9 = (_db9 && _db9.contacts) || [];
-      var npcCheckboxes = _contacts9.filter(function(c){return c.id;}).map(function(c){
-        var checked = ' checked';
+      // ★ 生成世界 UI 面板 — 从 threads 获取角色列表
+      var _th9 = null; try{ _th9 = (typeof loadThreads==='function') ? loadThreads() : (window._meowLoadThreads ? window._meowLoadThreads() : null); }catch(e){}
+      var _threadList9 = (_th9 && _th9.list) || [];
+      // 获取用户名
+      var _userName9 = '我'; try{ var _ucfg = JSON.parse(localStorage.getItem('meow_standalone_user_cfg')||'{}'); if(_ucfg.userName) _userName9=_ucfg.userName; }catch(e){}
+      // 用户自己的选项
+      var npcCheckboxes = '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;border-bottom:1px solid rgba(0,0,0,.04);padding-bottom:8px;margin-bottom:4px;">'+
+        '<input type="checkbox" data-npcid="__user__" checked style="width:16px;height:16px;accent-color:#07c160;"/>'+
+        '<span style="font-size:13px;color:var(--ph-text);font-weight:500;">👤 '+esc(_userName9)+' (你自己)</span></label>';
+      // NPC 列表
+      npcCheckboxes += _threadList9.filter(function(t){return t.id;}).map(function(t){
         return '<label style="display:flex;align-items:center;gap:8px;padding:6px 0;cursor:pointer;">'+
-          '<input type="checkbox" data-npcid="'+esc(c.id)+'"'+checked+' style="width:16px;height:16px;accent-color:#07c160;"/>'+
-          '<span style="font-size:13px;color:var(--ph-text);">'+esc(c.name||c.id)+'</span></label>';
+          '<input type="checkbox" data-npcid="'+esc(t.id)+'" checked style="width:16px;height:16px;accent-color:#07c160;"/>'+
+          '<span style="font-size:13px;color:var(--ph-text);">'+esc(t.name||t.id)+'</span></label>';
       }).join('');
       var wgHtml = '<div style="padding:4px 0;">'+
         '<div style="text-align:center;margin-bottom:12px;">'+
@@ -37094,12 +37102,25 @@ function renderMapApp(body){
         var hint = (wgOv.querySelector('[data-el="wgHint"]')||{}).value || '';
         var mode = (wgOv.querySelector('[data-el="wgMode"]')||{}).value || 'fresh';
         var checked = wgOv.querySelectorAll('input[data-npcid]:checked');
-        var ids = []; checked.forEach(function(cb){ ids.push(cb.getAttribute('data-npcid')); });
-        if (ids.length === 0) { statusEl.textContent='请至少选择一个角色'; statusEl.style.color='#e74c3c'; return; }
+        var ids = []; var includeUser = false;
+        checked.forEach(function(cb){ var nid = cb.getAttribute('data-npcid'); if(nid==='__user__') includeUser=true; else ids.push(nid); });
+        if (ids.length === 0 && !includeUser) { statusEl.textContent='请至少选择一个角色'; statusEl.style.color='#e74c3c'; return; }
+        // 如果选了用户自己，把用户信息加到 hint 里
+        if (includeUser) {
+          var _uName = '我'; try{ var _uc2 = JSON.parse(localStorage.getItem('meow_standalone_user_cfg')||'{}'); if(_uc2.userName) _uName=_uc2.userName; }catch(e){}
+          hint = (hint ? hint + '。' : '') + '还有用户自己「' + _uName + '」也住在这个小镇上，请给TA也分配一个家（用id "user" 作为 npcBindings 的 key）';
+        }
         btn.disabled = true; btn.textContent = '🔄 正在生成...'; statusEl.textContent='正在构建你们的世界，请稍候...'; statusEl.style.color='';
         try {
           var result = await MeowWorldEngine.generateWorld(ids, hint, { mode: mode });
           if (result.ok) {
+            // 处理用户自己的绑定（把家绑到地图 myHouseId 或自定义）
+            if (includeUser && result.result.npcBindings && result.result.npcBindings['user']) {
+              try {
+                var ub = result.result.npcBindings['user'];
+                if (ub.home) { var md2 = window._meowMapLoad(); if(md2) { md2.userHomeLmId = ub.home; window._meowMapSave(md2); } }
+              } catch(e){}
+            }
             statusEl.textContent = '✅ 生成成功！' + result.result.landmarkCount + ' 个地标';
             statusEl.style.color = '#07c160';
             btn.textContent = '✅ 完成'; 
@@ -46662,7 +46683,7 @@ setTimeout(function() {
     var npcBlock = npcInfos.map(function(n){ return '【'+n.name+'】(id:'+n.id+')\n职业/身份：'+n.jobLabel+'\n简介：'+String(n.profile||'').slice(0,250); }).join('\n\n');
     var existingBlock = ''; if (existingLm.length>0) existingBlock = '\n\n## 已有地标（请勿重复）\n'+existingLm.map(function(l){ return '- '+(l.customName||l.name)+' ('+l.emoji+')'; }).join('\n');
     var system = '你是一个擅长构建虚拟小镇的世界设计师。根据角色资料生成一张他们共同生活的地图。输出纯 JSON，不要输出任何其他内容。';
-    var user = '## 角色列表\n'+npcBlock+existingBlock+(userHint?('\n\n## 用户补充设定\n'+userHint):'')+'\n\n## 要求\n1. 生成 12~18 个地标，覆盖：居住区、工作/学习场所、餐饮（2个）、休闲、便利设施。\n2. 地标命名要有烟火气。✓ "鹿野咖啡" ✗ "咖啡馆A"\n3. funcTags 只能从：'+VALID_FUNC_TAGS.join(',')+'\n4. 每个角色分配 home 和 workBind（null=无）。可以合住。\n5. desc 尽量短（10字以内）。\n\n输出紧凑单行JSON，不要换行不要空格不要markdown：\n{"mapName":"名","landmarks":[{"id":"lm_001","name":"名","emoji":"🏬","funcTags":["eat"],"desc":"短描述"}],"npcBindings":{"id":{"home":"lm_x","workBind":"lm_y"}}}';
+    var user = '## 角色列表\n'+npcBlock+existingBlock+(userHint?('\n\n## 用户补充设定\n'+userHint):'')+'\n\n## 要求\n1. 生成 14~18 个地标，覆盖：居住区（角色的家，可合住）、工作/学习场所、餐饮（至少3个不同类型如快餐/咖啡/正餐/小吃摊）、休闲娱乐（公园/商场/KTV/健身房等）、便利设施（便利店/药店等）、1~2个特色地点（如老街/夜市/书店/画廊等增添个性）。\n2. 命名要有烟火气和画面感，像真实小镇。✓ "鹿野咖啡""七号公寓""阿婆米粉" ✗ "咖啡馆A""住宅1"\n3. funcTags 只能从：'+VALID_FUNC_TAGS.join(',')+'\n4. 每个角色分配 home 和 workBind（null=无）。可合住。\n5. desc 10字以内。\n\n输出紧凑单行JSON，不要换行不要空格不要markdown：\n{"mapName":"名","landmarks":[{"id":"lm_001","name":"名","emoji":"🏬","funcTags":["eat"],"desc":"短描述"}],"npcBindings":{"id":{"home":"lm_x","workBind":"lm_y"}}}';
     console.log('[WorldEngine] 开始生成世界...');
     var apiResult = await worldApiCall(system, user, { temperature:0.85, maxTokens:8000 });
     if (!apiResult.ok) return { ok:false, error:apiResult.error };
