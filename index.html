@@ -31532,17 +31532,17 @@ function bindPageScroll(){
                   }
                 }).catch(function(){});
 
-                // 触发条件：孤独感高 + 精力充足 + 合理时间
+                // 触发条件：孤独感高 + 精力充足
                 var h4 = new Date().getHours();
                 var dep3 = (p3.dependency != null) ? p3.dependency : 50;
                 var socialDrive3 = (p3.socialDrive != null) ? p3.socialDrive : 50;
                 var lonelyThresh3 = 100 - dep3 * 0.35 - socialDrive3 * 0.2;
                 var lonely3 = s3.attrs.loneliness || 0;
                 var energy3 = s3.attrs.energy || 0;
-                var mood3 = s3.attrs.mood || 0;
+                // ★ 删除"心情好就触发"的逻辑，只看孤独值
                 var lonelyOk = lonely3 > lonelyThresh3;
-                var moodOk = mood3 >= 75 && energy3 >= 40; // 心情很好时也可能主动联系
-                if (!lonelyOk && !moodOk) return;
+                console.log('[LifePush] 检查:', npcId, '孤独值:', lonely3, '阈值:', Math.round(lonelyThresh3), lonelyOk ? '✓可触发' : '✗不触发');
+                if (!lonelyOk) return;  // ★ 孤独值不够就不触发
                 if (energy3 < 20) return;
                 // 时间窗口：不限（由 _canCall 在来电分支里单独控制）
 
@@ -32132,6 +32132,22 @@ async function _ensureDailyOnlineProactive(npcId, opts){
       _setProactiveAttemptState(npcId, 'daily', { status:'skip', reason:'开关关闭', failReason:'主动消息开关关闭' });
       _pushProactiveDebug(npcId, 'daily', 'skip', '开关关闭 · ' + source);
       return null;
+    }
+    // ★ 检查孤独值（和前台推送一样的逻辑）
+    if (!opts.force) {
+      var s0 = _loadCharState(npcId);
+      if (s0 && s0.attrs) {
+        var p0 = s0.personality || {};
+        var dep0 = (p0.dependency != null) ? p0.dependency : 50;
+        var sd0 = (p0.socialDrive != null) ? p0.socialDrive : 50;
+        var threshold0 = 100 - dep0 * 0.35 - sd0 * 0.2;
+        var lonely0 = s0.attrs.loneliness || 0;
+        if (lonely0 <= threshold0) {
+          _setProactiveAttemptState(npcId, 'daily', { status:'skip', reason:'孤独值不足', failReason:'孤独值' + Math.round(lonely0) + '<=阈值' + Math.round(threshold0) });
+          _pushProactiveDebug(npcId, 'daily', 'skip', '孤独值不足(' + Math.round(lonely0) + '<=' + Math.round(threshold0) + ') · ' + source);
+          return null;
+        }
+      }
     }
     var now = Date.now();
     if (!opts.force && !_isDailyPushWindow(now)){
