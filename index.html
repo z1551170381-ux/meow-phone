@@ -32017,11 +32017,8 @@ async function _recoverAllPendingProactive(source, onlyNpcId){
   return out;
 }
 function _schedulePendingProactiveRecovery(source, delayMs, npcId){
-  try{ if (_pendingProactiveRecoverTimer) clearTimeout(_pendingProactiveRecoverTimer); }catch(e){}
-  _pendingProactiveRecoverTimer = setTimeout(function(){
-    _pendingProactiveRecoverTimer = 0;
-    _recoverAllPendingProactive(source || 'pending_proactive_recover', npcId).catch(function(){});
-  }, Math.max(1200, Number(delayMs || 0) || 0));
+  // 已关闭：不再在回前台 / 启动时恢复旧的待补主动消息。
+  return;
 }
 function _getTrackedLifeNpcIds(){
   try{
@@ -32306,13 +32303,8 @@ async function _reconcileAllDailyOnlineProactive(source, opts){
   return out;
 }
 function _scheduleGlobalDailyReconcile(source, delayMs){
-  var now = Date.now();
-  if (now - _lastGlobalReconcileAt < 8000) return;
-  _lastGlobalReconcileAt = now;
-  try{ if (_proactiveReconcileTimer) clearTimeout(_proactiveReconcileTimer); }catch(e){}
-  _proactiveReconcileTimer = setTimeout(function(){
-    _reconcileAllDailyOnlineProactive(source || 'scheduled_reconcile').catch(function(){});
-  }, Math.max(0, Number(delayMs || 0)));
+  // 已关闭：不再在启动 / focus / visible / online 时自动补“每日主动消息”。
+  return;
 }
 // ========== Phase 3A：聊天模式管理（online/offline） ==========
 var _chatModes = {}; // 缓存：contactId → 'online'|'offline'
