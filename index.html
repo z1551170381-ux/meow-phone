@@ -7630,6 +7630,17 @@ function buildHTML(){
               if (!scene.name && !scene.location){
                 _openSceneEditor(offNid);
               }
+            } else {
+              // ★ 退出线下时：检查是否有未总结内容，有则弹选项
+              var _exitPending = _getPendingForNpc(offNid, 'offline');
+              var _hasUnsummarized = _exitPending && (_exitPending.toIdx - _exitPending.fromIdx + 1) >= 3;
+              if (_hasUnsummarized){
+                // 弹出选项浮层（手机框内风格）
+                _showExitSummaryDialog(offNid);
+                renderChatDetail(offNid);
+                try{ toast('💬 已切换到在线模式'); }catch(e){}
+                return;
+              }
             }
             renderChatDetail(offNid);
             try{ toast(newMode === 'offline' ? '☕ 已切换到线下模式' : '💬 已切换到在线模式'); }catch(e){}
