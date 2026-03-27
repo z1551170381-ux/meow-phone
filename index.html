@@ -45257,34 +45257,7 @@ function onUserLeave() {
 }
 
 function onUserReturn() {
-  // ★ 添加冷却时间，避免频繁触发
-  var lastReturnKey = 'meow_last_user_return';
-  var lastReturn = parseInt(localStorage.getItem(lastReturnKey) || '0');
-  if (Date.now() - lastReturn < 5 * 60 * 1000) {
-    // 5分钟内回来过，不重复检查
-    return;
-  }
-  localStorage.setItem(lastReturnKey, String(Date.now()));
-
-  // ★ 不再全量 cancel — 否则会把 nextDay 也杀掉
-  // 只做：如果有失败的补传，趁回来再试一次
-  try {
-    if (typeof _meowCollectNpcs !== 'function') return;
-    var npcs = _meowCollectNpcs();
-
-    for (var i = 0; i < npcs.length; i++) {
-      var npc = npcs[i];
-      if (!npc || !npc.id) continue;
-      var syncState = _bgPushGetSyncState(npc.id);
-      if (syncState && syncState.status === 'fail') {
-        var hot = lsGet(HOT_MSG_KEY_PREFIX + npc.id, null);
-        if (hot && hot.slots) {
-          _bgPushSyncToServer(npc.id, hot, 'retry_return').catch(function(){});
-        }
-      }
-    }
-    console.log('[BgPush] 用户回来了，检查补传');
-  } catch(e) {}
+  // ★ 已移除：不再在用户回来时检查补传或触发任何 API 调用
 }
 
 
