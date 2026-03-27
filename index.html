@@ -25855,11 +25855,30 @@ const npc = _wxGetChatTargetMeta(npcId);
               _sendMaxTk = _wcSend > 0 ? Math.max(4096, Math.round(_wcSend * 3)) : 4096;
             }catch(e){ _sendMaxTk = 4096; }
           }
+
+          // ★ 线上模式：在 system prompt 末尾追加热备消息指令（合并为一次 API 调用）
+          var _wxInlineHotEnabled = false;
+          var _wxInlineHotExtra = 0;
+          if (!_isOffline && typeof window._meowSaveHotInline === 'function') {
+            _wxInlineHotEnabled = true;
+            _wxInlineHotExtra = 400;
+            var _wxHH = new Date().getHours();
+            var _wxHotSlots = _wxHH < 18
+              ? 'soon（聊完不久，minMin/maxMin 3~60分钟）和 later（几小时后，minMin/maxMin 120~480分钟）'
+              : 'soon（聊完不久，minMin/maxMin 3~60分钟）和 nextDay（第二天自然时段，minMin/maxMin 720~1440分钟）';
+            systemPrompt += '\n\n【附加任务·主动消息预生成】\n' +
+              '回复完成后，在最末尾另起一行输出标记 [HOTMSG_JSON]，紧跟一个JSON。\n' +
+              '这个JSON表示你之后会主动发给对方的消息，分' + _wxHotSlots + '两个时间点。\n' +
+              '格式：{"soon":{"text":["消息1","消息2"],"minMin":10,"maxMin":30},"' + (_wxHH<18?'later':'nextDay') + '":{"text":["消息1"],"minMin":120,"maxMin":360}}\n' +
+              '要求：text是数组1~3条，像真人微信连发，带当下细节，不要模板味。不发就text设null。\n' +
+              '注意：先正常回复，回复和[HOTMSG_JSON]之间用换行隔开，不要把JSON混在回复里。';
+          }
+
           const result = await PhoneAI.chat({
             messages: contextMessages,
             system: systemPrompt,
             timeout: _isOffline ? 180 : 60,
-            maxTokens: _sendMaxTk
+            maxTokens: _sendMaxTk || (1024 + _wxInlineHotExtra)
           });
 
           // 只在“被更晚的一次发送顶掉”时停止当前回复。
@@ -25882,13 +25901,27 @@ const npc = _wxGetChatTargetMeta(npcId);
           }
 
           // 4. 解析多条消息
+          // ★ 提取内联热备JSON（线上模式，如果有）
+          var _wxResponseText = String(result.data || '');
+          var _wxHotJsonStr = null;
+          if (_wxInlineHotEnabled) {
+            var _wxHotIdx = _wxResponseText.indexOf('[HOTMSG_JSON]');
+            if (_wxHotIdx >= 0) {
+              _wxHotJsonStr = _wxResponseText.slice(_wxHotIdx + '[HOTMSG_JSON]'.length).trim();
+              _wxResponseText = _wxResponseText.slice(0, _wxHotIdx).trim();
+              console.log('[InlineHot] 提取到热备JSON:', _wxHotJsonStr.slice(0, 100));
+            } else {
+              console.log('[InlineHot] 模型未输出热备标记，跳过');
+            }
+          }
+
           // ★ 离线模式：用 parseMultiMessages 安全清理后合并为单条
           var replies;
           if (_isOffline){
             replies = [_cleanOfflineAIResponse(parseMultiMessages(result.data).join('\n\n'))];
             console.log('[Offline] _wxSendChat 合并为单条回复, 长度=' + replies[0].length + '字符');
           } else {
-            replies = parseMultiMessages(result.data);
+            replies = parseMultiMessages(_wxResponseText);
           }
 
           // 5. 逐条写入 —— 每条消息独立节奏：typing → 气泡 → 停顿 → typing → ...
@@ -25937,6 +25970,17 @@ const npc = _wxGetChatTargetMeta(npcId);
           }
 
           try{ _clearPendingChatReply(npcId); }catch(_e){}
+
+          // ★ 保存内联热备消息（回复全部写入后）
+          if (_wxHotJsonStr && typeof window._meowSaveHotInline === 'function') {
+            try {
+              var _wxBond = '';
+              try { var _wxDb = loadContactsDB(); var _wxNpc2 = findContactById(_wxDb, npcId); _wxBond = (_wxNpc2 && _wxNpc2.bond) || '普通'; } catch(e){}
+              window._meowSaveHotInline(npcId, npc.name || npcId, _wxBond, _wxHotJsonStr);
+            } catch(e) {
+              console.warn('[InlineHot] _wxSendChat 保存失败:', e);
+            }
+          }
 
           // 阶段B：AI回复完成后概率触发（戳一戳 + 引用）
           _postReplyProbabilityTriggers(npcId, npc, replies);
