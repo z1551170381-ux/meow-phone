@@ -45559,12 +45559,19 @@ setTimeout(function() {
       }
 
       // 5. 检查孤独值
-      var stateKey = 'meow_phone_c_standalone_main_charstate_' + npcId;
-      var stateData = localStorage.getItem(stateKey);
       var loneliness = 50;
-      if (stateData) {
-        var state = JSON.parse(stateData);
-        if (state.attrs) loneliness = state.attrs.loneliness || 50;
+      try {
+        // 使用正确的存储格式读取状态
+        var chatUID = (typeof phoneGetChatUID === 'function') ? phoneGetChatUID() : '';
+        chatUID = String(chatUID || '').trim() || 'fallback';
+        var stateData = (typeof phoneGetC === 'function') 
+          ? phoneGetC(chatUID, 'charstate_' + npcId, null)
+          : null;
+        if (stateData && stateData.attrs) {
+          loneliness = stateData.attrs.loneliness || 50;
+        }
+      } catch(e) {
+        console.warn('[InnerVoice] 读取孤独值失败:', e);
       }
       if (loneliness < 60) {
         return { ok: false, reason: '孤独值不足 (' + loneliness + ')' };
