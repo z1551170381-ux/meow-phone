@@ -3,6 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="theme-color" content="#f7f4f0">
@@ -25581,17 +25582,28 @@ const npc = _wxGetChatTargetMeta(npcId);
 
           if (!result.ok) throw result.error || 'API error';
 
-          // ★ 提取内联热备JSON（如果有）
+          // ★ 提取内联热备JSON（如果有）— v6增强容错
           var _responseText = String(result.data || '');
           var _hotJsonStr = null;
           if (_inlineHotEnabled) {
-            var _hotIdx = _responseText.indexOf('[HOTMSG_JSON]');
-            if (_hotIdx >= 0) {
-              _hotJsonStr = _responseText.slice(_hotIdx + '[HOTMSG_JSON]'.length).trim();
+            // 支持多种标记变体：[HOTMSG_JSON]、[HOTMSG_JSON]:、【HOTMSG_JSON】等
+            var _hotMatch = _responseText.match(/\[HOTMSG_JSON\]\s*:?\s*/i) ||
+                            _responseText.match(/【HOTMSG_JSON】\s*:?\s*/i);
+            if (_hotMatch) {
+              var _hotIdx = _hotMatch.index;
+              _hotJsonStr = _responseText.slice(_hotIdx + _hotMatch[0].length).trim();
               _responseText = _responseText.slice(0, _hotIdx).trim();
               console.log('[InlineHot] 提取到热备JSON:', _hotJsonStr.slice(0, 100));
             } else {
-              console.log('[InlineHot] 模型未输出热备标记，跳过');
+              // ★ 兜底：尝试从末尾提取裸JSON（模型有时省略标记直接输出JSON）
+              var _tailJsonMatch = _responseText.match(/\n\s*(\{"soon"\s*:[\s\S]{10,})\s*$/);
+              if (_tailJsonMatch) {
+                _hotJsonStr = _tailJsonMatch[1].trim();
+                _responseText = _responseText.slice(0, _tailJsonMatch.index).trim();
+                console.log('[InlineHot] 兜底提取尾部JSON:', _hotJsonStr.slice(0, 100));
+              } else {
+                console.log('[InlineHot] 模型未输出热备标记，跳过');
+              }
             }
           }
 
@@ -25901,17 +25913,27 @@ const npc = _wxGetChatTargetMeta(npcId);
           }
 
           // 4. 解析多条消息
-          // ★ 提取内联热备JSON（线上模式，如果有）
+          // ★ 提取内联热备JSON（线上模式，如果有）— v6增强容错
           var _wxResponseText = String(result.data || '');
           var _wxHotJsonStr = null;
           if (_wxInlineHotEnabled) {
-            var _wxHotIdx = _wxResponseText.indexOf('[HOTMSG_JSON]');
-            if (_wxHotIdx >= 0) {
-              _wxHotJsonStr = _wxResponseText.slice(_wxHotIdx + '[HOTMSG_JSON]'.length).trim();
+            var _wxHotMatch = _wxResponseText.match(/\[HOTMSG_JSON\]\s*:?\s*/i) ||
+                              _wxResponseText.match(/【HOTMSG_JSON】\s*:?\s*/i);
+            if (_wxHotMatch) {
+              var _wxHotIdx = _wxHotMatch.index;
+              _wxHotJsonStr = _wxResponseText.slice(_wxHotIdx + _wxHotMatch[0].length).trim();
               _wxResponseText = _wxResponseText.slice(0, _wxHotIdx).trim();
               console.log('[InlineHot] 提取到热备JSON:', _wxHotJsonStr.slice(0, 100));
             } else {
-              console.log('[InlineHot] 模型未输出热备标记，跳过');
+              // ★ 兜底：尝试从末尾提取裸JSON
+              var _wxTailMatch = _wxResponseText.match(/\n\s*(\{"soon"\s*:[\s\S]{10,})\s*$/);
+              if (_wxTailMatch) {
+                _wxHotJsonStr = _wxTailMatch[1].trim();
+                _wxResponseText = _wxResponseText.slice(0, _wxTailMatch.index).trim();
+                console.log('[InlineHot] 兜底提取尾部JSON:', _wxHotJsonStr.slice(0, 100));
+              } else {
+                console.log('[InlineHot] 模型未输出热备标记，跳过');
+              }
             }
           }
 
@@ -41300,13 +41322,7 @@ function _meowUrlBase64ToUint8Array(base64String) {
         });
       });
 
-      // 初次渲染状态 tab
-      _renderTabContent();
-      _renderStatusTabFn = _renderStatusTab; // ★ 暴露给外层 _refresh 使用
-
-      _initDrag();
-
-      /* ── 可配置快捷操作系统 ── */
+      /* ── 可配置快捷操作系统（★ 必须在 _renderTabContent 之前定义，否则 hoisting 导致 undefined.slice() 报错）── */
       var LS_SHORTCUTS = 'meow.floatavatar.shortcuts';
       var SHORTCUT_DEFS = {
         map:       { label:'地图', svg:'<path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/>', action:'app', app:'map' },
@@ -41320,6 +41336,12 @@ function _meowUrlBase64ToUint8Array(base64String) {
         settings:  { label:'设置', svg:'<path d="M19.14 12.94c.04-.3.06-.61.06-.94 0-.32-.02-.64-.07-.94l2.03-1.58c.18-.14.23-.41.12-.61l-1.92-3.32c-.12-.22-.37-.29-.59-.22l-2.39.96c-.5-.38-1.03-.7-1.62-.94l-.36-2.54A.48.48 0 0 0 13.92 2h-3.84a.48.48 0 0 0-.48.41l-.36 2.54c-.59.24-1.13.57-1.62.94l-2.39-.96c-.22-.08-.47 0-.59.22L2.71 8.47c-.12.21-.08.47.12.61l2.03 1.58c-.05.3-.07.62-.07.94s.02.64.07.94l-2.03 1.58c-.18.14-.23.41-.12.61l1.92 3.32c.12.22.37.29.59.22l2.39-.96c.5.38 1.04.7 1.63.94l.36 2.54c.05.24.26.41.48.41h3.84c.24 0 .44-.17.48-.41l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.08.47 0 .59-.22l1.92-3.32c.12-.22.07-.47-.12-.61l-2.03-1.58zM12 15.6A3.6 3.6 0 1 1 12 8.4a3.6 3.6 0 0 1 0 7.2z"/>', action:'app', app:'settings' },
       };
       var DEFAULT_SHORTCUTS = ['map','work','shop','rest'];
+
+      // 初次渲染状态 tab
+      _renderTabContent();
+      _renderStatusTabFn = _renderStatusTab; // ★ 暴露给外层 _refresh 使用
+
+      _initDrag();
 
       function _loadShortcuts() {
         try { var v = JSON.parse(localStorage.getItem(LS_SHORTCUTS)); if(Array.isArray(v) && v.length) return v; } catch(e){}
@@ -44038,15 +44060,19 @@ function _meowUrlBase64ToUint8Array(base64String) {
 /* ── meow-news.js end ── */
 </script>
 <script>
-// ====== meow-bgpush.js v5 — 聊天后预生成 + 离开时推送 ======
+// ====== meow-bgpush.js v6 — 聊天后预生成 + 直传服务器 + 内联去重 ======
+//
+// v6 改造要点：
+//   ★ 热备不存本地：内联生成 → 直传服务器，localStorage 仅用于调试面板
+//   ★ 内联去重：chat-updated 事件检测冷却锁，内联已覆盖则跳过独立生成
+//   ★ 上传自动重试：最多 2 次重试 + 8秒超时控制
+//   ★ JSON 解析增强：支持标记变体、裸JSON提取、格式修复
 //
 // 流程：
-//   1. NPC 回复完毕后，静默调一次 API，生成 3 条不同时段的消息
-//      模型自己决定每条消息的延迟范围（根据对话氛围、情绪、关系）
-//   2. 存入 localStorage（热备消息）
-//   3. 用户切走时，一个 fetch POST 到后端（< 500ms，iOS 安全）
-//   4. 后端 cron 到时间推送
-//   5. 用户回来 → 取消未发的 pending
+//   1. NPC 回复完毕后，内联路径已在聊天回复中一起生成热备 JSON
+//   2. 直接 POST 到后端（不经 localStorage 中转）
+//   3. 后端 cron 到时间推送
+//   4. 仅当内联路径未覆盖时，才兜底调独立 API 生成
 //
 // ★ 不需要音频保活，不需要后台调 API
 // ★ API Key 永远不离开设备
@@ -44128,8 +44154,6 @@ function _meowUrlBase64ToUint8Array(base64String) {
     // reserved 过滤
     var reserved = {player:1,system:1,user:1,me:1,self:1};
     if (reserved[String(npcId).toLowerCase()]) return;
-
-    _genLocks[npcId] = now;
 
     _genLocks[npcId] = now;
 
@@ -44275,7 +44299,7 @@ var userPrompt = [
         return;
       }
 
-      // 存入 localStorage（镜像 + 调试用）
+      // ★ v6: localStorage 仅用于调试面板展示，不作为主路径
       var batchId = 'bg_' + npcId + '_' + Date.now();
       var hotPayload = {
         npcId: npcId,
@@ -44286,14 +44310,14 @@ var userPrompt = [
         batchId: batchId,
         source: 'chat_update'
       };
-      lsSet(HOT_MSG_KEY_PREFIX + npcId, hotPayload);
+      try { lsSet(HOT_MSG_KEY_PREFIX + npcId, hotPayload); } catch(e) {}
 
       var count = [parsed.soon, parsed.later, parsed.nextDay].filter(function(s){ return s && s.text; }).length;
       console.log('[BgPush] ✓', npcName, '生成了', count, '次热备（每次可含多条连发消息）');
 
-      // ★ 生成即上传：立刻 replace 该 NPC 的旧 pending
+      // ★ 生成即上传：立刻 replace 该 NPC 的旧 pending（v6: 内置自动重试）
       _bgPushSyncToServer(npcId, hotPayload, 'chat_update').catch(function(e) {
-        console.warn('[BgPush] 即时上传失败，切后台时会重试:', e.message || e);
+        console.warn('[BgPush] 上传最终失败（已重试）:', e.message || e);
       });
 
     } catch(e) {
@@ -44307,7 +44331,22 @@ var userPrompt = [
 
   function parseSlotJSON(raw) {
     var text = String(raw || '').trim();
+    // ★ v6增强：先清理常见干扰字符
     text = text.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+    // 去除可能的 BOM 和零宽字符
+    text = text.replace(/[\uFEFF\u200B\u200C\u200D]/g, '');
+
+    // ★ 如果整段不是以 { 开头，尝试从中间找 JSON
+    if (text.charAt(0) !== '{') {
+      var braceStart = text.indexOf('{');
+      if (braceStart >= 0) {
+        // 从第一个 { 到最后一个 } 之间提取
+        var braceEnd = text.lastIndexOf('}');
+        if (braceEnd > braceStart) {
+          text = text.slice(braceStart, braceEnd + 1);
+        }
+      }
+    }
 
     try {
       var obj = JSON.parse(text);
@@ -44345,11 +44384,25 @@ var userPrompt = [
       if (!result.soon && !result.later && !result.nextDay) return null;
       return result;
     } catch(e) {
+      // ★ v6增强：JSON.parse 失败时尝试修复常见问题
+      try {
+        // 尝试修复：单引号替换为双引号、尾逗号移除
+        var fixedText = text
+          .replace(/'/g, '"')
+          .replace(/,\s*}/g, '}')
+          .replace(/,\s*]/g, ']');
+        var obj2 = JSON.parse(fixedText);
+        if (obj2 && typeof obj2 === 'object') {
+          console.log('[BgPush] JSON修复解析成功');
+          return parseSlotJSON(JSON.stringify(obj2)); // 递归一次用规范JSON
+        }
+      } catch(e2) {}
       return null;
     }
   }
 
   // ★ 暴露给主聊天流程：在回复中内联生成热备时调用此函数保存
+  // ★ v6改造：不存localStorage，直接上传服务器，减少延迟和故障点
   window._meowSaveHotInline = function(npcId, npcName, bond, rawJsonStr) {
     try {
       var parsed = parseSlotJSON(rawJsonStr);
@@ -44367,12 +44420,13 @@ var userPrompt = [
         batchId: batchId,
         source: 'inline_chat'
       };
-      lsSet(HOT_MSG_KEY_PREFIX + npcId, hotPayload);
+      // ★ 仍然写一份到 localStorage 用于调试面板显示，但不依赖它
+      try { lsSet(HOT_MSG_KEY_PREFIX + npcId, hotPayload); } catch(e) {}
       // 设置冷却锁，阻止 bgpush 再重复生成
       _genLocks[npcId] = Date.now();
       var count = [parsed.soon, parsed.later, parsed.nextDay].filter(function(s){ return s && s.text; }).length;
-      console.log('[BgPush-Inline] ✓', npcName, '内联生成了', count, '次热备');
-      // 异步上传
+      console.log('[BgPush-Inline] ✓', npcName, '内联生成了', count, '次热备，直接上传');
+      // ★ 直接上传，不经过 localStorage 中转
       _bgPushSyncToServer(npcId, hotPayload, 'inline_chat').catch(function(e) {
         console.warn('[BgPush-Inline] 上传失败:', e.message || e);
       });
@@ -44468,6 +44522,7 @@ var userPrompt = [
   }
 
   // ── 立即上传到后端，replace 该 NPC 旧 pending ──
+  // ★ v6改造：添加自动重试 + 超时控制
   async function _bgPushSyncToServer(npcId, hot, reason) {
     _bgPushSetSyncState(npcId, { status: 'syncing', at: Date.now() });
 
@@ -44478,50 +44533,82 @@ var userPrompt = [
       return;
     }
 
-    try {
-      var resp = await fetch('/api/schedule-push', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          uid:       'standalone_main',
-          action:    'replace_npc_pending',
-          npcId:     hot.npcId,
-          npcName:   hot.npcName,
-          batchId:   hot.batchId || ('bg_' + npcId + '_' + Date.now()),
-          batchKind: 'bgpush',
-          source:    reason || hot.source || 'chat_update',
-          messages:  rows
-        }),
-        keepalive: true
-      });
+    var payload = JSON.stringify({
+      uid:       'standalone_main',
+      action:    'replace_npc_pending',
+      npcId:     hot.npcId,
+      npcName:   hot.npcName,
+      batchId:   hot.batchId || ('bg_' + npcId + '_' + Date.now()),
+      batchKind: 'bgpush',
+      source:    reason || hot.source || 'chat_update',
+      messages:  rows
+    });
 
-      var data = null;
-      try { data = await resp.json(); } catch(_) {}
+    var MAX_RETRIES = 2;
+    var lastError = null;
 
-      if (!resp.ok || (data && data.ok === false)) {
-        throw new Error((data && data.error) || ('HTTP ' + resp.status));
+    for (var attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // ★ 超时控制：8秒内必须完成
+        var controller = (typeof AbortController !== 'undefined') ? new AbortController() : null;
+        var timeoutId = null;
+        if (controller) {
+          timeoutId = setTimeout(function() { controller.abort(); }, 8000);
+        }
+
+        var fetchOpts = {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: payload,
+          keepalive: true
+        };
+        if (controller) fetchOpts.signal = controller.signal;
+
+        var resp = await fetch('/api/schedule-push', fetchOpts);
+        if (timeoutId) clearTimeout(timeoutId);
+
+        var data = null;
+        try { data = await resp.json(); } catch(_) {}
+
+        if (!resp.ok || (data && data.ok === false)) {
+          throw new Error((data && data.error) || ('HTTP ' + resp.status));
+        }
+
+        _bgPushSetSyncState(npcId, {
+          status: 'ok',
+          at: Date.now(),
+          inserted: (data && data.inserted) || rows.length,
+          cancelled: (data && data.cancelled) || 0,
+          batchId: hot.batchId,
+          attempt: attempt
+        });
+
+        console.log('[BgPush] ✓ 上传成功' + (attempt > 0 ? '(重试'+attempt+'次)' : '') + ':', npcId,
+          '取消旧', (data && data.cancelled) || '?', '条',
+          '插入新', (data && data.inserted) || rows.length, '条');
+        return; // 成功，退出
+
+      } catch(e) {
+        lastError = e;
+        if (timeoutId) clearTimeout(timeoutId);
+        console.warn('[BgPush] 上传尝试', attempt + 1, '失败:', e.message || e);
+
+        // 最后一次重试也失败了
+        if (attempt >= MAX_RETRIES) break;
+
+        // 等待后重试（指数退避：1秒、2秒）
+        await new Promise(function(r) { setTimeout(r, (attempt + 1) * 1000); });
       }
-
-      _bgPushSetSyncState(npcId, {
-        status: 'ok',
-        at: Date.now(),
-        inserted: (data && data.inserted) || rows.length,
-        cancelled: (data && data.cancelled) || 0,
-        batchId: hot.batchId
-      });
-
-      console.log('[BgPush] ✓ 即时上传成功:', npcId,
-        '取消旧', (data && data.cancelled) || '?', '条',
-        '插入新', (data && data.inserted) || rows.length, '条');
-
-    } catch(e) {
-      _bgPushSetSyncState(npcId, {
-        status: 'fail',
-        at: Date.now(),
-        error: String(e.message || e).slice(0, 200)
-      });
-      throw e;
     }
+
+    // 全部重试失败
+    _bgPushSetSyncState(npcId, {
+      status: 'fail',
+      at: Date.now(),
+      error: String((lastError && lastError.message) || lastError || '').slice(0, 200),
+      retries: MAX_RETRIES
+    });
+    throw lastError;
   }
 
   // ── 给调试页留同步状态 ──
@@ -44544,10 +44631,23 @@ var userPrompt = [
       // 只在 NPC 回复时触发（不是用户消息、不是系统消息）
       if (!npcId || role === 'me' || role === 'user' || role === 'system' || role === 'narrator') return;
 
+      // ★ v6改造：内联模式（online）已经在聊天回复中一起生成了热备，
+      // 不再单独调 API 重复生成。只有当内联路径未覆盖（冷却锁未设置）时才兜底生成。
+      // 检查：如果 _genLocks 在最近 10 秒内已被内联路径设置，跳过
+      if (_genLocks[npcId] && Date.now() - _genLocks[npcId] < 10000) {
+        console.log('[BgPush] 内联热备已覆盖，跳过独立生成:', npcId);
+        return;
+      }
+
       // 防抖：NPC 可能连发 3 条，等最后一条写完再生成
       if (_genTimers[npcId]) clearTimeout(_genTimers[npcId]);
       _genTimers[npcId] = setTimeout(function() {
         delete _genTimers[npcId];
+        // ★ 再次检查：防抖期间内联路径可能已完成
+        if (_genLocks[npcId] && Date.now() - _genLocks[npcId] < 10000) {
+          console.log('[BgPush] 防抖期间内联热备已完成，跳过:', npcId);
+          return;
+        }
         generateHotMessages(npcId).catch(function(e) {
           console.warn('[BgPush] 生成异常:', e);
         });
@@ -44854,7 +44954,7 @@ setTimeout(function() {
     });
   };
 
-  console.log('[BgPush] 聊天后预生成模块已加载 v5');
+  console.log('[BgPush] 聊天后预生成模块已加载 v6 (直传服务器+自动重试+内联去重)');
 })();
 
 
