@@ -25547,11 +25547,29 @@ const npc = _wxGetChatTargetMeta(npcId);
             }catch(e){ _offlineMaxTokens = 4096; }
           }
 
+          // ★ 线上模式：在 system prompt 末尾追加热备消息生成指令（省掉单独的 bgpush API 调用）
+          var _inlineHotEnabled = false;
+          var _inlineHotMaxTokensExtra = 0;
+          if (mySendMode === 'online' && typeof window._meowSaveHotInline === 'function') {
+            _inlineHotEnabled = true;
+            _inlineHotMaxTokensExtra = 400;
+            var _hh = new Date().getHours();
+            var _hotSlots = _hh < 18
+              ? 'soon（聊完不久，minMin/maxMin 3~60分钟）和 later（几小时后，minMin/maxMin 120~480分钟）'
+              : 'soon（聊完不久，minMin/maxMin 3~60分钟）和 nextDay（第二天自然时段，minMin/maxMin 720~1440分钟）';
+            systemPrompt += '\n\n【附加任务·主动消息预生成】\n' +
+              '回复完成后，在最末尾另起一行输出标记 [HOTMSG_JSON]，紧跟一个JSON。\n' +
+              '这个JSON表示你之后会主动发给对方的消息，分' + _hotSlots + '两个时间点。\n' +
+              '格式：{"soon":{"text":["消息1","消息2"],"minMin":10,"maxMin":30},"' + (_hh<18?'later':'nextDay') + '":{"text":["消息1"],"minMin":120,"maxMin":360}}\n' +
+              '要求：text是数组1~3条，像真人微信连发，带当下细节，不要模板味。不发就text设null。\n' +
+              '注意：先正常回复，回复和[HOTMSG_JSON]之间用换行隔开，不要把JSON混在回复里。';
+          }
+
           const result = await PhoneAI.chat({
             messages: contextMessages,
             system: systemPrompt,
             timeout: mySendMode === 'offline' ? 180 : 60,
-            maxTokens: _offlineMaxTokens
+            maxTokens: _offlineMaxTokens || (1024 + _inlineHotMaxTokensExtra)
           });
 
           // ★ 检查：会话未切走 且 模式未切换（防止回复发到错误模式）
@@ -25563,13 +25581,27 @@ const npc = _wxGetChatTargetMeta(npcId);
 
           if (!result.ok) throw result.error || 'API error';
 
+          // ★ 提取内联热备JSON（如果有）
+          var _responseText = String(result.data || '');
+          var _hotJsonStr = null;
+          if (_inlineHotEnabled) {
+            var _hotIdx = _responseText.indexOf('[HOTMSG_JSON]');
+            if (_hotIdx >= 0) {
+              _hotJsonStr = _responseText.slice(_hotIdx + '[HOTMSG_JSON]'.length).trim();
+              _responseText = _responseText.slice(0, _hotIdx).trim();
+              console.log('[InlineHot] 提取到热备JSON:', _hotJsonStr.slice(0, 100));
+            } else {
+              console.log('[InlineHot] 模型未输出热备标记，跳过');
+            }
+          }
+
           // ★ 离线模式：不拆分消息，用 parseMultiMessages 安全清理后合并
           var replies;
           if (mySendMode === 'offline'){
             replies = [_cleanOfflineAIResponse(parseMultiMessages(result.data).join('\n\n'))];
             console.log('[Offline] 合并为单条回复, 长度=' + replies[0].length + '字符');
           } else {
-            replies = parseMultiMessages(result.data);
+            replies = parseMultiMessages(_responseText);
           }
           for (var ri=0; ri<replies.length; ri++){
             if (mySeqId !== PhoneAI._replySeqId || state.chatTarget !== myChatId){
@@ -25585,6 +25617,18 @@ const npc = _wxGetChatTargetMeta(npcId);
             }
             await _writeAIReply(npcId, npc, replies[ri], _now());
           }
+
+          // ★ 保存内联热备消息（回复写入后异步处理）
+          if (_hotJsonStr && typeof window._meowSaveHotInline === 'function') {
+            try {
+              var _npcBond = '';
+              try { var _db2 = loadContactsDB(); var _npc2 = findContactById(_db2, npcId); _npcBond = (_npc2 && _npc2.bond) || '普通'; } catch(e){}
+              window._meowSaveHotInline(npcId, npc.name || npcId, _npcBond, _hotJsonStr);
+            } catch(e) {
+              console.warn('[InlineHot] 保存失败:', e);
+            }
+          }
+
           return; // AI 成功，不走 fallback
         }catch(e){
           _hideTypingIndicator();
@@ -44170,7 +44214,7 @@ var userPrompt = [
         messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.85,
         maxTokens: 500,
-        timeout: 30,
+        timeout: 45,
         channel: 'proactive'
       });
 
@@ -44261,9 +44305,39 @@ var userPrompt = [
     }
   }
 
-
-  // ═══════════════════════════════════════════
-  //  ★ 生成即上传：核心三函数
+  // ★ 暴露给主聊天流程：在回复中内联生成热备时调用此函数保存
+  window._meowSaveHotInline = function(npcId, npcName, bond, rawJsonStr) {
+    try {
+      var parsed = parseSlotJSON(rawJsonStr);
+      if (!parsed) {
+        console.log('[BgPush-Inline] JSON 解析失败，跳过');
+        return false;
+      }
+      var batchId = 'bg_' + npcId + '_' + Date.now();
+      var hotPayload = {
+        npcId: npcId,
+        npcName: npcName,
+        bond: bond,
+        slots: parsed,
+        generatedAt: Date.now(),
+        batchId: batchId,
+        source: 'inline_chat'
+      };
+      lsSet(HOT_MSG_KEY_PREFIX + npcId, hotPayload);
+      // 设置冷却锁，阻止 bgpush 再重复生成
+      _genLocks[npcId] = Date.now();
+      var count = [parsed.soon, parsed.later, parsed.nextDay].filter(function(s){ return s && s.text; }).length;
+      console.log('[BgPush-Inline] ✓', npcName, '内联生成了', count, '次热备');
+      // 异步上传
+      _bgPushSyncToServer(npcId, hotPayload, 'inline_chat').catch(function(e) {
+        console.warn('[BgPush-Inline] 上传失败:', e.message || e);
+      });
+      return true;
+    } catch(e) {
+      console.warn('[BgPush-Inline] 保存异常:', e);
+      return false;
+    }
+  };
   // ═══════════════════════════════════════════
 
   // ── 把 hot.slots 转成后端 rows ──
