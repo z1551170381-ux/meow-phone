@@ -98,6 +98,8 @@
     getEntry:   () => null,
     setEntry:   () => {},
     deleteEntry:() => {},
+    canWrite:   () => false,
+    listEntries:() => ({ all: [] }),
   };
 
   /* ═══════════════════════════════════════════════
@@ -44167,8 +44169,8 @@ var userPrompt = [
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
         temperature: 0.85,
-        maxTokens: 1200,
-        timeout: 50,
+        maxTokens: 500,
+        timeout: 30,
         channel: 'proactive'
       });
 
