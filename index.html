@@ -8270,6 +8270,50 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
             try{ toast(ce.enableLifePush ? '主动消息弹窗已开启' : '主动消息弹窗已关闭'); }catch(e){}
             return;
           }
+          if (act === 'wxCSProactiveExpand'){
+            const area = root.querySelector('[data-el="proactiveExpandArea"]');
+            const arrow = root.querySelector('[data-el="proactiveExpandArrow"]');
+            if (area){
+              const show = area.style.display === 'none';
+              area.style.display = show ? 'block' : 'none';
+              if (arrow) arrow.style.transform = show ? 'rotate(180deg)' : '';
+            }
+            return;
+          }
+          if (act === 'wxCSToggleInnerVoice'){
+            const nid = t.getAttribute('data-npcid') || state.chatTarget;
+            const ce = _loadCharExtra(nid);
+            ce.enableInnerVoice = !(ce.enableInnerVoice !== false);
+            _saveCharExtra(nid, ce);
+            t.classList.toggle('on', ce.enableInnerVoice); t.classList.toggle('off', !ce.enableInnerVoice);
+            try{ toast(ce.enableInnerVoice ? '心声表演已开启' : '心声表演已关闭'); }catch(e){}
+            return;
+          }
+          if (act === 'wxCSToggleChase'){
+            const nid = t.getAttribute('data-npcid') || state.chatTarget;
+            const ce = _loadCharExtra(nid);
+            ce.allowChaseOnRead = !ce.allowChaseOnRead;
+            _saveCharExtra(nid, ce);
+            t.classList.toggle('on', ce.allowChaseOnRead); t.classList.toggle('off', !ce.allowChaseOnRead);
+            try{ toast(ce.allowChaseOnRead ? '已读不回追发已开启' : '已读不回追发已关闭'); }catch(e){}
+            return;
+          }
+          if (t.hasAttribute('data-el') && t.getAttribute('data-el') === 'ps_freq_btn'){
+            const nid = t.getAttribute('data-npcid') || t.closest('[data-npcid]')?.getAttribute('data-npcid') || state.chatTarget;
+            const val = t.getAttribute('data-val');
+            const ce = _loadCharExtra(nid);
+            ce.pushFrequency = val;
+            _saveCharExtra(nid, ce);
+            // 更新按钮样式
+            root.querySelectorAll('[data-el="ps_freq_btn"]').forEach(function(btn){
+              const sel = btn.getAttribute('data-val') === val;
+              btn.style.border = '1px solid ' + (sel ? 'var(--ph-accent,#07c160)' : 'rgba(0,0,0,.08)');
+              btn.style.background = sel ? 'var(--ph-accent,#07c160)' : 'rgba(255,255,255,.7)';
+              btn.style.color = sel ? '#fff' : 'var(--ph-text)';
+            });
+            try{ toast('消息频率已设为 ' + {auto:'AI 自动',low:'少',normal:'正常',high:'频繁'}[val]); }catch(e){}
+            return;
+          }
           if (act === 'wxCSSumExpand'){
             const area = root.querySelector('[data-el="sumExpandArea"]');
             const arrow = root.querySelector('[data-el="sumExpandArrow"]');
@@ -18589,24 +18633,61 @@ const npc = _wxGetChatTargetMeta(npcId);
             </div>
 
             <div class="wxCSGroup" style="margin-top:12px;">
+              <div class="wxCSItem" style="flex-direction:column;align-items:stretch;gap:0;cursor:default;">
+                <div style="display:flex;align-items:center;width:100%;cursor:pointer;" data-act="wxCSProactiveExpand" data-npcid="${esc(contactId)}">
+                  <div class="wxCSIco">${_phFlatIcon('💭')}</div>
+                  <div class="wxCSName">主动找你</div>
+                  <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                    <button class="wxReminderToggle ${charEx.enableLifePush!==false?'on':'off'}" data-act="wxCSToggleLifePush" data-npcid="${esc(contactId)}"></button>
+                    <span data-el="proactiveExpandArrow" style="font-size:14px;color:rgba(20,24,28,.3);transition:transform .2s;">▼</span>
+                  </div>
+                </div>
+                <div data-el="proactiveExpandArea" style="display:none;padding:10px 0 4px 0;border-top:1px solid rgba(0,0,0,.04);margin-top:8px;">
+                  <div style="font-size:11px;color:rgba(20,24,28,.45);margin-bottom:10px;line-height:1.6;">角色会在聊天结束后主动发消息给你，还会有内心独白和撤回表演。</div>
+                  
+                  <div style="font-size:10.5px;color:rgba(20,24,28,.35);font-weight:600;text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;">消息频率</div>
+                  <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px;">
+                    ${['auto','low','normal','high'].map(function(v){
+                      var labels = {auto:'AI 自动',low:'少',normal:'正常',high:'频繁'};
+                      var sel = (charEx.pushFrequency||'auto') === v;
+                      return '<button data-el="ps_freq_btn" data-val="'+v+'" style="padding:6px 12px;border-radius:14px;border:1px solid '+(sel?'var(--ph-accent,#07c160)':'rgba(0,0,0,.08)')+';background:'+(sel?'var(--ph-accent,#07c160)':'rgba(255,255,255,.7)')+';color:'+(sel?'#fff':'var(--ph-text)')+';font-size:12px;cursor:pointer;">'+labels[v]+'</button>';
+                    }).join('')}
+                  </div>
+                  
+                  <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(0,0,0,.04);">
+                    <div>
+                      <div style="font-size:13px;color:var(--ph-text);">心声表演</div>
+                      <div style="font-size:11px;color:rgba(20,24,28,.4);margin-top:1px;">角色会有内心独白，偶尔发了又撤回</div>
+                    </div>
+                    <button class="wxReminderToggle ${charEx.enableInnerVoice!==false?'on':'off'}" data-act="wxCSToggleInnerVoice" data-npcid="${esc(contactId)}"></button>
+                  </div>
+                  
+                  ${['暧昧','恋人','伴侣'].indexOf(charEx.bondLabel||charEx.bond||'朋友')>=0 ? 
+                    '<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-top:1px solid rgba(0,0,0,.04);">'+
+                    '<div><div style="font-size:13px;color:var(--ph-text);">已读不回可追发</div>'+
+                    '<div style="font-size:11px;color:rgba(20,24,28,.4);margin-top:1px;">角色发现你看了没回，会再找你一次</div></div>'+
+                    '<button class="wxReminderToggle '+(charEx.allowChaseOnRead?'on':'off')+'" data-act="wxCSToggleChase" data-npcid="'+esc(contactId)+'"></button></div>' : ''}
+                  
+                  <div style="display:flex;gap:8px;margin-top:10px;">
+                    <button data-act="wxCSNav" data-cspage="proactiveDebug" data-npcid="${esc(contactId)}" style="flex:1;padding:10px;border-radius:10px;border:1px solid rgba(0,0,0,.08);background:rgba(255,255,255,.92);font-size:13px;color:rgba(20,24,28,.72);cursor:pointer;">调试面板</button>
+                  </div>
+                </div>
+              </div>
               <div class="wxCSItem" style="cursor:default;">
                 <div class="wxCSIco">${_phFlatIcon('💬')}</div>
                 <div class="wxCSName">
                   加入快捷聊天
                   <div style="font-size:11px;color:rgba(20,24,28,.4);margin-top:1px;">在悬浮头像的聊天Tab中快速对话</div>
                 </div>
-                <button class="wxReminderToggle ${charEx.quickChat?'on':'off'}" data-act="wxCSToggleQuickChat" data-npcid="${esc(contactId)}" style="margin-left:auto;flex-shrink:0;"></button>
-              </div>
-              <div class="wxCSItem" data-act="wxCSNav" data-cspage="proactiveSettings" data-npcid="${esc(contactId)}" style="padding-right:8px;">
-                <div class="wxCSIco">${_phFlatIcon('🔔')}</div>
-                <div class="wxCSName" style="flex:1;">
-                  主动找你
-                  <div style="font-size:11px;color:rgba(20,24,28,.4);margin-top:1px;">频率、心声表演</div>
+                <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
+                  <button class="wxReminderToggle ${charEx.quickChat?'on':'off'}" data-act="wxCSToggleQuickChat" data-npcid="${esc(contactId)}"></button>
+                  <span style="width:14px;"></span>
                 </div>
-                <button class="wxReminderToggle ${charEx.enableLifePush!==false?'on':'off'}" data-act="wxCSToggleLifePush" data-npcid="${esc(contactId)}" style="margin-left:auto;flex-shrink:0;"></button>
-                <div class="wxCSArrow" style="margin-left:8px;">›</div>
               </div>
-              <div class="wxCSItem" data-act="wxCSNav" data-cspage="proactiveDebug" data-npcid="${esc(contactId)}">
+            </div>
+
+            <div class="wxCSGroup" style="margin-top:12px;">
+              <div class="wxCSItem" data-act="wxCSNav" data-cspage="proactiveDebug" data-npcid="${esc(contactId)}" style="display:none;">
                 <div class="wxCSIco">${_phFlatIcon('🧪')}</div>
                 <div class="wxCSName">
                   主动消息调试
