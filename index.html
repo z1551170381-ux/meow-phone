@@ -22596,7 +22596,14 @@ const npc = _wxGetChatTargetMeta(npcId);
           // ★ 新增：性格五维（AI 提取一次后存储，驱动 LifeEngine 行为差异）
           personality: null,    // { socialDrive, emotionDisplay, discipline, dependency, resilience } 各 0-100
           // ★ 新增：当前行为状态（LifeEngine 填写）
-          currentBehavior: null // { key, label, startAt, endAt }
+          currentBehavior: null, // { key, label, startAt, endAt }
+          // ★ WorldEngine 新增字段
+          jobTemplate: null,
+          bindPlaces: {},
+          currentPlaceId: null,
+          currentPlaceName: '',
+          currentOffMap: false,
+          recentPlaceIds: []
         };
       }
 
@@ -23345,13 +23352,47 @@ const npc = _wxGetChatTargetMeta(npcId);
                      msgs:['想到你了','你在吗','有件事想跟你说','怎么突然想起你了'] },
           walk:    { label:'出门走走', icon:'🚶', durationMin:25, silent:false, msgChance:0.15,
                      effect:{ fun:+12, health:+3, energy:-5, hunger:-5 },
-                     msgs:['出去走了走','透了个气'] }
+                     msgs:['出去走了走','透了个气'] },
+          // ★ WorldEngine 新增行为
+          workout: { label:'锻炼', icon:'💪', durationMin:50, silent:false, msgChance:0.15,
+                     effect:{ energy:-12, hunger:-5, health:8, mood:10 },
+                     msgs:['刚练完','运动完了，出了一身汗'] },
+          shopping:{ label:'逛街', icon:'🛍️', durationMin:40, silent:false, msgChance:0.2,
+                     effect:{ energy:-5, mood:8, fun:10 },
+                     msgs:['在逛街','买了点东西'] },
+          cook:    { label:'做饭', icon:'🍳', durationMin:35, silent:false, msgChance:0.15,
+                     effect:{ hunger:40, mood:5, energy:-3 },
+                     msgs:['做了顿饭','自己做的，味道还行'] },
+          study:   { label:'学习', icon:'📚', durationMin:60, silent:true, msgChance:0.08,
+                     effect:{ energy:-8, mood:-2, fun:-5 },
+                     msgs:['刚上完课','学了好久'] }
         };
 
         // ---- 主导需求计算（每次 tick 只处理最紧迫的一个） ----
         function _getDominantNeed(attrs, personality, schedule){
           var needs = [];
           var p = personality || {};
+
+          // ★ 查询当前 schedule block，强制行为优先
+          if (typeof window.MeowWorldEngine !== 'undefined' && schedule && schedule.length) {
+            try {
+              var _h2 = new Date().getHours(), _m2 = new Date().getMinutes(), _nowMin = _h2*60+_m2;
+              var _we2 = window.MeowWorldEngine, _curBlock = null;
+              for (var si = 0; si < schedule.length; si++) {
+                var sl = schedule[si], sStart, sEnd;
+                if (sl.start != null) { var sp=String(sl.start).split(':'); sStart=parseInt(sp[0],10)*60+parseInt(sp[1]||'0',10); var ep=String(sl.end).split(':'); sEnd=parseInt(ep[0],10)*60+parseInt(ep[1]||'0',10); }
+                else if (sl.hour != null) { sStart=sl.hour*60; sEnd=(sl.endHour||24)*60; }
+                else continue;
+                if (_nowMin >= sStart && _nowMin < sEnd) { _curBlock = sl.block || sl.tag || null; break; }
+              }
+              if (_curBlock && _we2.BLOCK_FORCED_BEHAVIOR[_curBlock]) {
+                var forcedBeh = _we2.BLOCK_FORCED_BEHAVIOR[_curBlock];
+                if (BEHAVIORS[forcedBeh]) return forcedBeh;
+                if (forcedBeh === 'flex_work' && BEHAVIORS['browse']) return 'browse';
+                return null;
+              }
+            } catch(e) {}
+          }
 
           // 如厕：最高优先，无视性格
           if ((attrs.bladder||0) > 85) needs.push({ key:'bathroom', urgency:300 });
@@ -23410,6 +23451,18 @@ const npc = _wxGetChatTargetMeta(npcId);
           // 写生活日志（如厕完全静默）
           if (behaviorKey !== 'bathroom'){
             _writeLifeLog(npcId, { time:Date.now(), icon:beh.icon, label:beh.label, key:behaviorKey });
+          }
+
+          // ★ 写地图轨迹（WorldEngine 地点解析）
+          if (behaviorKey !== 'bathroom' && typeof window.MeowWorldEngine !== 'undefined') {
+            try {
+              var _we = window.MeowWorldEngine;
+              var _place = _we.resolvePlace(npcId, behaviorKey, s);
+              var _trace = { npcId:npcId, time:Date.now(), actionKey:behaviorKey, actionLabel:beh.label, actionIcon:beh.icon, lmId:_place.lmId, lmName:_place.lmName||'', offMap:!!_place.offMap, offMapType:_place.offMapType||'' };
+              _we.writeMapTrace(npcId, _trace);
+              if (_place.lmId) { s.currentPlaceId=_place.lmId; s.currentPlaceName=_place.lmName||''; if(!s.recentPlaceIds) s.recentPlaceIds=[]; if(s.recentPlaceIds.indexOf(_place.lmId)<0) s.recentPlaceIds.push(_place.lmId); if(s.recentPlaceIds.length>5) s.recentPlaceIds.shift(); } else { s.currentPlaceId=null; s.currentPlaceName=_place.offMapType||''; }
+              s.currentOffMap = !!_place.offMap;
+            } catch(_traceErr) { console.warn('[LifeEngine] writeMapTrace error:', _traceErr); }
           }
 
           // 决定是否发消息
@@ -23691,7 +23744,14 @@ const npc = _wxGetChatTargetMeta(npcId);
             }
 
             // 5. 计算主导需求并触发行为
-            var need = _getDominantNeed(s.attrs, s.personality, s.schedule);
+            // ★ 如果角色没有自定义 schedule，从职业模板获取
+            var _effectiveSch = s.schedule;
+            if ((!_effectiveSch || _effectiveSch.length === 0) && typeof window.MeowWorldEngine !== 'undefined') {
+              var _jt2 = s.jobTemplate || window.MeowWorldEngine.resolveJobTemplate(npcId);
+              var _tmpl2 = window.MeowWorldEngine.JOB_TEMPLATES[_jt2];
+              if (_tmpl2 && _tmpl2.defaultSchedule) _effectiveSch = _tmpl2.defaultSchedule;
+            }
+            var need = _getDominantNeed(s.attrs, s.personality, _effectiveSch);
             if (need){
               var p = s.personality || {};
               var disc = (p.discipline != null) ? p.discipline : 50;
@@ -36679,6 +36739,10 @@ function _mapInitGestures(wrapEl, mapData){
 // ---- 渲染地图 App 主页面 ----
 function renderMapApp(body){
   var mapData = _mapEnsure();
+
+  // ★ 补丁6: 打开地图时对所有联系人做一次轻量 tick
+  try { var _allC = loadContactsDB(); var _cls = (_allC&&_allC.contacts)||[]; for (var _ci=0;_ci<_cls.length;_ci++) { if(_cls[_ci].id) try { LifeEngine.tick(_cls[_ci].id); } catch(_te){} } } catch(_e2){}
+
   var npcId = state.chatTarget || null;
 
   // 查找当前聊天对象名称
@@ -36758,6 +36822,72 @@ function renderMapApp(body){
     '<button class="mapToolBtn" data-act="mapEditMapName">'+_svgRename+' 改名</button>'+
     '<button class="mapToolBtn mapToolBtnAccent" data-act="mapEnterEditor">'+_svgEdit+' 编辑地图</button>';
   wrap.appendChild(toolbar);
+
+  // ★ 补丁7: 渲染 NPC 头像层
+  if (typeof window.MeowWorldEngine !== 'undefined') {
+    try {
+      var _we7 = window.MeowWorldEngine;
+      var _db7 = loadContactsDB();
+      var _contacts7 = (_db7 && _db7.contacts) || [];
+      var _lmGroups = {}; // lmId → [{name, avatar, trace}]
+      var _offMapList = [];
+      for (var _i7 = 0; _i7 < _contacts7.length; _i7++) {
+        var _c7 = _contacts7[_i7]; if (!_c7.id) continue;
+        var _tr7 = _we7.getLatestTrace(_c7.id); if (!_tr7) continue;
+        var _entry7 = { npcId:_c7.id, npcName:_c7.name||String(_c7.id), npcAvatar:_c7.avatar||((_c7.name||'?').charAt(0)), trace:_tr7 };
+        if (_tr7.offMap) { _entry7.statusText = _we7.traceToTextStable(_tr7, _c7.name||''); _offMapList.push(_entry7); }
+        else if (_tr7.lmId) { if (!_lmGroups[_tr7.lmId]) _lmGroups[_tr7.lmId]=[]; _lmGroups[_tr7.lmId].push(_entry7); }
+      }
+      // 延迟渲染头像到SVG（等SVG挂载后）
+      setTimeout(function(){
+        var svgEl = wrap.querySelector('.mapIslandSvg');
+        if (!svgEl) return;
+        var lms = mapData.landmarks || [];
+        for (var _lmId in _lmGroups) {
+          var _lm7 = lms.find(function(l){return l.id===_lmId;});
+          if (!_lm7) continue;
+          var _npcs7 = _lmGroups[_lmId];
+          for (var _ni7 = 0; _ni7 < Math.min(_npcs7.length, 4); _ni7++) {
+            var _n7 = _npcs7[_ni7];
+            var g = document.createElementNS('http://www.w3.org/2000/svg','g');
+            g.setAttribute('class','mapNpcAvatar');
+            g.setAttribute('transform','translate('+(_lm7.x+16+_ni7*14)+','+(_lm7.y-10)+')');
+            g.setAttribute('data-npcid',_n7.npcId);
+            g.style.cursor='pointer';
+            var circ = document.createElementNS('http://www.w3.org/2000/svg','circle');
+            circ.setAttribute('r','8'); circ.setAttribute('fill','#fff'); circ.setAttribute('stroke','#07c160'); circ.setAttribute('stroke-width','1.5');
+            g.appendChild(circ);
+            var txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+            txt.setAttribute('text-anchor','middle'); txt.setAttribute('dominant-baseline','central'); txt.setAttribute('font-size','9');
+            txt.textContent = _n7.npcAvatar;
+            g.appendChild(txt);
+            svgEl.appendChild(g);
+          }
+          if (_npcs7.length > 4) {
+            var badge = document.createElementNS('http://www.w3.org/2000/svg','g');
+            badge.setAttribute('transform','translate('+(_lm7.x+16+4*14)+','+(_lm7.y-10)+')');
+            var bc = document.createElementNS('http://www.w3.org/2000/svg','circle'); bc.setAttribute('r','7'); bc.setAttribute('fill','#ff6b6b'); badge.appendChild(bc);
+            var bt = document.createElementNS('http://www.w3.org/2000/svg','text'); bt.setAttribute('text-anchor','middle'); bt.setAttribute('dominant-baseline','central'); bt.setAttribute('font-size','8'); bt.setAttribute('fill','#fff'); bt.setAttribute('font-weight','600'); bt.textContent='+'+ (_npcs7.length-4); badge.appendChild(bt);
+            svgEl.appendChild(badge);
+          }
+        }
+      }, 200);
+      // 底部"外出中"动态条
+      if (_offMapList.length > 0) {
+        var offBar = doc.createElement('div');
+        offBar.style.cssText = 'position:absolute;bottom:52px;left:8px;right:8px;background:rgba(255,255,255,.85);backdrop-filter:blur(8px);border-radius:12px;padding:8px 12px;font-size:11px;color:rgba(20,24,28,.6);box-shadow:0 2px 8px rgba(0,0,0,.06);display:flex;align-items:center;gap:8px;overflow-x:auto;z-index:10;';
+        var lbl = doc.createElement('span'); lbl.style.cssText='font-size:10px;font-weight:600;color:rgba(20,24,28,.35);white-space:nowrap;'; lbl.textContent='📍 外出'; offBar.appendChild(lbl);
+        for (var _oi=0; _oi<Math.min(_offMapList.length,6); _oi++) {
+          var _om=_offMapList[_oi]; var chip=doc.createElement('span');
+          chip.style.cssText='white-space:nowrap;background:rgba(0,0,0,.04);padding:3px 8px;border-radius:8px;font-size:11px;color:rgba(20,24,28,.55);';
+          chip.textContent=_om.npcName+' · '+(_om.trace.offMapType==='office'?'上班':_om.trace.offMapType==='school'?'上学':_om.trace.offMapType==='store'?'上班':'外出');
+          offBar.appendChild(chip);
+        }
+        if (_offMapList.length>6) { var more=doc.createElement('span'); more.style.cssText='font-size:10px;color:rgba(20,24,28,.3);'; more.textContent='+'+(_offMapList.length-6); offBar.appendChild(more); }
+        wrap.appendChild(offBar);
+      }
+    } catch(_avatarErr) { console.warn('[Map] NPC头像渲染失败:', _avatarErr); }
+  }
 
   body.appendChild(wrap);
 
@@ -46272,8 +46402,218 @@ setTimeout(function() {
   console.log('[InnerVoice] 心声表演系统已加载 v2 (面板定时更新+API预算)');
 })();
 
+</script>
+<script>
+// ====== MeowWorldEngine 世界引擎 v1.0 ======
+(function() {
+  'use strict';
 
+  var PLACE_TYPES = {
+    home:              { label: '家',      icon: '🏠', tags: ['sleep','rest','cook','bath','browse','relax'] },
+    office:            { label: '公司',    icon: '🏢', tags: ['work','coffee_break','overtime','social'] },
+    school:            { label: '学校',    icon: '🏫', tags: ['study','social','eat'] },
+    store:             { label: '店铺',    icon: '🏪', tags: ['shift_work','social'] },
+    gym:               { label: '健身房',  icon: '💪', tags: ['workout','stretch','shower'] },
+    restaurant:        { label: '餐饮',    icon: '🍽️', tags: ['eat','social'] },
+    light_food_shop:   { label: '轻食店',  icon: '🥗', tags: ['eat','social'] },
+    convenience_store: { label: '便利店',  icon: '🏪', tags: ['buy_snack','buy_drink'] },
+    mall:              { label: '商场',    icon: '🛍️', tags: ['shopping','eat','browse','social','shift_work'] },
+    park:              { label: '公园',    icon: '🌳', tags: ['walk','sit_and_relax','social','workout'] },
+    cafe:              { label: '咖啡馆',  icon: '☕', tags: ['eat','browse','social','flex_work','study'] },
+    library:           { label: '图书馆',  icon: '📚', tags: ['study','browse'] },
+    bar:               { label: '酒吧',    icon: '🍻', tags: ['social','eat','relax'] },
+    hospital:          { label: '医院',    icon: '🏥', tags: ['checkup'] },
+    station:           { label: '车站',    icon: '🚉', tags: ['commute'] },
+    entertainment:     { label: '娱乐',    icon: '🎮', tags: ['social','relax','browse'] },
+    nature:            { label: '自然',    icon: '🌲', tags: ['walk','sit_and_relax','social'] },
+    general:           { label: '通用',    icon: '📍', tags: ['social','browse'] }
+  };
 
+  function guessFuncTags(landmark) {
+    var name = String(landmark.customName || landmark.name || '').toLowerCase();
+    var emoji = String(landmark.emoji || '');
+    var existingTags = landmark.tags || [];
+    var tags = ['social'];
+    if (/餐|饭|食|面|粉|烧烤|火锅|寿司|拉面|奶茶|甜品|蛋糕|烘焙|面包|酒馆|厨|小吃|快餐|美食/.test(name) || /🍜|🍔|🍰|🥗|🍕|🍣|🍞|🍽|🍲|🍛/.test(emoji)) tags.push('eat');
+    if (/咖啡|茶馆|茶屋|茶室|coffee|cafe/.test(name) || /☕/.test(emoji)) tags.push('eat','browse','flex_work','study');
+    if (/商场|百货|广场|购物|市场|超市|商城|商街/.test(name) || /🏬|🛒|🛍/.test(emoji)) tags.push('shopping','eat','browse','shift_work');
+    if (/便利|7-11|全家|罗森|小卖|杂货/.test(name) || /🏪/.test(emoji)) tags.push('buy_snack','buy_drink');
+    if (/公园|花园|湖|河|山|海|沙滩|草地|林|森|花田|花谷|露营|丘|径/.test(name) || /🌳|🏞|🌊|⛰|🌸|🌲|🏕|🏖/.test(emoji)) tags.push('walk','sit_and_relax');
+    if (/学校|大学|学院|中学|校园|教学|学堂|学园/.test(name) || /🏫|🎓/.test(emoji)) tags.push('study','eat');
+    if (/公司|办公|写字楼|科技|大厦|工作室|事务所|企业/.test(name) || /🏢|💼/.test(emoji)) tags.push('work','overtime','coffee_break');
+    if (/健身|体育|运动|球场|泳池|训练|活力/.test(name) || /💪|🏋|⚽|🏀/.test(emoji)) tags.push('workout','stretch','shower');
+    if (/图书|书店|书吧|阅读|书阁|书屋/.test(name) || /📚|📖/.test(emoji)) tags.push('study','browse');
+    if (/医院|诊所|健康|药/.test(name) || /🏥/.test(emoji)) tags.push('checkup');
+    if (/车站|站台|机场|码头|站/.test(name) || /🚉|🚂|✈/.test(emoji)) tags.push('commute');
+    if (/酒吧|酒馆|夜店|pub|bar/.test(name) || /🍻|🍷|🍸/.test(emoji)) tags.push('eat','relax');
+    if (/ktv|歌厅|游乐|乐园|电影|游戏|网咖|游艺|麦克风/.test(name) || /🎤|🎮|🎠|🎬/.test(emoji)) tags.push('relax','browse');
+    if (/家|公寓|宿舍|住处|住宅|居所/.test(name) || /🏠|🏡/.test(emoji)) tags.push('sleep','rest','cook','bath','browse','relax');
+    if (/市政|行政|议事|公告|官方/.test(name) || /🏛/.test(emoji)) tags.push('work');
+    if (/博物|美术|艺术|陈列|展览/.test(name) || /🎨|🖼/.test(emoji)) tags.push('browse','study');
+    if (/温泉|汤|spa|浴/.test(name) || /♨/.test(emoji)) tags.push('rest','relax','shower');
+    var TAG_MAP = { 'food':'eat','delicious':'eat','dinner':'eat','bread':'eat','sweet':'eat','coffee':'eat','cozy':'relax','shopping':'shopping','clothes':'shopping','gifts':'shopping','trees':'walk','flowers':'walk','bench':'sit_and_relax','exercise':'workout','strong':'workout','books':'study','quiet':'study','knowledge':'study','education':'study','children':'social','fun':'relax','rides':'relax','music':'relax','sing':'relax','health':'checkup','doctor':'checkup','medicine':'checkup','travel':'commute','train':'commute','work':'work','official':'work','bulletin':'work','art':'browse','history':'browse','painting':'browse','sea':'walk','water':'walk','relax':'relax','warm':'relax','campfire':'social','stars':'sit_and_relax','sand':'walk','waves':'walk','steam':'rest','fragrance':'browse' };
+    for (var ti = 0; ti < existingTags.length; ti++) { var mapped = TAG_MAP[existingTags[ti]]; if (mapped && tags.indexOf(mapped) < 0) tags.push(mapped); }
+    var unique = []; for (var i = 0; i < tags.length; i++) { if (unique.indexOf(tags[i]) < 0) unique.push(tags[i]); } return unique;
+  }
+
+  var JOB_TEMPLATES = {
+    office_worker: { id:'office_worker', label:'上班族', defaultSchedule:[ {start:'07:00',end:'09:00',block:'morning_prepare'},{start:'09:00',end:'12:00',block:'work'},{start:'12:00',end:'14:00',block:'lunch_break'},{start:'14:00',end:'18:00',block:'work'},{start:'18:00',end:'21:00',block:'after_work'},{start:'21:00',end:'24:00',block:'night_home'} ], requiredBinds:['home','office'], behaviorBias:{ work:25,eat:10,rest:5,browse:3,shopping:6,walk:4,social:8,workout:5 } },
+    freelance: { id:'freelance', label:'自由职业', defaultSchedule:[ {start:'08:00',end:'10:00',block:'slow_morning'},{start:'10:00',end:'13:00',block:'flex_work'},{start:'13:00',end:'15:00',block:'lunch_break'},{start:'15:00',end:'19:00',block:'flex_work'},{start:'19:00',end:'23:00',block:'free_evening'} ], requiredBinds:['home'], behaviorBias:{ flex_work:18,eat:10,browse:10,walk:7,social:8,shopping:5,rest:5,study:3 } },
+    student: { id:'student', label:'学生', defaultSchedule:[ {start:'07:00',end:'08:30',block:'morning_prepare'},{start:'08:30',end:'12:00',block:'class'},{start:'12:00',end:'14:00',block:'lunch_break'},{start:'14:00',end:'17:30',block:'class_or_library'},{start:'17:30',end:'21:00',block:'free_evening'},{start:'21:00',end:'24:00',block:'night_home'} ], requiredBinds:['home','school'], behaviorBias:{ study:22,eat:10,browse:8,social:10,walk:5,shopping:4,rest:3,workout:3 } },
+    clerk: { id:'clerk', label:'店员', defaultSchedule:[ {start:'08:00',end:'10:00',block:'prepare_and_commute'},{start:'10:00',end:'13:00',block:'shift_work'},{start:'13:00',end:'15:00',block:'meal_break'},{start:'15:00',end:'20:00',block:'shift_work'},{start:'20:00',end:'24:00',block:'after_work'} ], requiredBinds:['home','store'], behaviorBias:{ shift_work:25,eat:12,rest:6,walk:3,social:5,browse:4,buy_snack:5 } },
+    general: { id:'general', label:'通用', defaultSchedule:[ {start:'07:30',end:'09:00',block:'morning_prepare'},{start:'09:00',end:'12:00',block:'daytime'},{start:'12:00',end:'14:00',block:'lunch_break'},{start:'14:00',end:'18:00',block:'daytime'},{start:'18:00',end:'21:00',block:'free_evening'},{start:'21:00',end:'24:00',block:'night_home'} ], requiredBinds:['home'], behaviorBias:{ eat:10,rest:6,browse:8,walk:6,social:8,shopping:5,relax:5,study:3 } }
+  };
+
+  var BIND_RULES = { work:'office',overtime:'office',coffee_break:'office',study:'school','class':'school',shift_work:'store',sleep:'home',cook:'home',bath:'home',rest:'home',shower:'home' };
+  var BLOCK_FORCED_BEHAVIOR = { work:'work',flex_work:'flex_work','class':'study',class_or_library:'study',shift_work:'shift_work',night_home:'sleep' };
+  var VALID_FUNC_TAGS = ['sleep','rest','cook','bath','browse','relax','work','overtime','coffee_break','flex_work','study','shift_work','eat','buy_snack','buy_drink','shopping','walk','sit_and_relax','workout','stretch','shower','social','commute','checkup'];
+
+  function resolveJobTemplate(npcId) {
+    try { var s = (typeof _loadCharState === 'function') ? _loadCharState(npcId) : null; if (s && s.jobTemplate && JOB_TEMPLATES[s.jobTemplate]) return s.jobTemplate; } catch(e) {}
+    var profile = ''; try { var ce = (typeof _loadCharExtra === 'function') ? _loadCharExtra(npcId) : {}; profile = String(ce.profile || ce.bio || '').toLowerCase(); } catch(e) {}
+    if (!profile) return 'general';
+    if (/学生|大学|高中|校园|中学|学院|研究生|大一|大二|大三|大四|初中/.test(profile)) return 'student';
+    if (/店员|收银|服务员|店长|柜台|导购|销售员|前台/.test(profile)) return 'clerk';
+    if (/自由|freelance|画师|作家|独立|自媒体|博主|插画|摄影师|设计师.*独立|个人工作室/.test(profile)) return 'freelance';
+    if (/上班|公司|职员|白领|工程师|设计师|程序|开发|策划|运营|编辑|会计|律师|医生|护士|老师|教师|经理|主管/.test(profile)) return 'office_worker';
+    return 'general';
+  }
+
+  function resolvePlace(npcId, behaviorKey, charState) {
+    var mapData = null; try { mapData = (typeof _mapLoad === 'function') ? _mapLoad() : null; } catch(e) {}
+    if (!mapData) return { lmId:null, offMap:true, offMapType:behaviorKey };
+    var landmarks = mapData.landmarks || []; var bindPlaces = (charState && charState.bindPlaces) || {};
+    var bindType = BIND_RULES[behaviorKey];
+    if (bindType && bindPlaces[bindType]) { var boundLm = landmarks.find(function(l){ return l.id === bindPlaces[bindType]; }); if (boundLm) return { lmId:bindPlaces[bindType], offMap:false, lmName:boundLm.customName||boundLm.name }; }
+    if (bindType && !bindPlaces[bindType] && ['office','school','store'].indexOf(bindType) >= 0) return { lmId:null, offMap:true, offMapType:bindType };
+    var candidates = [];
+    for (var i = 0; i < landmarks.length; i++) { var lm = landmarks[i]; var ft = lm.funcTags || guessFuncTags(lm); if (ft.indexOf(behaviorKey) >= 0) { if (bindPlaces.home && lm.id === bindPlaces.home) continue; candidates.push(lm); } }
+    if (candidates.length === 0 && ['eat','browse','relax'].indexOf(behaviorKey) >= 0 && bindPlaces.home) { var homeLm = landmarks.find(function(l){ return l.id === bindPlaces.home; }); if (homeLm) return { lmId:homeLm.id, offMap:false, lmName:homeLm.customName||homeLm.name }; }
+    if (candidates.length === 0) return { lmId:null, offMap:true, offMapType:behaviorKey };
+    var recent = (charState && charState.recentPlaceIds) || [];
+    candidates.sort(function(a,b){ return (recent.indexOf(a.id)>=0?1:0) - (recent.indexOf(b.id)>=0?1:0); });
+    var pick = (Math.random()<0.7) ? 0 : Math.min(1, candidates.length-1);
+    var chosen = candidates[pick]; return { lmId:chosen.id, offMap:false, lmName:chosen.customName||chosen.name };
+  }
+
+  var TRACE_KEY_PREFIX = 'meow_npc_trace_';
+  function writeMapTrace(npcId, trace) { var key = TRACE_KEY_PREFIX + String(npcId); var arr = []; try { arr = JSON.parse(localStorage.getItem(key)||'[]'); } catch(e){ arr=[]; } if (!Array.isArray(arr)) arr=[]; arr.push(trace); if (arr.length > 35) arr = arr.slice(arr.length - 30); try { localStorage.setItem(key, JSON.stringify(arr)); } catch(e){} }
+  function readMapTrace(npcId, isFollowed) { var key = TRACE_KEY_PREFIX + String(npcId); var arr = []; try { arr = JSON.parse(localStorage.getItem(key)||'[]'); } catch(e){ arr=[]; } if (!Array.isArray(arr)) return []; return arr.slice(isFollowed ? -30 : -3); }
+  function getLatestTrace(npcId) { var arr = readMapTrace(npcId, false); return arr.length > 0 ? arr[arr.length-1] : null; }
+
+  var LIGHT_TEMPLATES = {
+    work:['{name}在上班','{name}在工作中'], flex_work:['{name}在工作','{name}在远程办公'], overtime:['{name}在加班'], coffee_break:['{name}去买了杯咖啡'],
+    study:['{name}在上课','{name}在学习'], shift_work:['{name}在上班','{name}在店里忙'],
+    eat:['{name}在{place}吃饭','{name}去吃了点东西'], buy_snack:['{name}去便利店了','{name}买了点零食'], buy_drink:['{name}买了饮料'],
+    cook:['{name}在家做饭'], sleep:['{name}已回家休息','{name}睡下了'], rest:['{name}在家歇着','{name}在休息'], bath:['{name}在洗澡'],
+    browse:['{name}在刷手机','{name}在闲逛'], relax:['{name}在放松','{name}发呆中'],
+    walk:['{name}在{place}散步','{name}出去走走了'], sit_and_relax:['{name}在{place}发呆','{name}坐着放空'],
+    workout:['{name}在健身','{name}在锻炼'], stretch:['{name}在拉伸'], shower:['{name}洗完澡了'],
+    shopping:['{name}在{place}逛街','{name}去购物了'], social:['{name}在找人聊天','{name}想找你说话'],
+    nap:['{name}在午休'], commute:['{name}在路上'], checkup:['{name}去看了医生'],
+    _offMap_office:['{name}去上班了','{name}出门上班了'], _offMap_school:['{name}去上学了','{name}出门上课了'],
+    _offMap_store:['{name}去店里上班了'], _offMap_default:['{name}外出了','{name}出去了']
+  };
+  function traceToText(trace, npcName) { if (!trace) return ''; var name = npcName||'某人'; var templates; if (trace.offMap) { templates = LIGHT_TEMPLATES['_offMap_'+(trace.offMapType||'default')] || LIGHT_TEMPLATES['_offMap_default']; } else { templates = LIGHT_TEMPLATES[trace.actionKey] || ['{name}在{place}']; } var tmpl = templates[Math.floor(Math.random()*templates.length)]; return tmpl.replace(/\{name\}/g,name).replace(/\{place\}/g,trace.lmName||'某地'); }
+  function traceToTextStable(trace, npcName) { if (!trace) return ''; var name = npcName||'某人'; var templates; if (trace.offMap) { templates = LIGHT_TEMPLATES['_offMap_'+(trace.offMapType||'default')] || LIGHT_TEMPLATES['_offMap_default']; } else { templates = LIGHT_TEMPLATES[trace.actionKey] || ['{name}在{place}']; } var idx = (trace.time||0) % templates.length; return templates[idx].replace(/\{name\}/g,name).replace(/\{place\}/g,trace.lmName||'某地'); }
+
+  function _getApiConfig() { try { var raw=localStorage.getItem('meow_phone_api_presets_v1'); if(!raw) return null; var data=JSON.parse(raw); var presets=data.presets||[]; var targetId=data.backgroundActiveId||data.activeId||''; var preset=presets.find(function(p){return p.id===targetId;}); if(!preset&&presets.length>0) preset=presets[0]; if(!preset||!preset.apiKey||!preset.baseUrl) return null; return { endpoint:String(preset.baseUrl||'').trim().replace(/\/+$/,''), key:String(preset.apiKey||'').trim(), model:String(preset.model||'').trim(), extra:preset.extra||{} }; } catch(e){ return null; } }
+
+  async function worldApiCall(systemPrompt, userPrompt, opts) {
+    var cfg = _getApiConfig(); if (!cfg) return { ok:false, error:'请先配置 API', data:null }; if (!cfg.model) return { ok:false, error:'请先配置模型', data:null };
+    var ep = String(cfg.endpoint||'').trim().replace(/\/+$/,''); var url = /\/v1$/i.test(ep) ? ep+'/chat/completions' : ep+'/v1/chat/completions';
+    var body = { model:cfg.model, messages:[{role:'system',content:systemPrompt},{role:'user',content:userPrompt}], temperature:(opts&&opts.temperature)||0.8, max_tokens:(opts&&opts.maxTokens)||2048 };
+    if (cfg.extra && typeof cfg.extra==='object') Object.assign(body, cfg.extra);
+    if (/gemini/i.test(cfg.model) && !/maxthinking/i.test(cfg.model) && !body.thinking_config) body.thinking_config = { thinking_budget:0 };
+    try { var resp = await fetch(url, { method:'POST', headers:{'Content-Type':'application/json','Authorization':'Bearer '+cfg.key}, body:JSON.stringify(body) });
+      if (!resp.ok) { if (resp.status===401||resp.status===403) return {ok:false,error:'API 密钥无效',data:null}; if (resp.status===429) return {ok:false,error:'请求太频繁',data:null}; return {ok:false,error:'请求失败 ('+resp.status+')',data:null}; }
+      var json = await resp.json(); var text = ''; try { text = json.choices[0].message.content||''; } catch(e){ try { text = json.output_text||json.result||json.response||''; } catch(e2){} }
+      text = String(text||'').replace(/<thinking>[\s\S]*?<\/thinking>/gi,'').replace(/<think>[\s\S]*?<\/think>/gi,'').replace(/<\/?thinking>/gi,'').replace(/<\/?think>/gi,'').replace(/^\s*[\r\n]+/,'').trim();
+      if (!text) return {ok:false,error:'模型返回空内容',data:null}; return {ok:true,data:text,error:null};
+    } catch(e){ return {ok:false,error:'网络错误: '+(e.message||e),data:null}; }
+  }
+
+  function _generateActionsFromFuncTags(funcTags, name) {
+    var actions = [], ft = funcTags || [];
+    if (ft.indexOf('eat')>=0) actions.push({id:'eat',label:'吃饭',cost:30,fx:{hunger:35,mood:8,money:-30}});
+    if (ft.indexOf('shopping')>=0) actions.push({id:'shop',label:'逛街购物',cost:60,fx:{mood:12,money:-60}});
+    if (ft.indexOf('walk')>=0||ft.indexOf('sit_and_relax')>=0) actions.push({id:'walk',label:'散步',cost:0,fx:{mood:6,energy:-4}});
+    if (ft.indexOf('study')>=0) actions.push({id:'study',label:'学习',cost:0,fx:{mood:-2,energy:-5}});
+    if (ft.indexOf('work')>=0||ft.indexOf('flex_work')>=0) actions.push({id:'work',label:'工作',cost:0,fx:{mood:-3,energy:-8,money:5}});
+    if (ft.indexOf('workout')>=0) actions.push({id:'workout',label:'锻炼',cost:15,fx:{health:12,energy:-12,mood:8,money:-15}});
+    if (ft.indexOf('browse')>=0) actions.push({id:'browse',label:'闲逛',cost:0,fx:{mood:5}});
+    if (ft.indexOf('social')>=0&&actions.length<3) actions.push({id:'chat',label:'聊天',cost:0,fx:{mood:8}});
+    if (ft.indexOf('buy_snack')>=0) actions.push({id:'buy',label:'买东西',cost:15,fx:{hunger:12,money:-15}});
+    if (ft.indexOf('rest')>=0||ft.indexOf('relax')>=0) actions.push({id:'relax',label:'放松',cost:0,fx:{mood:10,energy:8}});
+    if (actions.length===0) actions.push({id:'visit',label:'逛逛',cost:0,fx:{mood:3}});
+    return actions;
+  }
+
+  function _autoLayoutLandmarks(landmarks, mapData) {
+    var zones = (mapData&&mapData.zones) || { city:{cx:200,cy:180,rx:95,ry:75}, commercial:{cx:350,cy:230,rx:75,ry:60}, nature:{cx:120,cy:120,rx:70,ry:60}, residential:{cx:300,cy:360,rx:85,ry:65}, special:{cx:140,cy:380,rx:80,ry:55} };
+    var usedPositions = []; if (mapData&&mapData.landmarks) mapData.landmarks.forEach(function(l){ if(l.x!=null&&l.y!=null) usedPositions.push({x:l.x,y:l.y}); });
+    function classifyZone(ft) { ft=ft||[]; if(ft.indexOf('sleep')>=0||ft.indexOf('rest')>=0) return 'residential'; if(ft.indexOf('work')>=0||ft.indexOf('overtime')>=0||ft.indexOf('checkup')>=0) return 'city'; if(ft.indexOf('shopping')>=0||ft.indexOf('eat')>=0||ft.indexOf('shift_work')>=0) return 'commercial'; if(ft.indexOf('walk')>=0||ft.indexOf('sit_and_relax')>=0||ft.indexOf('workout')>=0) return 'nature'; if(ft.indexOf('study')>=0) return 'residential'; return 'city'; }
+    landmarks.forEach(function(lm) { if(lm.x!=null&&lm.y!=null) return; var zoneId=classifyZone(lm.funcTags); var zone=zones[zoneId]||zones.city; var attempts=0,bx,by; do { bx=zone.cx+(Math.random()-0.5)*zone.rx*1.6; by=zone.cy+(Math.random()-0.5)*zone.ry*1.6; attempts++; } while(attempts<40&&usedPositions.some(function(p){return Math.abs(p.x-bx)<35&&Math.abs(p.y-by)<35;})); bx=Math.max(50,Math.min(450,bx)); by=Math.max(50,Math.min(480,by)); lm.x=Math.round(bx); lm.y=Math.round(by); usedPositions.push({x:bx,y:by}); });
+  }
+
+  async function generateWorld(selectedNpcIds, userHint, opts) {
+    opts = opts || {}; var mode = opts.mode || 'fresh';
+    var npcInfos = []; var db = null; try { db = (typeof loadContactsDB==='function') ? loadContactsDB() : null; } catch(e) {}
+    for (var i = 0; i < selectedNpcIds.length; i++) { var nid = selectedNpcIds[i]; var npc = null; try { npc = (db&&typeof findContactById==='function') ? findContactById(db,nid) : null; } catch(e){} var ce = {}; try { ce = (typeof _loadCharExtra==='function') ? _loadCharExtra(nid) : {}; } catch(e){} var jobId = resolveJobTemplate(nid); var jobTmpl = JOB_TEMPLATES[jobId]||JOB_TEMPLATES.general; npcInfos.push({ id:nid, name:(npc&&npc.name)||String(nid), profile:ce.profile||ce.bio||(npc&&npc.profile)||'', jobId:jobId, jobLabel:jobTmpl.label }); }
+    if (npcInfos.length === 0) return { ok:false, error:'请至少选择一个角色' };
+    var existingLm = []; if (mode==='append') { try { var md=(typeof _mapLoad==='function')?_mapLoad():null; if(md&&md.landmarks) existingLm=md.landmarks; } catch(e){} }
+    var npcBlock = npcInfos.map(function(n){ return '【'+n.name+'】(id:'+n.id+')\n职业/身份：'+n.jobLabel+'\n简介：'+String(n.profile||'').slice(0,250); }).join('\n\n');
+    var existingBlock = ''; if (existingLm.length>0) existingBlock = '\n\n## 已有地标（请勿重复）\n'+existingLm.map(function(l){ return '- '+(l.customName||l.name)+' ('+l.emoji+')'; }).join('\n');
+    var system = '你是一个擅长构建虚拟小镇的世界设计师。根据角色资料生成一张他们共同生活的地图。输出纯 JSON，不要输出任何其他内容。';
+    var user = '## 角色列表\n'+npcBlock+existingBlock+(userHint?('\n\n## 用户补充设定\n'+userHint):'')+'\n\n## 要求\n1. 生成 8~15 个地标，覆盖：居住区（每个角色要有家）、工作/学习场所（根据职业）、餐饮（至少2个）、休闲（公园/咖啡馆等）、便利设施。\n2. 地标命名要有烟火气和个性。✓ "鹿野咖啡" "7号公寓" "晨光中学" ✗ "咖啡馆A" "住宅区"\n3. funcTags 只能从以下选：'+VALID_FUNC_TAGS.join(',')+'\n4. 每个角色分配 home（住哪个地标id）和 workBind（工作/学习地点id，没有则null）。角色可以合住。\n5. 同一个地标可以服务多种功能。\n\n输出格式（纯 JSON，无 markdown）：\n{"mapName":"地图名","landmarks":[{"id":"lm_001","name":"地标名","emoji":"🏬","funcTags":["shopping","eat"],"desc":"一句话描述"}],"npcBindings":{"npc_id":{"home":"lm_xxx","workBind":"lm_yyy"}}}\n\n注意：id 格式为 lm_001 到 lm_015，emoji 用单个 emoji。';
+    console.log('[WorldEngine] 开始生成世界...');
+    var apiResult = await worldApiCall(system, user, { temperature:0.85, maxTokens:3000 });
+    if (!apiResult.ok) return { ok:false, error:apiResult.error };
+    var jsonStr = apiResult.data.replace(/```json\s*/gi,'').replace(/```\s*/gi,''); var start=jsonStr.indexOf('{'); var end=jsonStr.lastIndexOf('}');
+    if (start<0||end<=start) return { ok:false, error:'无法解析 AI 响应' };
+    var worldData; try { worldData=JSON.parse(jsonStr.substring(start,end+1)); } catch(e){ return { ok:false, error:'JSON 解析失败: '+e.message }; }
+    if (!worldData.landmarks||!Array.isArray(worldData.landmarks)||worldData.landmarks.length===0) return { ok:false, error:'AI 返回的地标列表为空' };
+    worldData.landmarks.forEach(function(lm,idx){ if(!lm.id) lm.id='lm_'+String(idx+1).padStart(3,'0'); if(!lm.name) lm.name='未命名地标'; if(!lm.emoji) lm.emoji='📍'; if(!Array.isArray(lm.funcTags)) lm.funcTags=['social']; lm.funcTags=lm.funcTags.filter(function(t){return VALID_FUNC_TAGS.indexOf(t)>=0;}); if(lm.funcTags.length===0) lm.funcTags=['social']; });
+    if (!worldData.npcBindings) worldData.npcBindings = {};
+    console.log('[WorldEngine] AI 生成成功:', worldData.landmarks.length, '个地标');
+    var mapData = null; try { mapData = (typeof _mapEnsure==='function') ? _mapEnsure() : null; } catch(e) {} if (!mapData) return { ok:false, error:'无法初始化基础地图' };
+    if (mode==='fresh') mapData.landmarks = [];
+    var newLandmarks = worldData.landmarks.map(function(lm){ return { id:lm.id, type:'ai_generated', region:'city', name:lm.name, customName:lm.name, x:0, y:0, icon:'ai_generated', emoji:lm.emoji, tags:[], funcTags:lm.funcTags, desc:lm.desc||'', actions:_generateActionsFromFuncTags(lm.funcTags,lm.name), visits:[], note:lm.desc||'' }; });
+    mapData.landmarks = (mode==='append') ? (mapData.landmarks||[]).concat(newLandmarks) : newLandmarks;
+    _autoLayoutLandmarks(mapData.landmarks, mapData);
+    if (worldData.mapName) mapData.name = worldData.mapName;
+    try { if(typeof _mapSave==='function') _mapSave(mapData); } catch(e){}
+    var bindings = worldData.npcBindings || {};
+    for (var npcId in bindings) { if (!bindings.hasOwnProperty(npcId)) continue; var bind=bindings[npcId]; try { var cs=(typeof _loadCharState==='function')?_loadCharState(npcId):null; if(cs){ if(!cs.bindPlaces) cs.bindPlaces={}; if(bind.home) cs.bindPlaces.home=bind.home; if(bind.workBind){ var jt=resolveJobTemplate(npcId); if(jt==='student') cs.bindPlaces.school=bind.workBind; else if(jt==='clerk') cs.bindPlaces.store=bind.workBind; else cs.bindPlaces.office=bind.workBind; } cs.jobTemplate=resolveJobTemplate(npcId); if(typeof _saveCharState==='function') _saveCharState(npcId,cs); } } catch(e){ console.warn('[WorldEngine] 写入绑定失败:',npcId,e); } }
+    console.log('[WorldEngine] 世界生成完成！'); return { ok:true, result:{ mapName:worldData.mapName||mapData.name, landmarkCount:worldData.landmarks.length, npcBindings:bindings, landmarks:worldData.landmarks } };
+  }
+
+  async function bindNewNpc(npcId) {
+    var db=null; try{db=(typeof loadContactsDB==='function')?loadContactsDB():null;}catch(e){} var npc=null; try{npc=(db&&typeof findContactById==='function')?findContactById(db,npcId):null;}catch(e){} var ce={}; try{ce=(typeof _loadCharExtra==='function')?_loadCharExtra(npcId):{};}catch(e){}
+    var jobId=resolveJobTemplate(npcId); var jobTmpl=JOB_TEMPLATES[jobId]||JOB_TEMPLATES.general; var npcName=(npc&&npc.name)||String(npcId); var profile=ce.profile||ce.bio||'';
+    var mapData=null; try{mapData=(typeof _mapLoad==='function')?_mapLoad():null;}catch(e){} if(!mapData||!mapData.landmarks||mapData.landmarks.length===0) return {ok:false,error:'地图上还没有地标，请先生成世界'};
+    var lmList=mapData.landmarks.map(function(l){ var ft=l.funcTags||guessFuncTags(l); return (l.customName||l.name)+'(id:'+l.id+', 功能:'+ft.join(',')+')'; }).join('\n');
+    var system='你是一个小镇管理员。为新居民分配住所和工作地点。输出纯 JSON。';
+    var user='新角色：'+npcName+'\n职业：'+jobTmpl.label+'\n简介：'+String(profile).slice(0,200)+'\n\n现有地标：\n'+lmList+'\n\n请分配 home 和 workBind。如果需要可在 newLandmarks 增加1~2个。\n输出：{"home":"lm_xxx","workBind":"lm_yyy","newLandmarks":[{"id":"lm_new_001","name":"名字","emoji":"📍","funcTags":["tag"],"desc":"描述"}]}';
+    var result=await worldApiCall(system,user,{temperature:0.7,maxTokens:800}); if(!result.ok) return {ok:false,error:result.error};
+    var jsonStr2=result.data.replace(/```json\s*/gi,'').replace(/```\s*/gi,''); var s2=jsonStr2.indexOf('{'); var e2=jsonStr2.lastIndexOf('}'); if(s2<0||e2<=s2) return {ok:false,error:'无法解析'};
+    var parsed; try{parsed=JSON.parse(jsonStr2.substring(s2,e2+1));}catch(e){return {ok:false,error:'JSON 解析失败'};}
+    if(parsed.newLandmarks&&parsed.newLandmarks.length>0){ var newLms=parsed.newLandmarks.map(function(lm){return {id:lm.id||('lm_new_'+Date.now()),type:'ai_generated',region:'city',name:lm.name,customName:lm.name,x:0,y:0,icon:'ai_generated',emoji:lm.emoji||'📍',tags:[],funcTags:lm.funcTags||['social'],desc:lm.desc||'',actions:_generateActionsFromFuncTags(lm.funcTags||[],lm.name),visits:[],note:lm.desc||''};}); mapData.landmarks=mapData.landmarks.concat(newLms); _autoLayoutLandmarks(mapData.landmarks,mapData); try{if(typeof _mapSave==='function') _mapSave(mapData);}catch(e){} }
+    try{ var cs2=(typeof _loadCharState==='function')?_loadCharState(npcId):null; if(cs2){ if(!cs2.bindPlaces) cs2.bindPlaces={}; if(parsed.home) cs2.bindPlaces.home=parsed.home; if(parsed.workBind){ if(jobId==='student') cs2.bindPlaces.school=parsed.workBind; else if(jobId==='clerk') cs2.bindPlaces.store=parsed.workBind; else cs2.bindPlaces.office=parsed.workBind; } cs2.jobTemplate=jobId; if(typeof _saveCharState==='function') _saveCharState(npcId,cs2); } }catch(e){}
+    return {ok:true,result:parsed};
+  }
+
+  window.MeowWorldEngine = {
+    PLACE_TYPES:PLACE_TYPES, JOB_TEMPLATES:JOB_TEMPLATES, BIND_RULES:BIND_RULES, BLOCK_FORCED_BEHAVIOR:BLOCK_FORCED_BEHAVIOR,
+    LIGHT_TEMPLATES:LIGHT_TEMPLATES, VALID_FUNC_TAGS:VALID_FUNC_TAGS,
+    guessFuncTags:guessFuncTags, resolveJobTemplate:resolveJobTemplate, resolvePlace:resolvePlace,
+    writeMapTrace:writeMapTrace, readMapTrace:readMapTrace, getLatestTrace:getLatestTrace,
+    traceToText:traceToText, traceToTextStable:traceToTextStable,
+    generateWorld:generateWorld, bindNewNpc:bindNewNpc, worldApiCall:worldApiCall,
+    _getApiConfig:_getApiConfig, _autoLayoutLandmarks:_autoLayoutLandmarks
+  };
+  console.log('[MeowWorldEngine] 世界引擎已加载 v1.0');
+})();
 </script>
 <script>
 // ====== Gist 自动同步后台逻辑 ======
