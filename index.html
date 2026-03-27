@@ -23679,9 +23679,19 @@ const npc = _wxGetChatTargetMeta(npcId);
         // ★ 心声更新（tick 时调用）
         function _updateInnerVoiceOnTick(npcId, s){
           try{
-            // 检查是否启用心声
-            var charExKey = 'meow_phone_c_standalone_main_charex_' + npcId;
-            var charEx = JSON.parse(localStorage.getItem(charExKey) || '{}');
+            // 检查是否启用心声（使用 _loadCharExtra 函数）
+            var charEx = {};
+            try {
+              charEx = _loadCharExtra(npcId);
+            } catch(e) {
+              // fallback: 遍历 localStorage
+              for (var i = 0; i < localStorage.length; i++) {
+                var key = localStorage.key(i);
+                if (key && key.indexOf('charex_' + npcId) !== -1) {
+                  try { charEx = JSON.parse(localStorage.getItem(key) || '{}'); break; } catch(e2) {}
+                }
+              }
+            }
             if (charEx.enableInnerVoice === false) return;
             if (charEx.enableLifePush === false) return;
 
@@ -44505,8 +44515,13 @@ function _meowUrlBase64ToUint8Array(base64String) {
     // ★ 读取作息表（如果有）
     var scheduleStr = '';
     try {
-      var charStateRaw = localStorage.getItem('meow_phone_c_standalone_main_charstate_' + npcId);
-      var charState = charStateRaw ? JSON.parse(charStateRaw) : null;
+      var charState = null;
+      for (var si = 0; si < localStorage.length; si++) {
+        var sk = localStorage.key(si);
+        if (sk && sk.indexOf('charstate_' + npcId) !== -1) {
+          try { charState = JSON.parse(localStorage.getItem(sk)); break; } catch(e) {}
+        }
+      }
       if (charState && charState.schedule && Array.isArray(charState.schedule) && charState.schedule.length) {
         scheduleStr = charState.schedule.map(function(sl) {
           return (sl.hour || 0) + ':00-' + (sl.endHour || 0) + ':00 ' + (sl.activity || sl.tag || '');
@@ -45389,21 +45404,27 @@ setTimeout(function() {
           }
         }
       }
-      // 获取状态
-      var stateKey = 'meow_phone_c_standalone_main_charstate_' + npcId;
-      var stateData = localStorage.getItem(stateKey);
-      if (stateData) {
-        var state = JSON.parse(stateData);
-        if (state.attrs) loneliness = state.attrs.loneliness || 50;
-        if (state.schedule) {
-          var h = new Date().getHours();
-          for (var j = 0; j < state.schedule.length; j++) {
-            var sl = state.schedule[j];
-            var inSlot = sl.endHour <= sl.hour 
-              ? (h >= sl.hour || h < sl.endHour)
-              : (h >= sl.hour && h < sl.endHour);
-            if (inSlot) { activity = sl.activity || ''; break; }
-          }
+      // 获取状态（遍历 localStorage 找到正确的 key）
+      for (var si = 0; si < localStorage.length; si++) {
+        var sk = localStorage.key(si);
+        if (sk && sk.indexOf('charstate_' + npcId) !== -1) {
+          try {
+            var state = JSON.parse(localStorage.getItem(sk));
+            if (state && state.attrs) {
+              loneliness = state.attrs.loneliness || 50;
+              if (state.schedule) {
+                var h = new Date().getHours();
+                for (var j = 0; j < state.schedule.length; j++) {
+                  var sl = state.schedule[j];
+                  var inSlot = sl.endHour <= sl.hour 
+                    ? (h >= sl.hour || h < sl.endHour)
+                    : (h >= sl.hour && h < sl.endHour);
+                  if (inSlot) { activity = sl.activity || ''; break; }
+                }
+              }
+            }
+            break;
+          } catch(e) {}
         }
       }
     } catch(e) {}
@@ -45460,28 +45481,39 @@ setTimeout(function() {
     var enableInnerVoice = true;
 
     try {
-      // 检查是否启用心声
-      var charExKey = 'meow_phone_c_standalone_main_charex_' + npcId;
-      var charEx = JSON.parse(localStorage.getItem(charExKey) || '{}');
+      // 检查是否启用心声（遍历 localStorage 找到正确的 key）
+      var charEx = {};
+      for (var k = 0; k < localStorage.length; k++) {
+        var kk = localStorage.key(k);
+        if (kk && kk.indexOf('charex_' + npcId) !== -1) {
+          try { charEx = JSON.parse(localStorage.getItem(kk) || '{}'); break; } catch(e) {}
+        }
+      }
       if (charEx.enableInnerVoice === false) {
         enableInnerVoice = false;
       }
 
-      // 获取状态
-      var stateKey = 'meow_phone_c_standalone_main_charstate_' + npcId;
-      var stateData = localStorage.getItem(stateKey);
-      if (stateData) {
-        var state = JSON.parse(stateData);
-        if (state.attrs) loneliness = state.attrs.loneliness || 50;
-        if (state.schedule) {
-          var h = new Date().getHours();
-          for (var j = 0; j < state.schedule.length; j++) {
-            var sl = state.schedule[j];
-            var inSlot = sl.endHour <= sl.hour 
-              ? (h >= sl.hour || h < sl.endHour)
-              : (h >= sl.hour && h < sl.endHour);
-            if (inSlot) { activity = sl.activity || ''; break; }
-          }
+      // 获取状态（遍历 localStorage 找到正确的 key）
+      for (var m = 0; m < localStorage.length; m++) {
+        var mk = localStorage.key(m);
+        if (mk && mk.indexOf('charstate_' + npcId) !== -1) {
+          try {
+            var state = JSON.parse(localStorage.getItem(mk));
+            if (state && state.attrs) {
+              loneliness = state.attrs.loneliness || 50;
+              if (state.schedule) {
+                var h = new Date().getHours();
+                for (var j = 0; j < state.schedule.length; j++) {
+                  var sl = state.schedule[j];
+                  var inSlot = sl.endHour <= sl.hour 
+                    ? (h >= sl.hour || h < sl.endHour)
+                    : (h >= sl.hour && h < sl.endHour);
+                  if (inSlot) { activity = sl.activity || ''; break; }
+                }
+              }
+            }
+            break;
+          } catch(e) {}
         }
       }
 
@@ -45523,8 +45555,16 @@ setTimeout(function() {
   function canTriggerProactive(npcId) {
     try {
       // 1. 检查是否启用主动找你
-      var charExKey = 'meow_phone_c_standalone_main_charex_' + npcId;
-      var charEx = JSON.parse(localStorage.getItem(charExKey) || '{}');
+      var charEx = {};
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (key && key.indexOf('charex_' + npcId) !== -1) {
+          try {
+            charEx = JSON.parse(localStorage.getItem(key) || '{}');
+            break;
+          } catch(e) {}
+        }
+      }
       if (charEx.enableLifePush === false) return { ok: false, reason: '主动找你已关闭' };
 
       // 2. 检查是否正在和该角色聊天
@@ -45561,15 +45601,27 @@ setTimeout(function() {
       // 5. 检查孤独值
       var loneliness = 50;
       try {
-        // 使用正确的存储格式读取状态
-        var chatUID = (typeof phoneGetChatUID === 'function') ? phoneGetChatUID() : '';
-        chatUID = String(chatUID || '').trim() || 'fallback';
-        var stateData = (typeof phoneGetC === 'function') 
-          ? phoneGetC(chatUID, 'charstate_' + npcId, null)
-          : null;
-        if (stateData && stateData.attrs) {
-          loneliness = stateData.attrs.loneliness || 50;
+        // 方法1：直接遍历 localStorage 找到匹配的 charstate
+        var foundState = null;
+        for (var i = 0; i < localStorage.length; i++) {
+          var key = localStorage.key(i);
+          if (key && key.indexOf('charstate_' + npcId) !== -1) {
+            try {
+              var data = JSON.parse(localStorage.getItem(key));
+              if (data && data.attrs) {
+                foundState = data;
+                break;
+              }
+            } catch(e) {}
+          }
         }
+        
+        if (foundState && foundState.attrs) {
+          loneliness = foundState.attrs.loneliness;
+          if (loneliness == null) loneliness = 50;
+        }
+        
+        console.log('[InnerVoice] 读取孤独值:', loneliness, 'npcId:', npcId);
       } catch(e) {
         console.warn('[InnerVoice] 读取孤独值失败:', e);
       }
