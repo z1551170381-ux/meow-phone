@@ -23646,18 +23646,21 @@ const npc = _wxGetChatTargetMeta(npcId);
             // 1. 孤独感累积
             _accumulateLoneliness(s, defs);
 
-            // 2. 如果角色正处于某个行为中，检查是否已结束
+            // ★ 2. 心声更新（根据孤独值）
+            _updateInnerVoiceOnTick(npcId, s);
+
+            // 3. 如果角色正处于某个行为中，检查是否已结束
             if (s.currentBehavior && s.currentBehavior.endAt && Date.now() > s.currentBehavior.endAt){
               s.currentBehavior = null;
             }
 
-            // 3. 行为中不再触发新行为（除如厕）
+            // 4. 行为中不再触发新行为（除如厕）
             if (s.currentBehavior && s.currentBehavior.key !== 'bathroom'){
               commitStats(npcId, s);
               return;
             }
 
-            // 4. 计算主导需求并触发行为
+            // 5. 计算主导需求并触发行为
             var need = _getDominantNeed(s.attrs, s.personality, s.schedule);
             if (need){
               var p = s.personality || {};
@@ -23671,6 +23674,45 @@ const npc = _wxGetChatTargetMeta(npcId);
             // ★ 写回存储，更新时间锚点
             commitStats(npcId, s);
           }catch(e){ console.warn('[LifeEngine] tick error:', e); }
+        }
+
+        // ★ 心声更新（tick 时调用）
+        function _updateInnerVoiceOnTick(npcId, s){
+          try{
+            // 检查是否启用心声
+            var charExKey = 'meow_phone_c_standalone_main_charex_' + npcId;
+            var charEx = JSON.parse(localStorage.getItem(charExKey) || '{}');
+            if (charEx.enableInnerVoice === false) return;
+            if (charEx.enableLifePush === false) return;
+
+            var loneliness = (s.attrs && s.attrs.loneliness) || 50;
+
+            // 检查上次更新时间（避免频繁更新）
+            var ivKey = 'meow_innervoice_' + npcId;
+            var ivData = null;
+            try { ivData = JSON.parse(localStorage.getItem(ivKey) || 'null'); } catch(e){}
+            var lastUpdate = ivData ? (ivData.updatedAt || 0) : 0;
+            var minInterval = 10 * 60 * 1000; // 最少 10 分钟更新一次
+            if (Date.now() - lastUpdate < minInterval) return;
+
+            // 根据孤独值决定更新概率
+            var updateChance = 0;
+            if (loneliness < 40) updateChance = 0.1;       // 低孤独：10% 概率更新
+            else if (loneliness < 60) updateChance = 0.3; // 中孤独：30%
+            else if (loneliness < 80) updateChance = 0.5; // 高孤独：50%
+            else updateChance = 0.8;                       // 极高孤独：80%
+
+            if (Math.random() > updateChance) return;
+
+            // 更新心声
+            if (typeof window._meowInnerVoice !== 'undefined' && window._meowInnerVoice){
+              // 孤独 > 70 时有概率用 API，否则用模板
+              var useAPI = loneliness >= 70 && Math.random() < 0.5;
+              window._meowInnerVoice.update(npcId, useAPI).then(function(result){
+                if (result) console.log('[LifeEngine] 心声已更新:', npcId, result.text);
+              }).catch(function(){});
+            }
+          }catch(e){ console.warn('[LifeEngine] _updateInnerVoiceOnTick error:', e); }
         }
 
         // ---- 性格提取（必须调 AI，失败返回 { error: "原因" }） ----
@@ -31460,8 +31502,85 @@ function bindPageScroll(){
                 // 时间窗口：不限（由 _canCall 在来电分支里单独控制）
 
                 _lastFgPushCheck[npcId] = Date.now();
-                _setProactiveAttemptState(npcId, 'random', { tryAt: Date.now(), status:'trying', reason:'foreground_timer', failReason:'' });
-                _pushProactiveDebug(npcId, 'random', 'try', 'foreground_timer');
+
+                // ★ 三种表演模式选择
+                // 1. 发消息（孤独>85，概率60%）
+                // 2. 撤回表演（孤独70-85，概率50%）
+                // 3. 纯心声（孤独60-70，或其他模式骰子不中）
+                var performMode = 'voice'; // 默认纯心声
+                var enableInnerVoice = true;
+                try {
+                  var _ceCheck = _loadCharExtra(npcId);
+                  enableInnerVoice = _ceCheck.enableInnerVoice !== false;
+                } catch(e) {}
+
+                if (lonely3 >= 85) {
+                  // 高孤独：60% 发消息，25% 撤回，15% 纯心声
+                  var roll1 = Math.random();
+                  if (roll1 < 0.60) performMode = 'message';
+                  else if (roll1 < 0.85 && enableInnerVoice) performMode = 'withdraw';
+                  else if (enableInnerVoice) performMode = 'voice';
+                  else performMode = 'message';
+                } else if (lonely3 >= 70) {
+                  // 中高孤独：30% 发消息，50% 撤回，20% 纯心声
+                  var roll2 = Math.random();
+                  if (roll2 < 0.30) performMode = 'message';
+                  else if (roll2 < 0.80 && enableInnerVoice) performMode = 'withdraw';
+                  else if (enableInnerVoice) performMode = 'voice';
+                  else performMode = 'message';
+                } else {
+                  // 低孤独：不发消息，纯心声
+                  if (enableInnerVoice) performMode = 'voice';
+                  else return; // 心声关闭且孤独不够高，不触发
+                }
+
+                console.log('[LifePush] 表演模式:', performMode, '孤独:', lonely3);
+                _setProactiveAttemptState(npcId, 'random', { tryAt: Date.now(), status:'trying', reason:'foreground_timer', failReason:'', mode: performMode });
+                _pushProactiveDebug(npcId, 'random', 'try', 'foreground_timer mode=' + performMode);
+
+                // ★ 根据表演模式执行不同行为
+                if (performMode === 'voice') {
+                  // 纯心声模式：只更新心声，不发消息
+                  (async function(nId){
+                    try {
+                      if (typeof window._meowInnerVoice !== 'undefined' && window._meowInnerVoice) {
+                        await window._meowInnerVoice.update(nId, true); // 调 API 生成
+                        console.log('[LifePush] 纯心声模式完成:', nId);
+                      }
+                    } catch(e) {}
+                  })(npcId);
+                  return;
+                }
+
+                if (performMode === 'withdraw') {
+                  // 撤回表演模式
+                  (async function(nId){
+                    try {
+                      if (typeof window._meowInnerVoice !== 'undefined' && window._meowInnerVoice) {
+                        var result = await window._meowInnerVoice.performWithdraw(nId);
+                        if (result) {
+                          console.log('[LifePush] 撤回表演完成:', nId, result);
+                          // 更新 thread
+                          bumpThread(nId, { lastMsg:'对方撤回了一条消息', lastTime:result.ts, unread:1 });
+                          // 如果当前在看这个聊天，刷新
+                          if (state.chatTarget === nId && state.app === 'chatDetail'){
+                            try{ renderChatDetail(nId); }catch(e){}
+                          }
+                          // 减少孤独感（撤回也算尝试联系了）
+                          var s4 = _loadCharState(nId);
+                          if (s4 && s4.attrs){
+                            var defs4 = _getAttrDefs(s4);
+                            s4.attrs.loneliness = _clampAttr('loneliness', (s4.attrs.loneliness||0) - 15, defs4);
+                            _saveCharState(nId, s4);
+                          }
+                        }
+                      }
+                    } catch(e) { console.warn('[LifePush] withdraw error:', e); }
+                  })(npcId);
+                  return;
+                }
+
+                // ★ 发消息模式（原有逻辑）
 
                 // 异步生成消息 + 写入 + 弹窗
                 (async function(nId, sSnap){
@@ -45481,8 +45600,33 @@ setTimeout(function() {
   }
 
   // ═══════════════════════════════════════════
-  //  撤回表演
+  //  撤回表演（带"正在输入..."效果）
   // ═══════════════════════════════════════════
+  
+  // 显示"正在输入..."提示（用于撤回表演）
+  function _showTypingHint(npcId, npcName) {
+    try {
+      // 更新 thread 列表显示"正在输入..."
+      if (typeof window._meowBumpThread === 'function') {
+        window._meowBumpThread(npcId, { 
+          lastMsg: npcName + ' 正在输入...',
+          typing: true 
+        });
+      }
+      console.log('[InnerVoice] 显示正在输入:', npcId);
+    } catch(e) {}
+  }
+
+  // 隐藏"正在输入..."提示
+  function _hideTypingHint(npcId) {
+    try {
+      // 恢复 thread 列表
+      if (typeof window._meowBumpThread === 'function') {
+        window._meowBumpThread(npcId, { typing: false });
+      }
+    } catch(e) {}
+  }
+
   async function performWithdraw(npcId) {
     var check = canTriggerProactive(npcId);
     if (!check.ok) {
@@ -45490,11 +45634,32 @@ setTimeout(function() {
       return false;
     }
 
-    // 生成一条消息
+    // 获取角色名
+    var npcName = npcId;
+    try {
+      if (typeof window._meowCollectNpcs === 'function') {
+        var npcs = window._meowCollectNpcs();
+        for (var i = 0; i < npcs.length; i++) {
+          if (npcs[i] && npcs[i].id === npcId) {
+            npcName = npcs[i].name || npcId;
+            break;
+          }
+        }
+      }
+    } catch(e) {}
+
+    // ★ 第一阶段：显示"正在输入..."（1.5-3秒）
+    _showTypingHint(npcId, npcName);
+    var typingDuration = 1500 + Math.random() * 1500;
+    await new Promise(function(r) { setTimeout(r, typingDuration); });
+
+    // ★ 第二阶段：隐藏"正在输入..."
+    _hideTypingHint(npcId);
+
+    // 生成一条消息（用于撤回记录）
     var msgText = null;
     try {
       if (typeof PhoneAI !== 'undefined' && PhoneAI && typeof PhoneAI.chat === 'function') {
-        // 生成一条简短消息
         var result = await PhoneAI.chat({
           system: '生成一条很短的聊天消息（5-15字），像是想说又不好意思说出口的，用于撤回表演。',
           messages: [{ role: 'user', content: '直接输出消息内容' }],
@@ -45510,7 +45675,7 @@ setTimeout(function() {
     } catch(e) {}
 
     if (!msgText) {
-      var fallbacks = ['那个...', '在吗', '我...', '想问你', '刚才...'];
+      var fallbacks = ['那个...', '在吗', '我...', '想问你', '刚才...', '你...'];
       msgText = fallbacks[Math.floor(Math.random() * fallbacks.length)];
     }
 
@@ -45535,7 +45700,8 @@ setTimeout(function() {
         window._meowBumpThread(npcId, { 
           lastMsg: '对方撤回了一条消息', 
           lastTime: ts, 
-          unread: 1 
+          unread: 1,
+          typing: false
         });
       }
     } catch(e) {}
@@ -45547,7 +45713,8 @@ setTimeout(function() {
       '措辞好难',
       '打了又删了',
       '还是不要打扰 ta 了',
-      '想说又不知道怎么开口'
+      '想说又不知道怎么开口',
+      '话到嘴边又咽回去了'
     ];
     var voiceText = withdrawVoices[Math.floor(Math.random() * withdrawVoices.length)];
     setInnerVoice(npcId, voiceText, 'withdraw');
