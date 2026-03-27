@@ -20744,8 +20744,13 @@ const npc = _wxGetChatTargetMeta(npcId);
           }, timeoutMs);
 
           try{
+            // ★ 如果没有配置 model，直接返回错误
+            if (!cfg.model) {
+              console.warn('[PhoneAI] 未配置模型，跳过 API 调用');
+              return { ok:false, data:null, error:'请先配置模型' };
+            }
             var body = {
-              model: cfg.model || 'gpt-4o-mini',
+              model: cfg.model,
               messages: [],
               temperature: (opts && opts.temperature) || 0.85,
               max_tokens: (opts && opts.maxTokens) || cfg.maxTokens || 1024
@@ -31371,7 +31376,8 @@ function bindPageScroll(){
               });
             }catch(e){ console.warn('[LifeEngine] global tick error:', e); }
           };
-          _lifeTickFn();
+          // ★ 延迟 60 秒再执行第一次 tick，避免启动时立即调用 API
+          setTimeout(_lifeTickFn, 60 * 1000);
           var _lifeTimer = setInterval(_lifeTickFn, 5 * 60 * 1000);
           if (MEOW.core?.timers) MEOW.core.timers.addInterval(_lifeTimer);
         }catch(e){ console.warn('[LifeEngine] init error:', e); }
