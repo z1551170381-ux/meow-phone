@@ -139,6 +139,42 @@
   // ★ 暴露 toast 到全局（外部 script 块需要）
   window.toast = toast;
 
+  /* ═══════════════════════════════════════════
+     9. 图片全屏预览（wxPhotoCard 点击调用）
+  ═══════════════════════════════════════════ */
+  window._meowPhotoPreview = function(el) {
+    if (!el) return;
+    var fullSrc = el.getAttribute('data-fullsrc') || '';
+    var caption = el.getAttribute('data-caption') || '';
+    // 兜底：没有 data-fullsrc 就用 img 的 src
+    if (!fullSrc) {
+      var img = el.querySelector('img');
+      if (img) fullSrc = img.src;
+    }
+    if (!fullSrc) return;
+
+    var root = document.getElementById('meow-phone-root') || document.body;
+    // 移除已有的预览
+    var old = root.querySelector('.wxPhotoOverlay');
+    if (old) old.remove();
+
+    var overlay = document.createElement('div');
+    overlay.className = 'wxPhotoOverlay';
+    overlay.innerHTML = '<button class="wxPOClose">✕</button>'
+      + '<img src="' + fullSrc + '" />'
+      + (caption ? '<div class="wxPOCaption">' + caption + '</div>' : '');
+
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay || e.target.classList.contains('wxPOClose')) {
+        overlay.style.opacity = '0';
+        overlay.style.transition = 'opacity .15s ease';
+        setTimeout(function() { overlay.remove(); }, 160);
+      }
+    });
+
+    root.appendChild(overlay);
+  };
+
   /* ═══════════════════════════════════════════════
      8. 全局 CSS 补丁（toast 动画 + 全屏强制）
   ═══════════════════════════════════════════════ */
@@ -4068,6 +4104,29 @@ case '🍪': return s('<circle cx="12" cy="12" r="10"/><circle cx="8" cy="9" r="
   width:220px; height:160px; background:linear-gradient(135deg,#e8ecf0,#d0d8e0);
   display:flex; align-items:center; justify-content:center;
   font-size:28px; color:rgba(255,255,255,.6);
+}
+/* ★ 图片全屏预览浮层 */
+#${ID} .wxPhotoOverlay{
+  position:fixed; inset:0; z-index:99999;
+  background:rgba(0,0,0,.92); display:flex; flex-direction:column;
+  align-items:center; justify-content:center; padding:20px;
+  animation:wxPhotoFadeIn .2s ease;
+  -webkit-backdrop-filter:blur(8px); backdrop-filter:blur(8px);
+}
+@keyframes wxPhotoFadeIn{ from{opacity:0} to{opacity:1} }
+#${ID} .wxPhotoOverlay img{
+  max-width:100%; max-height:75vh; object-fit:contain; border-radius:6px;
+  box-shadow:0 8px 40px rgba(0,0,0,.5);
+}
+#${ID} .wxPhotoOverlay .wxPOCaption{
+  color:rgba(255,255,255,.85); font-size:13px; line-height:1.5;
+  margin-top:12px; text-align:center; max-width:80%; word-break:break-word;
+}
+#${ID} .wxPhotoOverlay .wxPOClose{
+  position:absolute; top:max(12px, env(safe-area-inset-top)); right:12px;
+  width:32px; height:32px; border-radius:50%; border:none;
+  background:rgba(255,255,255,.15); color:#fff; font-size:18px;
+  display:flex; align-items:center; justify-content:center; cursor:pointer;
 }
 /* ★ AI 分享卡 */
 #${ID} .wxShareCard{
@@ -18538,16 +18597,14 @@ const npc = _wxGetChatTargetMeta(npcId);
                 </div>
                 <button class="wxReminderToggle ${charEx.quickChat?'on':'off'}" data-act="wxCSToggleQuickChat" data-npcid="${esc(contactId)}" style="margin-left:auto;flex-shrink:0;"></button>
               </div>
-              <div class="wxCSItem" data-act="wxCSNav" data-cspage="proactiveSettings" data-npcid="${esc(contactId)}">
+              <div class="wxCSItem" data-act="wxCSNav" data-cspage="proactiveSettings" data-npcid="${esc(contactId)}" style="padding-right:8px;">
                 <div class="wxCSIco">${_phFlatIcon('🔔')}</div>
-                <div class="wxCSName">
+                <div class="wxCSName" style="flex:1;">
                   主动找你
-                  <div style="font-size:11px;color:rgba(20,24,28,.4);margin-top:1px;">频率、关系、好感度</div>
+                  <div style="font-size:11px;color:rgba(20,24,28,.4);margin-top:1px;">频率、心声表演</div>
                 </div>
-                <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
-                  <span style="font-size:12px;color:rgba(20,24,28,.35);">${charEx.enableLifePush!==false?'已开启':'已关闭'}</span>
-                  <div class="wxCSArrow">›</div>
-                </div>
+                <button class="wxReminderToggle ${charEx.enableLifePush!==false?'on':'off'}" data-act="wxCSToggleLifePush" data-npcid="${esc(contactId)}" style="margin-left:auto;flex-shrink:0;"></button>
+                <div class="wxCSArrow" style="margin-left:8px;">›</div>
               </div>
               <div class="wxCSItem" data-act="wxCSNav" data-cspage="proactiveDebug" data-npcid="${esc(contactId)}">
                 <div class="wxCSIco">${_phFlatIcon('🧪')}</div>
@@ -18811,6 +18868,12 @@ const npc = _wxGetChatTargetMeta(npcId);
         var body = root.querySelector('.phAppBody');
         if (!body) return;
 
+        // 更新顶部标题
+        try {
+          var titleEl = root.querySelector('.phAppBar .phTitle, [data-ph="appTitle"]');
+          if (titleEl) titleEl.textContent = '主动找你';
+        } catch(e) {}
+
         // 读取角色配置
         var charEx = {};
         try { charEx = JSON.parse(localStorage.getItem('meow_phone_c_standalone_main_charex_' + npcId) || '{}'); } catch(e){}
@@ -18825,44 +18888,13 @@ const npc = _wxGetChatTargetMeta(npcId);
           }
         } catch(e) {}
 
-        // 读取后端配置（如果有）
+        // 读取配置
         var bondLabel = charEx.bondLabel || charEx.bond || '朋友';
         var pushFreq = charEx.pushFrequency || 'auto';
         var enablePush = charEx.enableLifePush !== false;
         var allowChase = !!charEx.allowChaseOnRead;
+        var enableInnerVoice = charEx.enableInnerVoice !== false; // 心声表演默认开启
 
-        // 好感模糊描述
-        var affinity = typeof charEx.affinity === 'number' ? charEx.affinity : 20;
-        function affinityDesc(v) {
-          if (v < -30) return '厌恶';
-          if (v < -10) return '反感';
-          if (v < 10)  return '冷淡';
-          if (v < 30)  return '一般';
-          if (v < 50)  return '友好';
-          if (v < 70)  return '亲近';
-          if (v < 85)  return '亲密';
-          return '深厚';
-        }
-        var isFamily = bondLabel === '家人';
-        function affinityColor(v) {
-          if (isFamily) {
-            if (v < 0) return '#b0a0c0';
-            if (v < 50) return '#8B7CB0';
-            return '#6D40B0';
-          }
-          if (v < -10) return '#e07060';
-          if (v < 30)  return 'var(--ph-text-dim)';
-          if (v < 60)  return '#e08080';
-          return '#e04070';
-        }
-        var heartCaps = { '同事':40,'同学':40,'室友':50,'朋友':60,'前任':70,'暧昧':80,'恋人':100,'伴侣':100,'家人':100 };
-        var heartCap = heartCaps[bondLabel] || 60;
-        var affinityPct = Math.max(0, Math.min(100, (affinity + 100) / 2));
-        var visualPct = Math.min(affinityPct, heartCap);
-        var heartFillY = 22 - visualPct * 0.22;
-        var hColor = affinityColor(affinity);
-
-        var VALID_LABELS = ['朋友','家人','暧昧','恋人','伴侣','同事','同学','前任','室友'];
         var FREQ_OPTIONS = [
           { val: 'auto', label: 'AI 自动', desc: '根据角色性格决定' },
           { val: 'low', label: '少', desc: '每轮最多 2 次' },
@@ -18873,7 +18905,6 @@ const npc = _wxGetChatTargetMeta(npcId);
         var showChaseOption = ['暧昧','恋人','伴侣'].indexOf(bondLabel) >= 0;
 
         body.innerHTML = ''
-          + '<div class="phTopBar"><button data-act="wxCSBack" class="phBackBtn">‹</button><div class="phTitle">主动找你</div><div style="width:32px;"></div></div>'
           + '<div class="phScroll" style="padding:12px 14px 80px;">'
 
           // 总开关
@@ -18882,27 +18913,6 @@ const npc = _wxGetChatTargetMeta(npcId);
           + '<div><div style="font-size:14px;font-weight:600;color:var(--ph-text);">' + esc(npcName) + ' 主动找你</div>'
           + '<div style="font-size:11px;color:var(--ph-text-sub);margin-top:2px;">开启后角色会在聊天结束后主动发消息给你</div></div>'
           + '<button class="sToggle' + (enablePush ? ' on' : '') + '" data-el="ps_enable" style="flex-shrink:0;"></button>'
-          + '</div></div>'
-
-          // 好感度条
-          + '<div class="phCard" style="margin-bottom:12px;padding:14px;">'
-          + '<div style="font-size:12px;font-weight:600;color:var(--ph-text);margin-bottom:8px;">好感度</div>'
-          + '<div style="display:flex;align-items:center;gap:10px;">'
-          + '<div style="flex:1;height:6px;border-radius:3px;background:var(--ph-sep,rgba(0,0,0,.06));overflow:hidden;">'
-          + '<div style="height:100%;width:' + affinityPct + '%;border-radius:3px;background:' + affinityColor(affinity) + ';transition:width .3s;"></div>'
-          + '</div>'
-          + '<span style="font-size:12px;font-weight:600;color:' + affinityColor(affinity) + ';min-width:36px;text-align:right;">' + affinityDesc(affinity) + '</span>'
-          + '</div>'
-          + '</div>'
-
-          // 关系标签
-          + '<div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:6px 2px 4px;">关系标签</div>'
-          + '<div class="phCard" style="margin-bottom:12px;padding:4px 6px;">'
-          + '<div style="display:flex;flex-wrap:wrap;gap:6px;padding:8px 4px;">'
-          + VALID_LABELS.map(function(lb) {
-              var sel = lb === bondLabel;
-              return '<button data-el="ps_bond" data-val="' + lb + '" style="padding:6px 14px;border-radius:16px;border:1px solid ' + (sel ? 'var(--ph-accent,#07c160)' : 'rgba(0,0,0,.08)') + ';background:' + (sel ? 'var(--ph-accent,#07c160)' : 'rgba(255,255,255,.7)') + ';color:' + (sel ? '#fff' : 'var(--ph-text)') + ';font-size:12px;font-weight:500;cursor:pointer;">' + lb + '</button>';
-            }).join('')
           + '</div></div>'
 
           // 消息频率
@@ -18919,6 +18929,15 @@ const npc = _wxGetChatTargetMeta(npcId);
                 + '</div>';
             }).join('')
           + '</div>'
+
+          // 心声表演（新增）
+          + '<div style="font-size:10.5px;color:var(--ph-text-dim);font-weight:600;text-transform:uppercase;letter-spacing:.6px;padding:6px 2px 4px;">心声表演</div>'
+          + '<div class="phCard" style="margin-bottom:12px;padding:14px;">'
+          + '<div style="display:flex;align-items:center;justify-content:space-between;">'
+          + '<div style="flex:1;padding-right:12px;"><div style="font-size:13px;font-weight:500;color:var(--ph-text);">启用心声与撤回</div>'
+          + '<div style="font-size:11px;color:var(--ph-text-sub);margin-top:2px;">角色会有内心独白，偶尔发了消息又撤回</div></div>'
+          + '<button class="sToggle' + (enableInnerVoice ? ' on' : '') + '" data-el="ps_innervoice" style="flex-shrink:0;"></button>'
+          + '</div></div>'
 
           // 已读不回可追发（仅暧昧/恋人/伴侣显示）
           + (showChaseOption
@@ -18939,24 +18958,12 @@ const npc = _wxGetChatTargetMeta(npcId);
         // 事件绑定
         var elEnable = body.querySelector('[data-el="ps_enable"]');
         var elChase = body.querySelector('[data-el="ps_chase"]');
+        var elInnerVoice = body.querySelector('[data-el="ps_innervoice"]');
         var elSave = body.querySelector('[data-el="ps_proactive_save"]');
 
         if (elEnable) elEnable.addEventListener('click', function() { elEnable.classList.toggle('on'); });
         if (elChase) elChase.addEventListener('click', function() { elChase.classList.toggle('on'); });
-
-        // 关系标签选择
-        body.querySelectorAll('[data-el="ps_bond"]').forEach(function(btn) {
-          btn.addEventListener('click', function() {
-            body.querySelectorAll('[data-el="ps_bond"]').forEach(function(b) {
-              b.style.border = '1px solid rgba(0,0,0,.08)';
-              b.style.background = 'rgba(255,255,255,.7)';
-              b.style.color = 'var(--ph-text)';
-            });
-            btn.style.border = '1px solid var(--ph-accent,#07c160)';
-            btn.style.background = 'var(--ph-accent,#07c160)';
-            btn.style.color = '#fff';
-          });
-        });
+        if (elInnerVoice) elInnerVoice.addEventListener('click', function() { elInnerVoice.classList.toggle('on'); });
 
         // 频率选择
         body.querySelectorAll('[data-el="ps_freq"]').forEach(function(row) {
@@ -18978,10 +18985,7 @@ const npc = _wxGetChatTargetMeta(npcId);
         if (elSave) elSave.addEventListener('click', function() {
           var newEnable = elEnable && elEnable.classList.contains('on');
           var newChase = elChase ? elChase.classList.contains('on') : false;
-
-          var newBond = bondLabel;
-          var selBondBtn = body.querySelector('[data-el="ps_bond"][style*="var(--ph-accent"]');
-          if (selBondBtn) newBond = selBondBtn.getAttribute('data-val') || bondLabel;
+          var newInnerVoice = elInnerVoice ? elInnerVoice.classList.contains('on') : true;
 
           var newFreq = pushFreq;
           body.querySelectorAll('[data-el="ps_freq"]').forEach(function(r) {
@@ -18993,10 +18997,9 @@ const npc = _wxGetChatTargetMeta(npcId);
 
           // 保存到 charEx
           charEx.enableLifePush = newEnable;
-          charEx.bondLabel = newBond;
-          charEx.bond = newBond;
           charEx.pushFrequency = newFreq;
           charEx.allowChaseOnRead = newChase;
+          charEx.enableInnerVoice = newInnerVoice;
           try { localStorage.setItem('meow_phone_c_standalone_main_charex_' + npcId, JSON.stringify(charEx)); } catch(e) {}
 
           // 同步到后端
@@ -19011,10 +19014,11 @@ const npc = _wxGetChatTargetMeta(npcId);
                 npcs: [{
                   id: npcId,
                   name: npcName,
-                  bond: newBond,
+                  bond: bondLabel,
                   enableLifePush: newEnable,
                   pushFrequency: newFreq,
-                  allowChaseOnRead: newChase
+                  allowChaseOnRead: newChase,
+                  enableInnerVoice: newInnerVoice
                 }]
               })
             }).catch(function(){});
@@ -20022,14 +20026,14 @@ const npc = _wxGetChatTargetMeta(npcId);
             <div style="padding:6px 14px;font-size:11px;color:rgba(20,24,28,.35);background:rgba(255,255,255,.9);">${esc(meta.note||'转账')}</div>
           </div>`;
         } else if (mt === 'photo'){
-          // ★ AI 发照片卡（Unsplash 随机图 + 描述文字）
+          // ★ AI 发照片卡（picsum.photos 随机图 + 描述文字）— v6: 修复图源+添加大图预览
           var _photoDesc = esc(meta.caption || text || '');
-          var _photoSeed = Math.floor(Math.random() * 900) + 100;
-          var _photoQuery = encodeURIComponent(meta.query || 'life moment');
-          var _photoSrc = 'https://source.unsplash.com/440x320/?' + _photoQuery + '&sig=' + _photoSeed;
+          var _photoSeed = encodeURIComponent((meta.query || 'life') + '_' + (Math.floor(Math.random() * 900) + 100));
+          var _photoSrc = 'https://picsum.photos/seed/' + _photoSeed + '/440/320';
+          var _photoSrcFull = 'https://picsum.photos/seed/' + _photoSeed + '/800/600';
           contentHtml = '<div class="wxCBContent wxCBSpecial" style="padding:0;">'
-            + '<div class="wxPhotoCard" onclick="this.classList.toggle(\'wxPhotoExpanded\')">'
-            + '<img src="' + _photoSrc + '" onerror="this.parentNode.innerHTML=\'<div class=wxPhotoLoading>🖼</div>\'" />'
+            + '<div class="wxPhotoCard" onclick="window._meowPhotoPreview(this)" data-fullsrc="' + _photoSrcFull + '" data-caption="' + _photoDesc + '">'
+            + '<img src="' + _photoSrc + '" loading="lazy" onerror="this.onerror=null;this.parentNode.innerHTML=\'<div class=wxPhotoLoading>🖼</div>\'" />'
             + (_photoDesc ? '<div class="wxPhotoCaption">' + _photoDesc + '</div>' : '')
             + '</div>'
             + editedTag + '</div>';
@@ -20037,9 +20041,8 @@ const npc = _wxGetChatTargetMeta(npcId);
           // ★ AI 发分享卡（链接卡样式：标题 + 描述 + 缩略图）
           var _shareTitle = esc(meta.title || text || '分享');
           var _shareDesc = esc(meta.desc || '');
-          var _shareSeed2 = Math.floor(Math.random() * 900) + 100;
-          var _shareQuery2 = encodeURIComponent(meta.query || 'news');
-          var _shareThumb = 'https://source.unsplash.com/200x90/?' + _shareQuery2 + '&sig=' + _shareSeed2;
+          var _shareSeed2 = encodeURIComponent((meta.query || 'news') + '_' + (Math.floor(Math.random() * 900) + 100));
+          var _shareThumb = 'https://picsum.photos/seed/' + _shareSeed2 + '/200/90';
           contentHtml = '<div class="wxCBContent wxCBSpecial" style="padding:0;">'
             + '<div class="wxShareCard">'
             + '<img class="wxSCThumb" src="' + _shareThumb + '" onerror="this.style.display=\'none\'" />'
