@@ -2397,7 +2397,7 @@ function phoneApplyWallpaper(base64OrEmpty, target){
           case '☰': return s('<path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"/>');
           case '✏': return s('<path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zm2.92 2.83H5v-.92l9.06-9.06.92.92-9.06 9.06zM20.71 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/>');
           case '💬': return s('<path d="M6 4h12a4 4 0 0 1 4 4v7a4 4 0 0 1-4 4H10l-6 5V8a4 4 0 0 1 4-4z"/>');
-          case '📢': return s('<path d="M3 11v2c0 .55.45 1 1 1h1l3 6h2l-1.5-6H14l5 3V7l-5 3H4c-.55 0-1 .45-1 1zm14-1.5v5l3-1.8v-1.4L17 9.5z"/>');
+          case '💭': return s('<path d="M20 4H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2h2v3l3-3h11c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm-9 9H7v-2h4v2zm6 0h-4v-2h4v2zm0-4H7V7h10v2z"/>');          case '📢': return s('<path d="M3 11v2c0 .55.45 1 1 1h1l3 6h2l-1.5-6H14l5 3V7l-5 3H4c-.55 0-1 .45-1 1zm14-1.5v5l3-1.8v-1.4L17 9.5z"/>');
           case '🔍': return s('<path d="M10 2a8 8 0 1 0 4.9 14.32l4.39 4.39 1.41-1.41-4.39-4.39A8 8 0 0 0 10 2zm0 2a6 6 0 1 1 0 12a6 6 0 0 1 0-12z"/>');
           case '➤': return s('<path d="M2 21l21-9L2 3v7l15 2-15 2v7z"/>');
           case '🎙': return s('<path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 0 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.93V21h2v-3.07A7 7 0 0 0 19 11h-2z"/>');
@@ -7608,6 +7608,16 @@ function buildHTML(){
             var _spc2 = root.querySelector('.wxStatePanelCard'); if(_spc2) _spc2.remove();
             state._innerStack.push(function(){ renderChatDetail(_sdNid); });
             _renderStateDetailPage(_sdNid);
+            return;
+          }
+          // ★ 点击撤回消息 → 跳转状态详情页查看心声
+          if (act === 'viewInnerVoice'){
+            var _ivNid = t.getAttribute('data-npcid') || state.chatTarget;
+            if (!_ivNid) return;
+            state._innerStack.push(function(){ state.app='chatDetail'; renderChatDetail(_ivNid); });
+            state.app = 'charSettings';
+            _renderStateDetailPage(_ivNid);
+            try{ toast('💭 查看 ta 的内心独白'); }catch(e){}
             return;
           }
           if (act === 'wxOfflineMode'){
@@ -20045,8 +20055,14 @@ const npc = _wxGetChatTargetMeta(npcId);
           b.setAttribute('data-msgts', String(ts||0));
           b.setAttribute('data-msgrole', role);
           b.setAttribute('data-msgtext', '');
+          b.setAttribute('data-npcid', String(npcId||''));
           var who = (role === 'me') ? '你' : (npc.name || '对方');
-          b.innerHTML = '<div class="wxCBRecalled">' + esc(who) + ' 撤回了一条消息</div>';
+          // ★ 如果是对方撤回，显示可点击的提示
+          if (role === 'them') {
+            b.innerHTML = '<div class="wxCBRecalled" style="cursor:pointer;" data-act="viewInnerVoice" data-npcid="' + esc(npcId) + '">' + esc(who) + ' 撤回了一条消息 <span style="font-size:10px;opacity:.6;">点击查看ta的状态</span></div>';
+          } else {
+            b.innerHTML = '<div class="wxCBRecalled">' + esc(who) + ' 撤回了一条消息</div>';
+          }
           msgs.appendChild(b);
           return;
         }
@@ -22189,6 +22205,50 @@ const npc = _wxGetChatTargetMeta(npcId);
           </div>
 
           ${silentBanner}
+
+          <!-- ★ 心声（内心独白） -->
+          ${(function(){
+            var ce = charEx;
+            // 先从心声系统读取
+            var ivData = null;
+            try {
+              var ivKey = 'meow_innervoice_' + npcId;
+              var ivStored = localStorage.getItem(ivKey);
+              if (ivStored) ivData = JSON.parse(ivStored);
+            } catch(e) {}
+            // 兼容 charEx.innerVoice
+            if (!ivData) ivData = ce.innerVoice || {};
+            
+            var ivText = ivData.text || '';
+            var loneliness = attrs.loneliness || 0;
+            
+            // 如果没有心声文本，根据孤独值生成模板
+            if (!ivText) {
+              var templates = {
+                low: ['今天挺充实的', '专注做自己的事', '一个人待着也挺好', '还有很多事要忙'],
+                mid: ['有点想聊天了', '不知道 ta 在干嘛', '脑子有点空', '好像想起了什么...'],
+                high: ['要不要发个消息...', '好想找 ta 说点什么', '忍住忍住...', 'ta 会不会觉得我烦'],
+                critical: ['算了不忍了', '就发一条...', '太想 ta 了', '不管了直接找 ta']
+              };
+              var pool = loneliness < 40 ? templates.low : loneliness < 60 ? templates.mid : loneliness < 85 ? templates.high : templates.critical;
+              ivText = pool[Math.floor(Math.random() * pool.length)];
+            }
+            
+            var ivAge = ivData.updatedAt ? Math.floor((Date.now() - ivData.updatedAt) / 60000) : 0;
+            var ivTimeStr = ivAge < 1 ? '刚刚' : ivAge < 60 ? ivAge + '分钟前' : ivAge < 1440 ? Math.floor(ivAge/60) + '小时前' : '';
+            var ivColor = loneliness > 70 ? '#e04070' : loneliness > 50 ? '#f39c12' : 'var(--ph-text-sub)';
+            var ivSource = ivData.source === 'api' ? '✨' : ivData.source === 'withdraw' ? '💫' : '';
+            
+            return '<div class="wxSDInnerVoice" style="margin:8px 14px 4px;padding:10px 14px;background:linear-gradient(135deg, rgba(255,255,255,.9), rgba(250,248,245,.95));border-radius:12px;border:1px solid rgba(0,0,0,.04);box-shadow:0 1px 3px rgba(0,0,0,.03);">' +
+              '<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">' +
+              '<span style="font-size:13px;">💭</span>' +
+              '<span style="font-size:10.5px;color:var(--ph-text-dim);font-weight:500;letter-spacing:.3px;">内心独白</span>' +
+              (ivSource ? '<span style="font-size:10px;">'+ivSource+'</span>' : '') +
+              (ivTimeStr ? '<span style="font-size:10px;color:var(--ph-text-dim);margin-left:auto;opacity:.6;">'+ivTimeStr+'</span>' : '') +
+              '</div>' +
+              '<div style="font-size:13px;color:'+ivColor+';font-style:italic;line-height:1.5;padding-left:19px;">「' + ivText + '」</div>' +
+              '</div>';
+          })()}
 
           <!-- 当前时段 -->
           ${scheduleNow ? `<div class="wxSDSchedule"><span style="font-size:16px;">${scheduleIcon}</span><span>当前：${esc(scheduleNow)}</span></div>` : ''}
@@ -45002,6 +45062,441 @@ setTimeout(function() {
   };
 
   console.log('[BgPush] 纯内联热备模块已加载 v6 (跟随聊天·直传服务器·自动重试)');
+})();
+
+// ====== 心声表演系统 v1 ======
+(function() {
+  'use strict';
+
+  var INNER_VOICE_KEY_PREFIX = 'meow_innervoice_';
+  var WITHDRAWN_KEY_PREFIX = 'meow_withdrawn_';
+
+  // ═══════════════════════════════════════════
+  //  心声模板（不调 API，纯前端）
+  // ═══════════════════════════════════════════
+  var VOICE_TEMPLATES = {
+    low: [  // 孤独 < 40：满足、忙碌
+      '今天挺充实的',
+      '专注做自己的事',
+      '一个人待着也挺好',
+      '还有很多事要忙',
+      '难得清静'
+    ],
+    mid: [  // 孤独 40-60：开始想念
+      '有点想聊天了',
+      '不知道 ta 在干嘛',
+      '脑子有点空',
+      '好像想起了什么...',
+      '刚才好像看到了什么想分享的'
+    ],
+    high: [  // 孤独 60-85：纠结
+      '要不要发个消息...',
+      '好想找 ta 说点什么',
+      '忍住忍住...',
+      'ta 会不会觉得我烦',
+      '算了再等等',
+      '打了好几个字又删掉了'
+    ],
+    critical: [  // 孤独 > 85：憋不住
+      '算了不忍了',
+      '就发一条...',
+      '太想 ta 了',
+      '不管了直接找 ta',
+      '再不发我要憋坏了'
+    ]
+  };
+
+  // 根据孤独值获取模板
+  function getTemplateVoice(loneliness, npcName, activity) {
+    var pool;
+    if (loneliness < 40) pool = VOICE_TEMPLATES.low;
+    else if (loneliness < 60) pool = VOICE_TEMPLATES.mid;
+    else if (loneliness < 85) pool = VOICE_TEMPLATES.high;
+    else pool = VOICE_TEMPLATES.critical;
+    
+    var text = pool[Math.floor(Math.random() * pool.length)];
+    // 替换变量
+    text = text.replace(/\{activity\}/g, activity || '忙自己的事');
+    return text;
+  }
+
+  // ═══════════════════════════════════════════
+  //  心声存储
+  // ═══════════════════════════════════════════
+  function getInnerVoice(npcId) {
+    try {
+      var data = localStorage.getItem(INNER_VOICE_KEY_PREFIX + npcId);
+      return data ? JSON.parse(data) : null;
+    } catch(e) { return null; }
+  }
+
+  function setInnerVoice(npcId, text, source) {
+    try {
+      var data = {
+        text: text,
+        source: source || 'template',  // 'template' | 'api'
+        updatedAt: Date.now()
+      };
+      localStorage.setItem(INNER_VOICE_KEY_PREFIX + npcId, JSON.stringify(data));
+      return data;
+    } catch(e) { return null; }
+  }
+
+  // ═══════════════════════════════════════════
+  //  撤回消息记录
+  // ═══════════════════════════════════════════
+  function addWithdrawnRecord(npcId, originalText) {
+    try {
+      var key = WITHDRAWN_KEY_PREFIX + npcId;
+      var records = JSON.parse(localStorage.getItem(key) || '[]');
+      records.push({
+        text: originalText,
+        withdrawnAt: Date.now()
+      });
+      // 只保留最近 10 条
+      if (records.length > 10) records = records.slice(-10);
+      localStorage.setItem(key, JSON.stringify(records));
+    } catch(e) {}
+  }
+
+  function getLastWithdrawn(npcId) {
+    try {
+      var key = WITHDRAWN_KEY_PREFIX + npcId;
+      var records = JSON.parse(localStorage.getItem(key) || '[]');
+      return records.length ? records[records.length - 1] : null;
+    } catch(e) { return null; }
+  }
+
+  // ═══════════════════════════════════════════
+  //  AI 生成心声（高孤独值时）
+  // ═══════════════════════════════════════════
+  async function generateInnerVoiceAPI(npcId) {
+    if (typeof PhoneAI === 'undefined' || !PhoneAI || typeof PhoneAI.chat !== 'function') {
+      return null;
+    }
+
+    var npcName = npcId;
+    var profile = '';
+    var loneliness = 50;
+    var activity = '';
+    var bond = '普通';
+
+    try {
+      // 获取角色信息
+      if (typeof _meowCollectNpcs === 'function') {
+        var npcs = _meowCollectNpcs();
+        for (var i = 0; i < npcs.length; i++) {
+          if (npcs[i] && npcs[i].id === npcId) {
+            npcName = npcs[i].name || npcId;
+            profile = npcs[i].profile || '';
+            bond = npcs[i].bond || '普通';
+            break;
+          }
+        }
+      }
+      // 获取状态
+      var stateKey = 'meow_phone_c_standalone_main_charstate_' + npcId;
+      var stateData = localStorage.getItem(stateKey);
+      if (stateData) {
+        var state = JSON.parse(stateData);
+        if (state.attrs) loneliness = state.attrs.loneliness || 50;
+        if (state.schedule) {
+          var h = new Date().getHours();
+          for (var j = 0; j < state.schedule.length; j++) {
+            var sl = state.schedule[j];
+            var inSlot = sl.endHour <= sl.hour 
+              ? (h >= sl.hour || h < sl.endHour)
+              : (h >= sl.hour && h < sl.endHour);
+            if (inSlot) { activity = sl.activity || ''; break; }
+          }
+        }
+      }
+    } catch(e) {}
+
+    var prompt = [
+      '你是「' + npcName + '」。',
+      profile ? profile.slice(0, 300) : '',
+      '',
+      '现在是' + new Date().getHours() + '点。',
+      activity ? '你正在：' + activity : '',
+      '你的孤独感：' + loneliness + '/100（' + (loneliness > 80 ? '很想找人说话' : loneliness > 60 ? '有点想聊天' : '还好') + '）',
+      '你和对方的关系：' + bond,
+      '',
+      '请写一句简短的内心独白（10-20字），表达你此刻的心理状态。',
+      '- 要像真实的内心 OS，不是发给对方的消息',
+      '- 要符合角色性格',
+      '- 可以纠结、犹豫、嘴硬、期待',
+      '- 不要太文艺，要像真人的想法',
+      '',
+      '只输出独白内容，不要引号，不要解释。'
+    ].filter(Boolean).join('\n');
+
+    try {
+      var result = await PhoneAI.chat({
+        system: '你是一个角色扮演助手，负责生成角色的内心独白。',
+        messages: [{ role: 'user', content: prompt }],
+        temperature: 0.9,
+        maxTokens: 50,
+        timeout: 20,
+        channel: 'innervoice'
+      });
+
+      if (result && result.ok && result.data) {
+        var text = String(result.data).trim()
+          .replace(/^["'「『【\s]+|["'」』】\s]+$/g, '')
+          .slice(0, 50);
+        if (text.length >= 3) {
+          return text;
+        }
+      }
+    } catch(e) {
+      console.warn('[InnerVoice] API error:', e);
+    }
+    return null;
+  }
+
+  // ═══════════════════════════════════════════
+  //  更新心声（综合判断）
+  // ═══════════════════════════════════════════
+  async function updateInnerVoice(npcId, forceAPI) {
+    var loneliness = 50;
+    var activity = '';
+    var npcName = npcId;
+    var enableInnerVoice = true;
+
+    try {
+      // 检查是否启用心声
+      var charExKey = 'meow_phone_c_standalone_main_charex_' + npcId;
+      var charEx = JSON.parse(localStorage.getItem(charExKey) || '{}');
+      if (charEx.enableInnerVoice === false) {
+        enableInnerVoice = false;
+      }
+
+      // 获取状态
+      var stateKey = 'meow_phone_c_standalone_main_charstate_' + npcId;
+      var stateData = localStorage.getItem(stateKey);
+      if (stateData) {
+        var state = JSON.parse(stateData);
+        if (state.attrs) loneliness = state.attrs.loneliness || 50;
+        if (state.schedule) {
+          var h = new Date().getHours();
+          for (var j = 0; j < state.schedule.length; j++) {
+            var sl = state.schedule[j];
+            var inSlot = sl.endHour <= sl.hour 
+              ? (h >= sl.hour || h < sl.endHour)
+              : (h >= sl.hour && h < sl.endHour);
+            if (inSlot) { activity = sl.activity || ''; break; }
+          }
+        }
+      }
+
+      // 获取角色名
+      if (typeof _meowCollectNpcs === 'function') {
+        var npcs = _meowCollectNpcs();
+        for (var i = 0; i < npcs.length; i++) {
+          if (npcs[i] && npcs[i].id === npcId) {
+            npcName = npcs[i].name || npcId;
+            break;
+          }
+        }
+      }
+    } catch(e) {}
+
+    if (!enableInnerVoice) {
+      return null;
+    }
+
+    // 决定用模板还是 API
+    var useAPI = forceAPI || (loneliness >= 70);
+    var text;
+
+    if (useAPI) {
+      text = await generateInnerVoiceAPI(npcId);
+    }
+
+    // 如果 API 失败或不使用 API，用模板
+    if (!text) {
+      text = getTemplateVoice(loneliness, npcName, activity);
+    }
+
+    return setInnerVoice(npcId, text, useAPI ? 'api' : 'template');
+  }
+
+  // ═══════════════════════════════════════════
+  //  前台主动消息触发条件检查
+  // ═══════════════════════════════════════════
+  function canTriggerProactive(npcId) {
+    try {
+      // 1. 检查是否启用主动找你
+      var charExKey = 'meow_phone_c_standalone_main_charex_' + npcId;
+      var charEx = JSON.parse(localStorage.getItem(charExKey) || '{}');
+      if (charEx.enableLifePush === false) return { ok: false, reason: '主动找你已关闭' };
+
+      // 2. 检查是否正在和该角色聊天
+      if (typeof PhoneAI !== 'undefined' && PhoneAI && PhoneAI._state) {
+        var state = PhoneAI._state;
+        if (state.app === 'chatDetail' && state.chatTarget === npcId) {
+          return { ok: false, reason: '正在和该角色聊天' };
+        }
+      }
+
+      // 3. 检查距离上次聊天是否超过 15 分钟
+      var lastChatKey = 'meow_last_chat_' + npcId;
+      var lastChat = parseInt(localStorage.getItem(lastChatKey) || '0');
+      if (Date.now() - lastChat < 15 * 60 * 1000) {
+        return { ok: false, reason: '距离上次聊天不足15分钟' };
+      }
+
+      // 4. 检查今日是否已触发过
+      var todayKey = 'meow_proactive_today_' + npcId;
+      var todayData = localStorage.getItem(todayKey);
+      var today = new Date().toDateString();
+      if (todayData) {
+        var parsed = JSON.parse(todayData);
+        if (parsed.date === today) {
+          if (parsed.msgCount >= 1) {
+            return { ok: false, reason: '今日已主动发过消息' };
+          }
+          if (parsed.withdrawCount >= 2) {
+            return { ok: false, reason: '今日已撤回2次' };
+          }
+        }
+      }
+
+      // 5. 检查孤独值
+      var stateKey = 'meow_phone_c_standalone_main_charstate_' + npcId;
+      var stateData = localStorage.getItem(stateKey);
+      var loneliness = 50;
+      if (stateData) {
+        var state = JSON.parse(stateData);
+        if (state.attrs) loneliness = state.attrs.loneliness || 50;
+      }
+      if (loneliness < 60) {
+        return { ok: false, reason: '孤独值不足 (' + loneliness + ')' };
+      }
+
+      return { ok: true, loneliness: loneliness };
+    } catch(e) {
+      return { ok: false, reason: '检查出错: ' + e.message };
+    }
+  }
+
+  // 记录今日触发次数
+  function recordProactiveToday(npcId, type) {
+    try {
+      var todayKey = 'meow_proactive_today_' + npcId;
+      var today = new Date().toDateString();
+      var data = { date: today, msgCount: 0, withdrawCount: 0, voiceCount: 0 };
+      
+      var existing = localStorage.getItem(todayKey);
+      if (existing) {
+        var parsed = JSON.parse(existing);
+        if (parsed.date === today) {
+          data = parsed;
+        }
+      }
+
+      if (type === 'msg') data.msgCount++;
+      else if (type === 'withdraw') data.withdrawCount++;
+      else if (type === 'voice') data.voiceCount++;
+
+      localStorage.setItem(todayKey, JSON.stringify(data));
+    } catch(e) {}
+  }
+
+  // ═══════════════════════════════════════════
+  //  撤回表演
+  // ═══════════════════════════════════════════
+  async function performWithdraw(npcId) {
+    var check = canTriggerProactive(npcId);
+    if (!check.ok) {
+      console.log('[InnerVoice] 撤回条件不满足:', check.reason);
+      return false;
+    }
+
+    // 生成一条消息
+    var msgText = null;
+    try {
+      if (typeof PhoneAI !== 'undefined' && PhoneAI && typeof PhoneAI.chat === 'function') {
+        // 生成一条简短消息
+        var result = await PhoneAI.chat({
+          system: '生成一条很短的聊天消息（5-15字），像是想说又不好意思说出口的，用于撤回表演。',
+          messages: [{ role: 'user', content: '直接输出消息内容' }],
+          temperature: 0.95,
+          maxTokens: 30,
+          timeout: 15,
+          channel: 'withdraw'
+        });
+        if (result && result.ok && result.data) {
+          msgText = String(result.data).trim().replace(/^["'「『【\s]+|["'」』】\s]+$/g, '').slice(0, 30);
+        }
+      }
+    } catch(e) {}
+
+    if (!msgText) {
+      var fallbacks = ['那个...', '在吗', '我...', '想问你', '刚才...'];
+      msgText = fallbacks[Math.floor(Math.random() * fallbacks.length)];
+    }
+
+    // 记录撤回
+    addWithdrawnRecord(npcId, msgText);
+    recordProactiveToday(npcId, 'withdraw');
+
+    // ★ 在聊天记录中插入撤回消息
+    var ts = Date.now();
+    try {
+      if (typeof window._meowPushLog === 'function') {
+        window._meowPushLog(npcId, 'them', '', { recalled: true, t: ts, originalText: msgText });
+        console.log('[InnerVoice] 已插入撤回消息记录');
+      }
+    } catch(e) {
+      console.warn('[InnerVoice] 插入撤回消息失败:', e);
+    }
+
+    // ★ 更新聊天列表（显示"对方撤回了一条消息"）
+    try {
+      if (typeof window._meowBumpThread === 'function') {
+        window._meowBumpThread(npcId, { 
+          lastMsg: '对方撤回了一条消息', 
+          lastTime: ts, 
+          unread: 1 
+        });
+      }
+    } catch(e) {}
+
+    // 更新心声为撤回后的想法
+    var withdrawVoices = [
+      '算了还是不说了',
+      '删掉了...',
+      '措辞好难',
+      '打了又删了',
+      '还是不要打扰 ta 了',
+      '想说又不知道怎么开口'
+    ];
+    var voiceText = withdrawVoices[Math.floor(Math.random() * withdrawVoices.length)];
+    setInnerVoice(npcId, voiceText, 'withdraw');
+
+    console.log('[InnerVoice] 撤回表演完成:', msgText, '→', voiceText);
+    return { withdrawn: msgText, voice: voiceText, ts: ts };
+  }
+
+  // ═══════════════════════════════════════════
+  //  暴露接口
+  // ═══════════════════════════════════════════
+  window._meowInnerVoice = {
+    get: getInnerVoice,
+    set: setInnerVoice,
+    update: updateInnerVoice,
+    getTemplate: getTemplateVoice,
+    generateAPI: generateInnerVoiceAPI,
+    canTrigger: canTriggerProactive,
+    recordToday: recordProactiveToday,
+    performWithdraw: performWithdraw,
+    addWithdrawn: addWithdrawnRecord,
+    getLastWithdrawn: getLastWithdrawn
+  };
+
+  console.log('[InnerVoice] 心声表演系统已加载 v1');
 })();
 
 
