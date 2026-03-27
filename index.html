@@ -33800,6 +33800,65 @@ function _getTimelinePendingRange(npcId, mode, maxChunk){
   return { fromIdx:lastEnd, toIdx:endIdx, logLength:log.length, hasMore: endIdx < log.length - 1 };
 }
 
+// ★ 按时间间隔获取待处理范围（时间模式专用）
+function _getTimelinePendingRangeByTime(npcId, mode, gapMinutes, maxChunk){
+  var targetMode = _normChatMode(mode || _getChatMode(npcId));
+  var log = _getLogForModeBranch(npcId, targetMode);
+  if (log.length === 0) return null;
+  var tl = _loadTimeline(npcId);
+  var bucket = _getTimelineModeState(tl, targetMode, true);
+
+  var lastEnd = 0;
+  if(bucket.entries.length > 0){
+    var lastEntry = bucket.entries[bucket.entries.length - 1];
+    // 使用和 _getTimelinePendingRange 相同的定位逻辑
+    if(lastEntry.tailHashes && lastEntry.tailHashes.length > 0){
+      var matchIdx = _findTailHashSeqEnd(log, lastEntry.tailHashes);
+      if(matchIdx >= 0){
+        lastEnd = matchIdx + 1;
+      } else if (lastEntry.tailAnchor && lastEntry.tailAnchor.t){
+        var aT = Number(lastEntry.tailAnchor.t || 0);
+        var aR = String(lastEntry.tailAnchor.role || '');
+        var idx2 = -1;
+        for (var j = log.length - 1; j >= 0; j--){
+          if (Number(log[j] && log[j].t || 0) === aT && String(log[j] && log[j].role || '') === aR){ idx2 = j; break; }
+        }
+        lastEnd = idx2 >= 0 ? (idx2 + 1) : Math.min(lastEntry.range[1] + 1, log.length);
+      } else {
+        lastEnd = Math.min(lastEntry.range[1] + 1, log.length);
+      }
+    } else {
+      lastEnd = Math.min(lastEntry.range[1] + 1, log.length);
+    }
+  }
+
+  if(lastEnd >= log.length) return null;
+
+  // ★ 时间模式：按时间间隔分块
+  var gapMs = (gapMinutes || 60) * 60 * 1000;
+  var startIdx = lastEnd;
+  var endIdx = startIdx;
+  var startTime = log[startIdx] && log[startIdx].t ? Number(log[startIdx].t) : 0;
+  var lastTime = startTime;
+
+  for (var i = startIdx; i < log.length; i++){
+    var msgTime = log[i] && log[i].t ? Number(log[i].t) : lastTime;
+    // 如果时间间隔超过 gapMinutes，就在这里断开
+    if (i > startIdx && (msgTime - lastTime) > gapMs){
+      endIdx = i - 1;
+      break;
+    }
+    endIdx = i;
+    lastTime = msgTime;
+    // 同时也要遵守 maxChunk 限制
+    if (maxChunk && maxChunk > 0 && (endIdx - startIdx + 1) >= maxChunk){
+      break;
+    }
+  }
+
+  return { fromIdx:startIdx, toIdx:endIdx, logLength:log.length, hasMore: endIdx < log.length - 1 };
+}
+
 // ========== Phase 5B：生成时间线总结条目 ==========
 // ---- 时间线专用 API 队列（避免被聊天挤掉）----
 var _tlApiQueue = [];
