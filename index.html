@@ -8285,7 +8285,7 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
           if (act === 'wxCSToggleLifePush'){
             const nid = t.getAttribute('data-npcid') || state.chatTarget;
             const ce = _loadCharExtra(nid);
-            ce.enableLifePush = !(ce.enableLifePush !== false); // 默认 true
+            ce.enableLifePush = !ce.enableLifePush; // 默认 false，点击切换
             _saveCharExtra(nid, ce);
             t.classList.toggle('on', ce.enableLifePush); t.classList.toggle('off', !ce.enableLifePush);
             try{ toast(ce.enableLifePush ? '主动消息弹窗已开启' : '主动消息弹窗已关闭'); }catch(e){}
@@ -9967,6 +9967,7 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
       window._meowLoadCharState = function(npcId){ try{ return _loadCharState(npcId); }catch(e){ return null; } };
       window._meowLoadCharExtra = function(npcId){ try{ return _loadCharExtra(npcId); }catch(e){ return {}; } };
       window._meowCatchUpStats = function(npcId){ try{ return catchUpStats(npcId); }catch(e){ return null; } };
+      window._meowGetChatMode = function(npcId){ try{ return _getChatMode(npcId); }catch(e){ return 'online'; } };
 
       // ★ 来电弹窗共享引用（已移至外层，此行保留作兼容占位）
       var _triggerIncomingCall = null;
@@ -17844,7 +17845,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           offlineBg:'',
           autoSummary:false,
           autoSumEvery:20,
-          enableLifePush:true,
+          enableLifePush:false,
           onlineSummaryPrompt:'',
           offlineSummaryTemplate:'',
           summaryCustomPrompt:'',
@@ -18663,7 +18664,7 @@ const npc = _wxGetChatTargetMeta(npcId);
                   <div class="wxCSIco">${_phFlatIcon('💭')}</div>
                   <div class="wxCSName">主动找你</div>
                   <div style="margin-left:auto;display:flex;align-items:center;gap:6px;">
-                    <button class="wxReminderToggle ${charEx.enableLifePush!==false?'on':'off'}" data-act="wxCSToggleLifePush" data-npcid="${esc(contactId)}"></button>
+                    <button class="wxReminderToggle ${charEx.enableLifePush===true?'on':'off'}" data-act="wxCSToggleLifePush" data-npcid="${esc(contactId)}"></button>
                     <span data-el="proactiveExpandArrow" style="font-size:14px;color:rgba(20,24,28,.3);transition:transform .2s;">▼</span>
                   </div>
                 </div>
@@ -18997,7 +18998,7 @@ const npc = _wxGetChatTargetMeta(npcId);
         // 读取配置
         var bondLabel = charEx.bondLabel || charEx.bond || '朋友';
         var pushFreq = charEx.pushFrequency || 'auto';
-        var enablePush = charEx.enableLifePush !== false;
+        var enablePush = charEx.enableLifePush === true;
         var allowChase = !!charEx.allowChaseOnRead;
         var enableInnerVoice = charEx.enableInnerVoice !== false; // 心声表演默认开启
 
@@ -19160,7 +19161,7 @@ const npc = _wxGetChatTargetMeta(npcId);
 
           <div style="margin:12px 14px 0;font-size:10.5px;color:rgba(20,24,28,.38);letter-spacing:.35px;padding:0 2px;">当前状态</div>
           <div style="margin:6px 14px 0;border-radius:14px;overflow:hidden;background:var(--ph-glass,rgba(255,255,255,.78));border:1px solid var(--ph-glass-border,rgba(0,0,0,.07));backdrop-filter:blur(12px);">
-            ${infoRow('主动消息开关', ce.enableLifePush === false ? '关闭' : '开启')}
+            ${infoRow('主动消息开关', ce.enableLifePush === true ? '开启' : '关闭')}
             ${infoRow('页面可见', (typeof document !== 'undefined' && document.visibilityState === 'visible') ? '是' : '否')}
             ${infoRow('每日时间窗', dailyReady ? '允许（10:00-22:00）' : '当前不在窗口')}
             ${infoRow('随机时间窗', randomReady ? '允许（08:00-23:00）' : '当前不在窗口')}
@@ -23610,7 +23611,7 @@ const npc = _wxGetChatTargetMeta(npcId);
         async function catchUpProactiveMsgs(npcId, elapsedMin){
           try{
             var ce = _loadCharExtra(npcId);
-            if (ce.enableLifePush === false) return;
+            if (ce.enableLifePush !== true) return;
             if (elapsedMin < 60) return; // 离线不够久不补
 
             var s = _loadCharState(npcId);
@@ -23713,12 +23714,11 @@ const npc = _wxGetChatTargetMeta(npcId);
         // ★ 心声更新（tick 时调用）
         function _updateInnerVoiceOnTick(npcId, s){
           try{
-            // 检查是否启用心声（使用 _loadCharExtra 函数）
+            // 检查是否启用
             var charEx = {};
             try {
               charEx = _loadCharExtra(npcId);
             } catch(e) {
-              // fallback: 遍历 localStorage
               for (var i = 0; i < localStorage.length; i++) {
                 var key = localStorage.key(i);
                 if (key && key.indexOf('charex_' + npcId) !== -1) {
@@ -23727,33 +23727,34 @@ const npc = _wxGetChatTargetMeta(npcId);
               }
             }
             if (charEx.enableInnerVoice === false) return;
-            if (charEx.enableLifePush === false) return;
+            if (charEx.enableLifePush !== true) return;
 
-            var loneliness = (s.attrs && s.attrs.loneliness) || 50;
+            // ★ 关系检查：只有暧昧才更新心声
+            var _tickBond = charEx.bondLabel || charEx.bond || (s && s.bond) || '';
+            if (_tickBond !== '暧昧') return;
 
-            // 检查上次更新时间（避免频繁更新）
+            var loneliness = (s.attrs && s.attrs.loneliness != null) ? s.attrs.loneliness : 10;
+
+            // 检查上次更新时间
             var ivKey = 'meow_innervoice_' + npcId;
             var ivData = null;
             try { ivData = JSON.parse(localStorage.getItem(ivKey) || 'null'); } catch(e){}
             var lastUpdate = ivData ? (ivData.updatedAt || 0) : 0;
-            var minInterval = 30 * 60 * 1000; // ★ 改为 30 分钟更新一次
+            var minInterval = 30 * 60 * 1000; // 30 分钟
             if (Date.now() - lastUpdate < minInterval) return;
 
-            // 根据孤独值决定更新概率（★ 降低概率）
+            // 根据孤独值决定更新概率
             var updateChance = 0;
-            if (loneliness < 40) updateChance = 0.05;      // 低孤独：5% 概率更新
-            else if (loneliness < 60) updateChance = 0.1;  // 中孤独：10%
-            else if (loneliness < 80) updateChance = 0.2;  // 高孤独：20%
-            else updateChance = 0.4;                        // 极高孤独：40%
-
+            if (loneliness < 40) updateChance = 0.05;
+            else if (loneliness < 60) updateChance = 0.1;
+            else if (loneliness < 80) updateChance = 0.2;
+            else updateChance = 0.4;
             if (Math.random() > updateChance) return;
 
-            // 更新心声
+            // ★ tick 只做模板心声更新，API 心声由面板定时更新系统负责
             if (typeof window._meowInnerVoice !== 'undefined' && window._meowInnerVoice){
-              // ★ 改为只在孤独 > 85 时才有概率用 API，其他时候用模板
-              var useAPI = loneliness >= 85 && Math.random() < 0.3;
-              window._meowInnerVoice.update(npcId, useAPI).then(function(result){
-                if (result) console.log('[LifeEngine] 心声已更新:', npcId, result.text);
+              window._meowInnerVoice.update(npcId, false).then(function(result){
+                if (result) console.log('[LifeEngine] 心声模板已更新:', npcId, result.text);
               }).catch(function(){});
             }
           }catch(e){ console.warn('[LifeEngine] _updateInnerVoiceOnTick error:', e); }
@@ -31507,8 +31508,32 @@ function bindPageScroll(){
                 // 检查开关
                 try{
                   var ce2 = _loadCharExtra(npcId);
-                  if (ce2.enableLifePush === false) return;
+                  if (ce2.enableLifePush !== true) return;
+                  // ★ 关系检查：只有暧昧才触发
+                  var _fgBond = ce2.bondLabel || ce2.bond || '';
+                  if (!_fgBond) {
+                    var _fgState = _loadCharState(npcId);
+                    if (_fgState) _fgBond = _fgState.bond || '';
+                  }
+                  if (_fgBond !== '暧昧') return;
                 }catch(e){ return; }
+
+                // ★ 用户必须不在该角色聊天窗口（前台补发条件）
+                if (state.app === 'chatDetail' && state.chatTarget === npcId) return;
+
+                // ★ 必须是线上模式
+                try {
+                  if (_getChatMode(npcId) === 'offline') return;
+                } catch(e) {}
+
+                // ★ API 预算检查
+                try {
+                  if (typeof window._meowInnerVoice !== 'undefined' && window._meowInnerVoice) {
+                    var _fgQuota = window._meowInnerVoice.getQuota(npcId);
+                    if (_fgQuota.apiTotal >= 5) return; // 总预算用完
+                    if (_fgQuota.fallbackCount >= 1) return; // 前台补发已用完
+                  }
+                } catch(e) {}
 
                 // 冷却：同一角色 12 分钟内不重复推
                 var lastPush = _lastFgPushCheck[npcId] || 0;
@@ -31537,7 +31562,7 @@ function bindPageScroll(){
                 var dep3 = (p3.dependency != null) ? p3.dependency : 50;
                 var socialDrive3 = (p3.socialDrive != null) ? p3.socialDrive : 50;
                 var lonelyThresh3 = 100 - dep3 * 0.35 - socialDrive3 * 0.2;
-                var lonely3 = s3.attrs.loneliness || 0;
+                var lonely3 = s3.attrs.loneliness != null ? s3.attrs.loneliness : 0;
                 var energy3 = s3.attrs.energy || 0;
                 // ★ 删除"心情好就触发"的逻辑，只看孤独值
                 var lonelyOk = lonely3 > lonelyThresh3;
@@ -31585,12 +31610,12 @@ function bindPageScroll(){
 
                 // ★ 根据表演模式执行不同行为
                 if (performMode === 'voice') {
-                  // 纯心声模式：只更新心声，不发消息
+                  // 纯心声模式：只用模板更新，不调 API（API 由面板定时更新系统负责）
                   (async function(nId){
                     try {
                       if (typeof window._meowInnerVoice !== 'undefined' && window._meowInnerVoice) {
-                        await window._meowInnerVoice.update(nId, true); // 调 API 生成
-                        console.log('[LifePush] 纯心声模式完成:', nId);
+                        await window._meowInnerVoice.update(nId, false); // false = 模板
+                        console.log('[LifePush] 纯心声模板更新:', nId);
                       }
                     } catch(e) {}
                   })(npcId);
@@ -31648,6 +31673,13 @@ function bindPageScroll(){
                     if (!inserted5) return;
                     var ts5 = inserted5.ts;
                     fgText = inserted5.text;
+
+                    // ★ 记录前台补发计数
+                    try {
+                      if (typeof window._meowInnerVoice !== 'undefined' && window._meowInnerVoice) {
+                        window._meowInnerVoice.recordToday(nId, 'fallback');
+                      }
+                    } catch(e) {}
 
                     // ★ 来电概率：社交主动性高 + 当前不在深夜 → 有概率触发来电而非文字
                     var _p5 = sSnap.personality || {};
@@ -32128,9 +32160,18 @@ async function _ensureDailyOnlineProactive(npcId, opts){
   var source = String(opts.source || 'unknown');
   try{
     var ce = _loadCharExtra(npcId);
-    if (ce.enableLifePush === false){
+    if (ce.enableLifePush !== true){
       _setProactiveAttemptState(npcId, 'daily', { status:'skip', reason:'开关关闭', failReason:'主动消息开关关闭' });
       _pushProactiveDebug(npcId, 'daily', 'skip', '开关关闭 · ' + source);
+      return null;
+    }
+    // ★ 关系检查：只有暧昧才触发
+    var _dailyBond = ce.bondLabel || ce.bond || '';
+    if (!_dailyBond) {
+      try { var _dbState = _loadCharState(npcId); if (_dbState) _dailyBond = _dbState.bond || ''; } catch(e) {}
+    }
+    if (_dailyBond !== '暧昧') {
+      _pushProactiveDebug(npcId, 'daily', 'skip', '关系非暧昧(' + _dailyBond + ') · ' + source);
       return null;
     }
     // ★ 检查孤独值（和前台推送一样的逻辑）
@@ -40309,7 +40350,7 @@ function _meowCollectNpcs() {
       return {
         id: npcId,
         name: String(c.name || c.id),
-        enableLifePush: extra.enableLifePush !== false,
+        enableLifePush: extra.enableLifePush === true,
 
         profile: profile,
         bond: String((state && state.bond) || extra.bond || '普通'),
@@ -40354,7 +40395,7 @@ var npcs = _meowCollectNpcs().map(function(n){
   return {
     id: String(n.id || ''),
     name: String(n.name || n.id || ''),
-    enableLifePush: n.enableLifePush !== false,
+    enableLifePush: n.enableLifePush === true,
 
     profile: String(n.profile || ''),
     bond: String(n.bond || '普通'),
@@ -44551,7 +44592,9 @@ function _meowUrlBase64ToUint8Array(base64String) {
 
     var npc = getNpcContext(npcId);
     if (!npc) return;
-    if (npc.enableLifePush === false) return;
+    if (npc.enableLifePush !== true) return;
+    // ★ 关系检查
+    if (npc.bond !== '暧昧') return;
 
     // reserved 过滤
     var reserved = {player:1,system:1,user:1,me:1,self:1};
@@ -45195,7 +45238,8 @@ function onUserLeave() {
 
     for (var i = 0; i < npcs.length; i++) {
       var npc = npcs[i];
-      if (!npc || !npc.id || npc.enableLifePush === false) continue;
+      if (!npc || !npc.id || npc.enableLifePush !== true) continue;
+      if (npc.bond !== '暧昧') continue;
 
       var syncState = _bgPushGetSyncState(npc.id);
       if (syncState && syncState.status === 'fail') {
@@ -45320,7 +45364,7 @@ setTimeout(function() {
     if (!npcId) {
       var npcs = typeof _meowCollectNpcs === 'function' ? _meowCollectNpcs() : [];
       for (var i = 0; i < npcs.length; i++) {
-        if (npcs[i] && npcs[i].enableLifePush !== false) { npcId = npcs[i].id; break; }
+        if (npcs[i] && npcs[i].enableLifePush === true && npcs[i].bond === '暧昧') { npcId = npcs[i].id; break; }
       }
     }
     if (!npcId) { console.log('没有可用角色'); return; }
@@ -45447,7 +45491,7 @@ setTimeout(function() {
 
     var npcName = npcId;
     var profile = '';
-    var loneliness = 50;
+    var loneliness = 10;
     var activity = '';
     var bond = '普通';
 
@@ -45464,12 +45508,14 @@ setTimeout(function() {
           }
         }
       }
-      // 获取状态（★ 直接读取存储值，不推算）
+      // 获取状态（★ 多种方式读取，避免 chatUID 不一致）
+      var _gotStateG = false;
       try {
         if (typeof window._meowLoadCharState === 'function') {
           var state = window._meowLoadCharState(npcId);
           if (state && state.attrs) {
-            loneliness = state.attrs.loneliness || 50;
+            loneliness = state.attrs.loneliness != null ? state.attrs.loneliness : 10;
+            _gotStateG = true;
             if (state.schedule) {
               var h = new Date().getHours();
               for (var j = 0; j < state.schedule.length; j++) {
@@ -45483,6 +45529,21 @@ setTimeout(function() {
           }
         }
       } catch(e) {}
+      if (!_gotStateG) {
+        try {
+          var _sfxG = '_charstate_' + String(npcId);
+          for (var _kg = 0; _kg < localStorage.length; _kg++) {
+            var _kng = localStorage.key(_kg);
+            if (_kng && _kng.indexOf(_sfxG) !== -1) {
+              var _pdg = JSON.parse(localStorage.getItem(_kng));
+              if (_pdg && _pdg.attrs) {
+                loneliness = _pdg.attrs.loneliness != null ? _pdg.attrs.loneliness : 10;
+                break;
+              }
+            }
+          }
+        } catch(e) {}
+      }
     } catch(e) {}
 
     var prompt = [
@@ -45531,7 +45592,7 @@ setTimeout(function() {
   //  更新心声（综合判断）
   // ═══════════════════════════════════════════
   async function updateInnerVoice(npcId, forceAPI) {
-    var loneliness = 50;
+    var loneliness = 10;
     var activity = '';
     var npcName = npcId;
     var enableInnerVoice = true;
@@ -45548,12 +45609,14 @@ setTimeout(function() {
         enableInnerVoice = false;
       }
 
-      // ★ 直接读取存储值，不推算（避免被作息规则改变）
+      // ★ 多种方式读取状态，避免 chatUID 不一致
+      var _gotState = false;
       try {
         if (typeof window._meowLoadCharState === 'function') {
           var state = window._meowLoadCharState(npcId);
           if (state && state.attrs) {
-            loneliness = state.attrs.loneliness || 50;
+            loneliness = state.attrs.loneliness != null ? state.attrs.loneliness : 10;
+            _gotState = true;
             if (state.schedule) {
               var h = new Date().getHours();
               for (var j = 0; j < state.schedule.length; j++) {
@@ -45567,6 +45630,22 @@ setTimeout(function() {
           }
         }
       } catch(e) {}
+      // fallback：直接搜 localStorage
+      if (!_gotState) {
+        try {
+          var _sfxU = '_charstate_' + String(npcId);
+          for (var _ki = 0; _ki < localStorage.length; _ki++) {
+            var _kni = localStorage.key(_ki);
+            if (_kni && _kni.indexOf(_sfxU) !== -1) {
+              var _pdi = JSON.parse(localStorage.getItem(_kni));
+              if (_pdi && _pdi.attrs) {
+                loneliness = _pdi.attrs.loneliness != null ? _pdi.attrs.loneliness : 10;
+                break;
+              }
+            }
+          }
+        } catch(e) {}
+      }
 
       // 获取角色名
       if (typeof _meowCollectNpcs === 'function') {
@@ -45585,11 +45664,13 @@ setTimeout(function() {
     }
 
     // 决定用模板还是 API
-    var useAPI = forceAPI || (loneliness >= 70);
+    // ★ API 心声现在由面板定时更新系统统一管理，这里只在明确 forceAPI 时才用
+    var useAPI = forceAPI === true;
     var text;
 
-    if (useAPI) {
+    if (useAPI && canUseAPI(npcId)) {
       text = await generateInnerVoiceAPI(npcId);
+      if (text) recordProactiveToday(npcId, 'api'); // 计入 API 预算
     }
 
     // 如果 API 失败或不使用 API，用模板
@@ -45612,7 +45693,19 @@ setTimeout(function() {
           charEx = window._meowLoadCharExtra(npcId) || {};
         }
       } catch(e) {}
-      if (charEx.enableLifePush === false) return { ok: false, reason: '主动找你已关闭' };
+      if (charEx.enableLifePush !== true) return { ok: false, reason: '主动找你已关闭' };
+
+      // 1.5. ★ 检查关系阶段（只有暧昧才启用）
+      var _bond = charEx.bondLabel || charEx.bond || '';
+      if (!_bond) {
+        try {
+          if (typeof window._meowLoadCharState === 'function') {
+            var _bState = window._meowLoadCharState(npcId);
+            if (_bState) _bond = _bState.bond || '';
+          }
+        } catch(e) {}
+      }
+      if (_bond !== '暧昧') return { ok: false, reason: '关系非暧昧 (' + _bond + ')' };
 
       // 2. 检查是否正在和该角色聊天
       if (typeof PhoneAI !== 'undefined' && PhoneAI && PhoneAI._state) {
@@ -45639,29 +45732,44 @@ setTimeout(function() {
           if (parsed.msgCount >= 1) {
             return { ok: false, reason: '今日已主动发过消息' };
           }
-          if (parsed.withdrawCount >= 2) {
-            return { ok: false, reason: '今日已撤回2次' };
+          if (parsed.withdrawCount >= 1) {
+            return { ok: false, reason: '今日已撤回1次' };
           }
         }
       }
 
       // 5. 检查孤独值
-      var loneliness = 50;
+      var loneliness = -1;
+      var lonelinessSource = 'default';
       try {
-        // ★ 直接读取存储值，不用 catchUpStats 推算（避免被作息规则改变）
         if (typeof window._meowLoadCharState === 'function') {
           var stateData = window._meowLoadCharState(npcId);
-          if (stateData && stateData.attrs) {
+          if (stateData && stateData.attrs && stateData.attrs.loneliness != null) {
             loneliness = stateData.attrs.loneliness;
-            if (loneliness == null) loneliness = 50;
+            lonelinessSource = '_meowLoadCharState';
           }
         }
-        
-        console.log('[InnerVoice] 读取孤独值:', loneliness, 'npcId:', npcId);
-      } catch(e) {
-        console.warn('[InnerVoice] 读取孤独值失败:', e);
+      } catch(e) {}
+      // fallback：直接遍历 localStorage
+      if (loneliness < 0) {
+        try {
+          var _sfx = '_charstate_' + String(npcId);
+          for (var _lsi = 0; _lsi < localStorage.length; _lsi++) {
+            var _lsKey = localStorage.key(_lsi);
+            if (_lsKey && _lsKey.indexOf(_sfx) !== -1) {
+              var _raw = JSON.parse(localStorage.getItem(_lsKey));
+              if (_raw && _raw.attrs && _raw.attrs.loneliness != null) {
+                loneliness = _raw.attrs.loneliness;
+                lonelinessSource = 'localStorage(' + _lsKey + ')';
+                break;
+              }
+            }
+          }
+        } catch(e) {}
       }
-      if (loneliness < 60) {
+      if (loneliness < 0) { loneliness = 10; lonelinessSource = 'hardDefault'; }
+      console.log('[InnerVoice] 孤独值:', loneliness, '来源:', lonelinessSource, 'npcId:', npcId);
+      if (loneliness < 70) {
         return { ok: false, reason: '孤独值不足 (' + Math.round(loneliness) + ')' };
       }
 
@@ -45671,27 +45779,48 @@ setTimeout(function() {
     }
   }
 
-  // 记录今日触发次数
-  function recordProactiveToday(npcId, type) {
+  // 记录今日触发次数 + API 预算
+  var API_DAILY_BUDGET = 5; // 每角色每天 API 总预算
+  var API_PANEL_LIMIT = 3;  // 面板更新最多 3 次
+  var API_WITHDRAW_LIMIT = 1; // 撤回最多 1 次
+  var API_FALLBACK_LIMIT = 1; // 前台补发最多 1 次
+
+  function _loadTodayQuota(npcId) {
     try {
       var todayKey = 'meow_proactive_today_' + npcId;
       var today = new Date().toDateString();
-      var data = { date: today, msgCount: 0, withdrawCount: 0, voiceCount: 0 };
-      
       var existing = localStorage.getItem(todayKey);
       if (existing) {
         var parsed = JSON.parse(existing);
-        if (parsed.date === today) {
-          data = parsed;
-        }
+        if (parsed.date === today) return parsed;
       }
+      return { date: today, msgCount: 0, withdrawCount: 0, voiceCount: 0, panelCount: 0, fallbackCount: 0, apiTotal: 0 };
+    } catch(e) {
+      return { date: new Date().toDateString(), msgCount: 0, withdrawCount: 0, voiceCount: 0, panelCount: 0, fallbackCount: 0, apiTotal: 0 };
+    }
+  }
 
-      if (type === 'msg') data.msgCount++;
-      else if (type === 'withdraw') data.withdrawCount++;
-      else if (type === 'voice') data.voiceCount++;
-
-      localStorage.setItem(todayKey, JSON.stringify(data));
+  function _saveTodayQuota(npcId, data) {
+    try {
+      localStorage.setItem('meow_proactive_today_' + npcId, JSON.stringify(data));
     } catch(e) {}
+  }
+
+  function canUseAPI(npcId) {
+    var q = _loadTodayQuota(npcId);
+    return q.apiTotal < API_DAILY_BUDGET;
+  }
+
+  function recordProactiveToday(npcId, type) {
+    var data = _loadTodayQuota(npcId);
+    if (type === 'msg') data.msgCount++;
+    else if (type === 'withdraw') { data.withdrawCount++; data.apiTotal++; }
+    else if (type === 'voice') data.voiceCount++;
+    else if (type === 'panel') { data.panelCount++; data.apiTotal++; }
+    else if (type === 'fallback') { data.fallbackCount++; data.apiTotal++; }
+    else if (type === 'api') data.apiTotal++; // 通用 API 计数
+    _saveTodayQuota(npcId, data);
+    console.log('[InnerVoice] 记录:', type, 'npcId:', npcId, '今日API:', data.apiTotal + '/' + API_DAILY_BUDGET);
   }
 
   // ═══════════════════════════════════════════
@@ -45729,14 +45858,22 @@ setTimeout(function() {
       return false;
     }
 
-    // 获取角色名
+    // ★ 检查 API 预算
+    if (!canUseAPI(npcId)) {
+      console.log('[InnerVoice] 撤回跳过：今日 API 预算已用完');
+      return false;
+    }
+
+    // 获取角色名和人设
     var npcName = npcId;
+    var profile = '';
     try {
       if (typeof window._meowCollectNpcs === 'function') {
         var npcs = window._meowCollectNpcs();
         for (var i = 0; i < npcs.length; i++) {
           if (npcs[i] && npcs[i].id === npcId) {
             npcName = npcs[i].name || npcId;
+            profile = npcs[i].profile || '';
             break;
           }
         }
@@ -45751,30 +45888,52 @@ setTimeout(function() {
     // ★ 第二阶段：隐藏"正在输入..."
     _hideTypingHint(npcId);
 
-    // 生成一条消息（用于撤回记录）
+    // ★ 一次 API 同时生成：撤回消息 + 撤回后心声
     var msgText = null;
+    var voiceText = null;
     try {
       if (typeof PhoneAI !== 'undefined' && PhoneAI && typeof PhoneAI.chat === 'function') {
         var result = await PhoneAI.chat({
-          system: '生成一条很短的聊天消息（5-15字），像是想说又不好意思说出口的，用于撤回表演。',
-          messages: [{ role: 'user', content: '直接输出消息内容' }],
-          temperature: 0.95,
-          maxTokens: 30,
+          system: '你是「' + npcName + '」。' + (profile ? profile.slice(0, 200) : '') +
+            '\n你现在很想给对方发消息，但犹豫了一下决定撤回。' +
+            '\n请用JSON格式回复（不要加```），包含两个字段：' +
+            '\n{"msg":"想发但撤回的消息（5-15字）","voice":"撤回后的内心独白（10-20字）"}' +
+            '\nmsg 示例：那个... / 在吗 / 我想跟你说...' +
+            '\nvoice 示例：算了还是不说了 / 话到嘴边又咽回去了',
+          messages: [{ role: 'user', content: '直接输出JSON' }],
+          temperature: 0.9,
+          maxTokens: 80,
           timeout: 15,
           channel: 'withdraw'
         });
         if (result && result.ok && result.data) {
-          msgText = String(result.data).trim().replace(/^["'「『【\s]+|["'」』】\s]+$/g, '').slice(0, 30);
+          try {
+            var parsed = JSON.parse(String(result.data).replace(/```json|```/g, '').trim());
+            if (parsed.msg) msgText = String(parsed.msg).slice(0, 30);
+            if (parsed.voice) voiceText = String(parsed.voice).slice(0, 40);
+          } catch(e2) {
+            // JSON 解析失败，把整个回复当消息用
+            msgText = String(result.data).trim().replace(/^["'「『【\s]+|["'」』】\s]+$/g, '').slice(0, 30);
+          }
         }
       }
     } catch(e) {}
 
+    // fallback 模板
     if (!msgText) {
       var fallbacks = ['那个...', '在吗', '我...', '想问你', '刚才...', '你...'];
       msgText = fallbacks[Math.floor(Math.random() * fallbacks.length)];
     }
+    if (!voiceText) {
+      var withdrawVoices = [
+        '算了还是不说了', '删掉了...', '措辞好难',
+        '打了又删了', '还是不要打扰 ta 了',
+        '想说又不知道怎么开口', '话到嘴边又咽回去了'
+      ];
+      voiceText = withdrawVoices[Math.floor(Math.random() * withdrawVoices.length)];
+    }
 
-    // 记录撤回
+    // 记录撤回 + API 计数
     addWithdrawnRecord(npcId, msgText);
     recordProactiveToday(npcId, 'withdraw');
 
@@ -45789,7 +45948,7 @@ setTimeout(function() {
       console.warn('[InnerVoice] 插入撤回消息失败:', e);
     }
 
-    // ★ 更新聊天列表（显示"对方撤回了一条消息"）
+    // ★ 更新聊天列表
     try {
       if (typeof window._meowBumpThread === 'function') {
         window._meowBumpThread(npcId, { 
@@ -45801,22 +45960,283 @@ setTimeout(function() {
       }
     } catch(e) {}
 
-    // 更新心声为撤回后的想法
-    var withdrawVoices = [
-      '算了还是不说了',
-      '删掉了...',
-      '措辞好难',
-      '打了又删了',
-      '还是不要打扰 ta 了',
-      '想说又不知道怎么开口',
-      '话到嘴边又咽回去了'
-    ];
-    var voiceText = withdrawVoices[Math.floor(Math.random() * withdrawVoices.length)];
+    // 更新心声
     setInnerVoice(npcId, voiceText, 'withdraw');
 
     console.log('[InnerVoice] 撤回表演完成:', msgText, '→', voiceText);
     return { withdrawn: msgText, voice: voiceText, ts: ts };
   }
+
+  // ═══════════════════════════════════════════
+  //  面板定时更新（早/午/晚各1次，不聊天时自动刷新穿着+正在做+心声）
+  // ═══════════════════════════════════════════
+  var PANEL_SLOTS = [
+    { id: 'morning', startH: 9,  endH: 13, label: '上午' },
+    { id: 'afternoon', startH: 13, endH: 19, label: '下午' },
+    { id: 'evening', startH: 19, endH: 24, label: '晚上' }
+  ];
+
+  function _getPanelSlotNow() {
+    var h = new Date().getHours();
+    for (var i = 0; i < PANEL_SLOTS.length; i++) {
+      if (h >= PANEL_SLOTS[i].startH && h < PANEL_SLOTS[i].endH) return PANEL_SLOTS[i];
+    }
+    return null;
+  }
+
+  function _hasPanelUpdatedThisSlot(npcId, slotId) {
+    try {
+      var key = 'meow_panel_update_' + npcId;
+      var data = JSON.parse(localStorage.getItem(key) || '{}');
+      var today = new Date().toDateString();
+      if (data.date !== today) return false;
+      return !!(data.slots && data.slots[slotId]);
+    } catch(e) { return false; }
+  }
+
+  function _recordPanelUpdate(npcId, slotId) {
+    try {
+      var key = 'meow_panel_update_' + npcId;
+      var today = new Date().toDateString();
+      var data = JSON.parse(localStorage.getItem(key) || '{}');
+      if (data.date !== today) data = { date: today, slots: {} };
+      if (!data.slots) data.slots = {};
+      data.slots[slotId] = Date.now();
+      localStorage.setItem(key, JSON.stringify(data));
+    } catch(e) {}
+  }
+
+  // 检查面板更新是否可触发
+  function canUpdatePanel(npcId) {
+    // 1. 主动找你开关
+    var charEx = {};
+    try {
+      if (typeof window._meowLoadCharExtra === 'function') charEx = window._meowLoadCharExtra(npcId) || {};
+    } catch(e) {}
+    if (charEx.enableLifePush !== true) return { ok: false, reason: '主动找你未开启' };
+
+    // 2. 关系必须是暧昧
+    var bond = charEx.bondLabel || charEx.bond || '';
+    if (!bond) {
+      try {
+        if (typeof window._meowLoadCharState === 'function') {
+          var bState = window._meowLoadCharState(npcId);
+          if (bState) bond = bState.bond || '';
+        }
+      } catch(e) {}
+    }
+    if (bond !== '暧昧') return { ok: false, reason: '关系非暧昧' };
+
+    // 3. 不在该角色聊天窗口
+    if (typeof PhoneAI !== 'undefined' && PhoneAI && PhoneAI._state) {
+      var state = PhoneAI._state;
+      if (state.app === 'chatDetail' && state.chatTarget === npcId) {
+        return { ok: false, reason: '正在聊天中' };
+      }
+    }
+
+    // 4. 必须是线上模式（线下模式忽略）
+    try {
+      if (typeof window._meowGetChatMode === 'function') {
+        if (window._meowGetChatMode(npcId) === 'offline') return { ok: false, reason: '线下模式中' };
+      }
+    } catch(e) {}
+
+    // 5. 当前时段是否已更新
+    var slot = _getPanelSlotNow();
+    if (!slot) return { ok: false, reason: '不在更新时段(0-9点)' };
+    if (_hasPanelUpdatedThisSlot(npcId, slot.id)) return { ok: false, reason: slot.label + '已更新过' };
+
+    // 6. API 预算
+    var quota = _loadTodayQuota(npcId);
+    if (quota.panelCount >= API_PANEL_LIMIT) return { ok: false, reason: '面板更新次数已满' };
+    if (quota.apiTotal >= API_DAILY_BUDGET) return { ok: false, reason: 'API 预算已用完' };
+
+    return { ok: true, slot: slot };
+  }
+
+  // 执行面板更新（一次 API 生成穿着+正在做+心声）
+  async function updatePanelViaAPI(npcId) {
+    var check = canUpdatePanel(npcId);
+    if (!check.ok) {
+      console.log('[PanelUpdate] 跳过:', npcId, check.reason);
+      return null;
+    }
+
+    var slot = check.slot;
+    var npcName = npcId;
+    var profile = '';
+    var activity = '';
+    var bond = '暧昧';
+    var loneliness = 10;
+
+    // 获取角色信息
+    try {
+      if (typeof _meowCollectNpcs === 'function') {
+        var npcs = _meowCollectNpcs();
+        for (var i = 0; i < npcs.length; i++) {
+          if (npcs[i] && npcs[i].id === npcId) {
+            npcName = npcs[i].name || npcId;
+            profile = npcs[i].profile || '';
+            bond = npcs[i].bond || '暧昧';
+            break;
+          }
+        }
+      }
+    } catch(e) {}
+
+    // 获取状态
+    try {
+      if (typeof window._meowLoadCharState === 'function') {
+        var stateData = window._meowLoadCharState(npcId);
+        if (stateData && stateData.attrs) {
+          loneliness = stateData.attrs.loneliness != null ? stateData.attrs.loneliness : 10;
+        }
+        if (stateData && stateData.schedule) {
+          var h = new Date().getHours();
+          for (var j = 0; j < stateData.schedule.length; j++) {
+            var sl = stateData.schedule[j];
+            var inSlot = sl.endHour <= sl.hour
+              ? (h >= sl.hour || h < sl.endHour)
+              : (h >= sl.hour && h < sl.endHour);
+            if (inSlot) { activity = sl.activity || ''; break; }
+          }
+        }
+      }
+    } catch(e) {}
+
+    // 获取最近几条聊天记录作为上下文
+    var recentChat = '';
+    try {
+      if (typeof window._meowGetLog === 'function') {
+        var logs = window._meowGetLog(npcId) || [];
+        var lastMsgs = logs.slice(-6);
+        recentChat = lastMsgs.map(function(m) {
+          var who = m.role === 'them' ? npcName : '用户';
+          var txt = String(m.text || m.content || '').slice(0, 50);
+          return who + '：' + txt;
+        }).join('\n');
+      }
+    } catch(e) {}
+
+    var timeDesc = new Date().getHours() + '点' + (new Date().getMinutes() < 10 ? '0' : '') + new Date().getMinutes() + '分';
+
+    // ★ 调 API
+    try {
+      if (typeof PhoneAI === 'undefined' || !PhoneAI || typeof PhoneAI.chat !== 'function') {
+        console.warn('[PanelUpdate] PhoneAI 不可用');
+        return null;
+      }
+
+      var systemPrompt = '你是「' + npcName + '」。' + (profile ? profile.slice(0, 300) : '') +
+        '\n\n现在是' + timeDesc + '，' + slot.label + '。' +
+        (activity ? '你当前的作息安排是：' + activity + '。' : '') +
+        '你和对方的关系是「' + bond + '」。' +
+        '\n聊天暂时结束了，大家各干各的。你可能会一瞬间想起刚才的一些对话和瞬间。' +
+        (recentChat ? '\n\n【刚才的对话片段】\n' + recentChat : '') +
+        '\n\n请用JSON格式回复（不要加```），描述你此刻的状态：' +
+        '\n{"wearing":"当前穿着（10字内）","doing":"正在做的事（10字内）","voice":"此刻内心独白（10-25字）"}' +
+        '\n内心独白要自然，可以跟刚才的对话有关，也可以跟当前做的事有关。' +
+        '\n示例：{"wearing":"白色卫衣","doing":"窝在沙发上刷手机","voice":"刚才聊的那个话题还挺有意思的"}';
+
+      var result = await PhoneAI.chat({
+        system: systemPrompt,
+        messages: [{ role: 'user', content: '直接输出JSON' }],
+        temperature: 0.85,
+        maxTokens: 100,
+        timeout: 15,
+        channel: 'panel_update'
+      });
+
+      if (result && result.ok && result.data) {
+        try {
+          var parsed = JSON.parse(String(result.data).replace(/```json|```/g, '').trim());
+          var wearing = parsed.wearing ? String(parsed.wearing).slice(0, 20) : '';
+          var doing = parsed.doing ? String(parsed.doing).slice(0, 20) : '';
+          var voice = parsed.voice ? String(parsed.voice).slice(0, 50) : '';
+
+          // 写入 behavior（穿着+正在做）
+          if (wearing || doing) {
+            try {
+              if (typeof window._meowLoadCharState === 'function') {
+                // 通过全局暴露的方式更新 behavior
+                // _loadCharBehavior / _saveCharBehavior 在 PhoneAI IIFE 内部
+                // 需要通过 _meowState 间接访问，或直接写 localStorage
+                var bhKey = null;
+                var bhSuffix = '_charbehavior_' + String(npcId);
+                for (var ki = 0; ki < localStorage.length; ki++) {
+                  var kn = localStorage.key(ki);
+                  if (kn && kn.indexOf(bhSuffix) !== -1) { bhKey = kn; break; }
+                }
+                if (bhKey) {
+                  var bh = JSON.parse(localStorage.getItem(bhKey) || '{}');
+                  if (wearing) bh.wearing = wearing;
+                  if (doing) bh.doing = doing;
+                  if (voice) bh.heartLine = voice;
+                  localStorage.setItem(bhKey, JSON.stringify(bh));
+                } else {
+                  console.warn('[PanelUpdate] 找不到 behavior 存储 key');
+                }
+              }
+            } catch(e) { console.warn('[PanelUpdate] 写入 behavior 失败:', e); }
+          }
+
+          // 写入心声系统
+          if (voice) {
+            setInnerVoice(npcId, voice, 'api');
+          }
+
+          // 记录
+          _recordPanelUpdate(npcId, slot.id);
+          recordProactiveToday(npcId, 'panel');
+
+          console.log('[PanelUpdate] 更新成功:', npcId, slot.label, {wearing: wearing, doing: doing, voice: voice});
+          return { wearing: wearing, doing: doing, voice: voice, slot: slot.id };
+        } catch(e) {
+          console.warn('[PanelUpdate] 解析 API 返回失败:', e, result.data);
+        }
+      }
+    } catch(e) {
+      console.warn('[PanelUpdate] API 调用失败:', e);
+    }
+    return null;
+  }
+
+  // ★ 定时检查器（每 10 分钟检查一次所有暧昧角色）
+  var _panelCheckInterval = null;
+  function startPanelUpdateTimer() {
+    if (_panelCheckInterval) return;
+    _panelCheckInterval = setInterval(function() {
+      try {
+        // 检查所有角色
+        var npcs = [];
+        try {
+          if (typeof _meowCollectNpcs === 'function') npcs = _meowCollectNpcs();
+        } catch(e) {}
+
+        for (var i = 0; i < npcs.length; i++) {
+          var npc = npcs[i];
+          if (!npc || !npc.id) continue;
+          // 快速前置检查
+          if (npc.enableLifePush !== true) continue;
+          if (npc.bond !== '暧昧') continue;
+
+          var check = canUpdatePanel(npc.id);
+          if (check.ok) {
+            console.log('[PanelUpdate] 触发更新:', npc.id, npc.name);
+            updatePanelViaAPI(npc.id).catch(function(e) {
+              console.warn('[PanelUpdate] 更新异常:', e);
+            });
+            break; // 每次 tick 只处理一个角色，避免并发
+          }
+        }
+      } catch(e) { console.warn('[PanelUpdate] 定时检查异常:', e); }
+    }, 10 * 60 * 1000); // 每 10 分钟检查一次
+    console.log('[PanelUpdate] 定时器已启动（每10分钟）');
+  }
+
+  // 页面加载后启动
+  setTimeout(startPanelUpdateTimer, 30 * 1000); // 30秒后启动，避免阻塞初始化
 
   // ═══════════════════════════════════════════
   //  暴露接口
@@ -45831,10 +46251,72 @@ setTimeout(function() {
     recordToday: recordProactiveToday,
     performWithdraw: performWithdraw,
     addWithdrawn: addWithdrawnRecord,
-    getLastWithdrawn: getLastWithdrawn
+    getLastWithdrawn: getLastWithdrawn,
+    // ★ 面板更新
+    canUpdatePanel: canUpdatePanel,
+    updatePanel: updatePanelViaAPI,
+    // ★ API 预算
+    canUseAPI: canUseAPI,
+    getQuota: _loadTodayQuota,
+    // ★ 调试
+    debug: function(npcId) {
+      console.log('=== 心声系统调试 v2 ===');
+      console.log('角色ID:', npcId);
+
+      // 1. charExtra
+      try {
+        if (typeof window._meowLoadCharExtra === 'function') {
+          var ce = window._meowLoadCharExtra(npcId);
+          console.log('charExtra:', { enableLifePush: ce.enableLifePush, enableInnerVoice: ce.enableInnerVoice, bond: ce.bondLabel || ce.bond });
+        }
+      } catch(e) {}
+
+      // 2. charState 孤独值
+      try {
+        if (typeof window._meowLoadCharState === 'function') {
+          var st = window._meowLoadCharState(npcId);
+          console.log('charState:', st ? { loneliness: st.attrs ? st.attrs.loneliness : 'N/A', bond: st.bond } : 'null');
+        }
+      } catch(e) {}
+
+      // 3. localStorage fallback
+      var lsMatches = [];
+      var sfx = '_charstate_' + String(npcId);
+      for (var i = 0; i < localStorage.length; i++) {
+        var key = localStorage.key(i);
+        if (key && key.indexOf(sfx) !== -1) {
+          try {
+            var val = JSON.parse(localStorage.getItem(key));
+            lsMatches.push({ key: key, loneliness: val && val.attrs ? val.attrs.loneliness : 'N/A', bond: val ? val.bond : 'N/A' });
+          } catch(e) { lsMatches.push({ key: key, error: e.message }); }
+        }
+      }
+      console.log('localStorage charstate:', lsMatches);
+
+      // 4. 今日额度
+      console.log('今日额度:', _loadTodayQuota(npcId));
+
+      // 5. canTrigger
+      console.log('canTrigger:', canTriggerProactive(npcId));
+
+      // 6. canUpdatePanel
+      console.log('canUpdatePanel:', canUpdatePanel(npcId));
+
+      // 7. 心声 & 撤回
+      console.log('当前心声:', getInnerVoice(npcId));
+      console.log('最近撤回:', getLastWithdrawn(npcId));
+
+      // 8. 面板更新记录
+      try {
+        var pk = 'meow_panel_update_' + npcId;
+        console.log('面板更新记录:', JSON.parse(localStorage.getItem(pk) || '{}'));
+      } catch(e) {}
+
+      console.log('=== 调试结束 ===');
+    }
   };
 
-  console.log('[InnerVoice] 心声表演系统已加载 v1');
+  console.log('[InnerVoice] 心声表演系统已加载 v2 (面板定时更新+API预算)');
 })();
 
 
