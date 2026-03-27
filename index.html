@@ -9966,6 +9966,8 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
       // ★ 暴露状态读取函数给心声系统使用
       window._meowLoadCharState = function(npcId){ try{ return _loadCharState(npcId); }catch(e){ return null; } };
       window._meowLoadCharExtra = function(npcId){ try{ return _loadCharExtra(npcId); }catch(e){ return {}; } };
+      window._meowSaveCharState = function(npcId, s){ try{ _saveCharState(npcId, s); }catch(e){} };
+      window._meowFindContactById = function(db, id){ try{ return findContactById(db, id); }catch(e){ return null; } };
       window._meowCatchUpStats = function(npcId){ try{ return catchUpStats(npcId); }catch(e){ return null; } };
       window._meowGetChatMode = function(npcId){ try{ return _getChatMode(npcId); }catch(e){ return 'online'; } };
 
@@ -35621,6 +35623,11 @@ function _mapEnsure(){
   return data;
 }
 
+// ★ 暴露地图函数给 WorldEngine 使用
+window._meowMapLoad = _mapLoad;
+window._meowMapSave = _mapSave;
+window._meowMapEnsure = _mapEnsure;
+
 // ---- SVG 构建 ----
 function _mapBuildSVG(mapData){
   var pal = mapData.palette || MAP_PALETTES[0];
@@ -46407,6 +46414,16 @@ setTimeout(function() {
 // ====== MeowWorldEngine 世界引擎 v1.0 ======
 (function() {
   'use strict';
+
+  // ★ 适配闭包：使用 window 暴露的版本访问主代码内部函数
+  var _mapLoad = function(){ return window._meowMapLoad ? window._meowMapLoad() : null; };
+  var _mapSave = function(d){ if(window._meowMapSave) window._meowMapSave(d); };
+  var _mapEnsure = function(){ return window._meowMapEnsure ? window._meowMapEnsure() : null; };
+  var _loadCharState = function(id){ return window._meowLoadCharState ? window._meowLoadCharState(id) : null; };
+  var _saveCharState = function(id,s){ if(window._meowSaveCharState) window._meowSaveCharState(id,s); };
+  var _loadCharExtra = function(id){ return window._meowLoadCharExtra ? window._meowLoadCharExtra(id) : {}; };
+  var loadContactsDB = function(){ return window._meowLoadContactsDB ? window._meowLoadContactsDB() : null; };
+  var findContactById = function(db,id){ return window._meowFindContactById ? window._meowFindContactById(db,id) : null; };
 
   var PLACE_TYPES = {
     home:              { label: '家',      icon: '🏠', tags: ['sleep','rest','cook','bath','browse','relax'] },
