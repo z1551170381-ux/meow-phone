@@ -20720,8 +20720,18 @@ const npc = _wxGetChatTargetMeta(npcId);
         _request: async function(opts){
           var channel = (opts && opts.channel) || 'default';
           // ★ 让心声/撤回等后台调用也使用 background 配置
-          if (channel === 'innervoice' || channel === 'withdraw' || channel === 'proactive') {
+          var isBackgroundCall = (channel === 'innervoice' || channel === 'withdraw' || channel === 'proactive' || channel === 'background');
+          if (isBackgroundCall) {
             channel = 'background';
+            // ★ 后台调用全局冷却：防止短时间内多次调用 API
+            var globalCooldownKey = '_meowBgApiLastCall';
+            var lastApiCall = this[globalCooldownKey] || 0;
+            var cooldownMs = 30000; // 30秒冷却
+            if (Date.now() - lastApiCall < cooldownMs) {
+              console.log('[PhoneAI] 后台 API 冷却中，跳过');
+              return { ok:false, data:null, error:'API 冷却中' };
+            }
+            this[globalCooldownKey] = Date.now();
           }
           if (channel !== 'background') channel = 'default';
           var cfg = this._getConfig(channel);
@@ -45438,11 +45448,10 @@ setTimeout(function() {
           }
         }
       }
-      // 获取状态（使用暴露的函数）
+      // 获取状态（★ 直接读取存储值，不推算）
       try {
-        var stateFunc = window._meowCatchUpStats || window._meowLoadCharState;
-        if (typeof stateFunc === 'function') {
-          var state = stateFunc(npcId);
+        if (typeof window._meowLoadCharState === 'function') {
+          var state = window._meowLoadCharState(npcId);
           if (state && state.attrs) {
             loneliness = state.attrs.loneliness || 50;
             if (state.schedule) {
@@ -45523,11 +45532,10 @@ setTimeout(function() {
         enableInnerVoice = false;
       }
 
-      // 获取状态（使用暴露的函数）
+      // ★ 直接读取存储值，不推算（避免被作息规则改变）
       try {
-        var stateFunc = window._meowCatchUpStats || window._meowLoadCharState;
-        if (typeof stateFunc === 'function') {
-          var state = stateFunc(npcId);
+        if (typeof window._meowLoadCharState === 'function') {
+          var state = window._meowLoadCharState(npcId);
           if (state && state.attrs) {
             loneliness = state.attrs.loneliness || 50;
             if (state.schedule) {
@@ -45624,17 +45632,11 @@ setTimeout(function() {
       // 5. 检查孤独值
       var loneliness = 50;
       try {
-        // 使用暴露的函数读取状态
-        if (typeof window._meowCatchUpStats === 'function') {
-          var stateData = window._meowCatchUpStats(npcId);
+        // ★ 直接读取存储值，不用 catchUpStats 推算（避免被作息规则改变）
+        if (typeof window._meowLoadCharState === 'function') {
+          var stateData = window._meowLoadCharState(npcId);
           if (stateData && stateData.attrs) {
             loneliness = stateData.attrs.loneliness;
-            if (loneliness == null) loneliness = 50;
-          }
-        } else if (typeof window._meowLoadCharState === 'function') {
-          var stateData2 = window._meowLoadCharState(npcId);
-          if (stateData2 && stateData2.attrs) {
-            loneliness = stateData2.attrs.loneliness;
             if (loneliness == null) loneliness = 50;
           }
         }
