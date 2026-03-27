@@ -34241,7 +34241,11 @@ function _openTimelineViewer(npcId){
       return Math.max(10, ce.tlGapMinutes || 60);
     }catch(e){ return 60; }
   }
-  function _getPending(){
+  function _getPending(forceAll){
+    // forceAll=true 时不做时间分块，直接返回所有剩余消息
+    if (forceAll){
+      return _getTimelinePendingRange(npcId, viewMode, 99999);
+    }
     if (_isTimeMode()){
       return _getTimelinePendingRangeByTime(npcId, viewMode, _getGapMinutes(), _getChunkSize());
     }
@@ -34701,18 +34705,20 @@ function _openTimelineViewer(npcId){
     if (act === 'tlGenerate'){
       if (isGenerating) return;
       (async function(){
-        var pending = _getPending();
-        console.log('[TL] 生成, pending=', JSON.stringify(pending), 'timeMode=', _isTimeMode());
+        // ★ 手动点击时，forceAll=true，不做时间分块，总结所有剩余消息
+        var pending = _getPending(true);
+        console.log('[TL] 手动生成, pending=', JSON.stringify(pending));
         if (!pending){ try{ toast('没有新的未总结消息'); }catch(e){} return; }
         isGenerating = true; genAborted = false;
         refresh();
         var batchNo = 0;
         while(!genAborted){
-          var p = _getPending();
+          // 手动模式也用 forceAll
+          var p = _getPending(true);
           if (!p) break;
           batchNo++;
           var progEl = modal.querySelector('[data-el="tlProgressText"]');
-          if (progEl) progEl.textContent = '第 '+batchNo+' 批 '+(_isTimeMode()?'(时间)':'(条数)')+'：#'+(p.fromIdx+1)+'~'+(p.toIdx+1);
+          if (progEl) progEl.textContent = '第 '+batchNo+' 批：#'+(p.fromIdx+1)+'~'+(p.toIdx+1)+' (共'+(p.toIdx-p.fromIdx+1)+'条)';
           try{
             var entry = await _tlApiEnqueue(function(){
               return _generateTimelineEntry(npcId, p.fromIdx, p.toIdx, viewMode);
@@ -34720,7 +34726,7 @@ function _openTimelineViewer(npcId){
             if (!entry) break;
             if (!modal.querySelector('[data-el="tlRoot"]')) break;
             refresh(); isGenerating = true;
-            if (!_getPending()) break;
+            if (!_getPending(true)) break;
             await new Promise(function(r){ setTimeout(r, 500); });
           }catch(e){
             try{ toast('出错: '+((e&&e.message)||'')); }catch(e2){}
