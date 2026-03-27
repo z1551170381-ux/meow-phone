@@ -9984,12 +9984,7 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
           catchUpStats(contactId);
           // 异步：离线补发（写入历史消息）
           LifeEngine.catchUpProactiveMsgs(contactId, _elapsed).catch(function(){});
-          _reconcileDailyOnlineProactive(contactId, 'open_chat').then(function(inserted){
-            if (!inserted) return;
-            if (state.chatTarget === contactId && state.app === 'chatDetail'){
-              try{ renderChatDetail(contactId); }catch(e){}
-            }
-          }).catch(function(){});
+          // ★ 已移除 _reconcileDailyOnlineProactive：前台不再主动生成消息，由后端推送负责
           try{ _schedulePendingChatReplyRecovery('open_chat', 1200, contactId); }catch(_e){}
           try{ _schedulePendingProactiveRecovery('open_chat', 1500, contactId); }catch(_e2){}
         }catch(e){}
@@ -31290,18 +31285,17 @@ function bindPageScroll(){
           W.addEventListener('resize',()=>{ if(state.mode==='full') updateTime(); },{passive:true});
         }catch(e){}
         try{
-          W.addEventListener('focus', function(){ _scheduleGlobalDailyReconcile('window_focus', 1200); try{ _schedulePendingChatReplyRecovery('window_focus', 1500); }catch(_e){} try{ _schedulePendingProactiveRecovery('window_focus', 1700); }catch(_e2){} }, { passive:true });
+          W.addEventListener('focus', function(){ try{ _schedulePendingChatReplyRecovery('window_focus', 1500); }catch(_e){} try{ _schedulePendingProactiveRecovery('window_focus', 1700); }catch(_e2){} }, { passive:true });
         }catch(e){}
         try{
           D.addEventListener('visibilitychange', function(){
             if (D.visibilityState === 'visible'){
-              _scheduleGlobalDailyReconcile('page_visible', 1200);
               try{ _schedulePendingChatReplyRecovery('page_visible', 1500); }catch(_e){}
               try{ _schedulePendingProactiveRecovery('page_visible', 1800); }catch(_e2){}
             }
           }, { passive:true });
         }catch(e){}
-        try{ W.addEventListener('online', function(){ try{ _schedulePendingChatReplyRecovery('window_online', 1200); }catch(_e){} try{ _scheduleGlobalDailyReconcile('window_online', 1300); }catch(_e2){} try{ _schedulePendingProactiveRecovery('window_online', 1600); }catch(_e3){} }, { passive:true }); }catch(e){}
+        try{ W.addEventListener('online', function(){ try{ _schedulePendingChatReplyRecovery('window_online', 1200); }catch(_e){} try{ _schedulePendingProactiveRecovery('window_online', 1600); }catch(_e3){} }, { passive:true }); }catch(e){}
         try{ W.addEventListener('pageshow', function(){ try{ _schedulePendingChatReplyRecovery('page_show', 1200); }catch(_e){} try{ _schedulePendingProactiveRecovery('page_show', 1600); }catch(_e2){} }, { passive:true }); }catch(e){}
         // MeowDB 初始化（IndexedDB 基础设施）
         try{
@@ -31549,13 +31543,7 @@ function bindPageScroll(){
                 if (!s3 || !s3.attrs) return;
                 var p3 = s3.personality || {};
 
-                // 每日保底：只补线上消息，不依赖当前正在看哪种模式
-                _reconcileDailyOnlineProactive(npcId, 'foreground_timer').then(function(inserted){
-                  if (!inserted) return;
-                  if (state.chatTarget === npcId && state.app === 'chatDetail'){
-                    try{ renderChatDetail(npcId); }catch(e){}
-                  }
-                }).catch(function(){});
+                // ★ 已移除每日保底 reconcile：由后端推送负责，前台不再主动调 API 生成
 
                 // 触发条件：孤独感高 + 精力充足
                 var h4 = new Date().getHours();
