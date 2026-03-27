@@ -44627,9 +44627,13 @@ var userPrompt = [
       var detail = e.detail || {};
       var npcId = String(detail.npcId || '').trim();
       var role = String(detail.role || '').trim();
+      var source = String(detail.source || '').trim();
 
-      // 只在 NPC 回复时触发（不是用户消息、不是系统消息）
-      if (!npcId || role === 'me' || role === 'user' || role === 'system' || role === 'narrator') return;
+      // ★ v6修复：只在真实 NPC 回复时触发（pushLog 且 role 是 NPC）
+      // bumpThread / openChat / 其他来源都不应触发热备生成
+      if (!npcId) return;
+      if (source !== 'pushLog') return;  // 只有 pushLog（真实消息写入）才触发
+      if (!role || role === 'me' || role === 'user' || role === 'system' || role === 'narrator') return;
 
       // ★ v6改造：内联模式（online）已经在聊天回复中一起生成了热备，
       // 不再单独调 API 重复生成。只有当内联路径未覆盖（冷却锁未设置）时才兜底生成。
