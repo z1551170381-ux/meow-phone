@@ -23357,6 +23357,9 @@ const npc = _wxGetChatTargetMeta(npcId);
                      effect:{ fun:+12, health:+3, energy:-5, hunger:-5 },
                      msgs:['出去走了走','透了个气'] },
           // ★ WorldEngine 新增行为
+          work:    { label:'工作', icon:'💼', durationMin:60, silent:true, msgChance:0.05,
+                     effect:{ energy:-8, mood:-3, fun:-5, hunger:-5 },
+                     msgs:['在忙','工作中'] },
           workout: { label:'锻炼', icon:'💪', durationMin:50, silent:false, msgChance:0.15,
                      effect:{ energy:-12, hunger:-5, health:8, mood:10 },
                      msgs:['刚练完','运动完了，出了一身汗'] },
@@ -23368,7 +23371,10 @@ const npc = _wxGetChatTargetMeta(npcId);
                      msgs:['做了顿饭','自己做的，味道还行'] },
           study:   { label:'学习', icon:'📚', durationMin:60, silent:true, msgChance:0.08,
                      effect:{ energy:-8, mood:-2, fun:-5 },
-                     msgs:['刚上完课','学了好久'] }
+                     msgs:['刚上完课','学了好久'] },
+          shift_work:{ label:'上班', icon:'🏪', durationMin:60, silent:true, msgChance:0.05,
+                     effect:{ energy:-6, mood:-2, fun:-3 },
+                     msgs:['在店里忙','刚忙完一阵'] }
         };
 
         // ---- 主导需求计算（每次 tick 只处理最紧迫的一个） ----
