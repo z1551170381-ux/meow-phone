@@ -36952,24 +36952,49 @@ function renderMapApp(body){
         var svgEl = wrap.querySelector('.mapIslandSvg');
         if (!svgEl) return;
         var lms = mapData.landmarks || [];
+        var avatarData = (typeof phoneLoadAvatars==='function') ? phoneLoadAvatars() : {};
+
         for (var _lmId in _lmGroups) {
           var _lm7 = lms.find(function(l){return l.id===_lmId;});
           if (!_lm7) continue;
           var _npcs7 = _lmGroups[_lmId];
           for (var _ni7 = 0; _ni7 < Math.min(_npcs7.length, 4); _ni7++) {
             var _n7 = _npcs7[_ni7];
+            var _avUrl = avatarData[_n7.npcId] || '';
             var g = document.createElementNS('http://www.w3.org/2000/svg','g');
             g.setAttribute('class','mapNpcAvatar');
             g.setAttribute('transform','translate('+(_lm7.x+16+_ni7*14)+','+(_lm7.y-10)+')');
             g.setAttribute('data-npcid',_n7.npcId);
+            g.setAttribute('data-npcname',_n7.npcName);
+            var _statusText7 = _we7.traceToTextStable(_n7.trace, _n7.npcName);
+            g.setAttribute('data-status', _statusText7);
             g.style.cursor='pointer';
+            // 白边圆
             var circ = document.createElementNS('http://www.w3.org/2000/svg','circle');
-            circ.setAttribute('r','8'); circ.setAttribute('fill','#fff'); circ.setAttribute('stroke','#07c160'); circ.setAttribute('stroke-width','1.5');
+            circ.setAttribute('r','9'); circ.setAttribute('fill','#fff'); circ.setAttribute('stroke','#07c160'); circ.setAttribute('stroke-width','1.8');
             g.appendChild(circ);
-            var txt = document.createElementNS('http://www.w3.org/2000/svg','text');
-            txt.setAttribute('text-anchor','middle'); txt.setAttribute('dominant-baseline','central'); txt.setAttribute('font-size','9');
-            txt.textContent = _n7.npcAvatar;
-            g.appendChild(txt);
+            if (_avUrl) {
+              // 用clipPath做圆形头像
+              var clipId = 'avclip_'+_n7.npcId+'_'+_ni7;
+              var defs = svgEl.querySelector('defs') || document.createElementNS('http://www.w3.org/2000/svg','defs');
+              if (!defs.parentNode) svgEl.insertBefore(defs, svgEl.firstChild);
+              var cp = document.createElementNS('http://www.w3.org/2000/svg','clipPath');
+              cp.setAttribute('id',clipId);
+              var cc = document.createElementNS('http://www.w3.org/2000/svg','circle');
+              cc.setAttribute('r','7.5'); cc.setAttribute('cx','0'); cc.setAttribute('cy','0');
+              cp.appendChild(cc); defs.appendChild(cp);
+              var img = document.createElementNS('http://www.w3.org/2000/svg','image');
+              img.setAttribute('href',_avUrl); img.setAttribute('x','-7.5'); img.setAttribute('y','-7.5');
+              img.setAttribute('width','15'); img.setAttribute('height','15');
+              img.setAttribute('clip-path','url(#'+clipId+')');
+              img.setAttribute('preserveAspectRatio','xMidYMid slice');
+              g.appendChild(img);
+            } else {
+              var txt = document.createElementNS('http://www.w3.org/2000/svg','text');
+              txt.setAttribute('text-anchor','middle'); txt.setAttribute('dominant-baseline','central'); txt.setAttribute('font-size','9');
+              txt.textContent = _n7.npcAvatar;
+              g.appendChild(txt);
+            }
             svgEl.appendChild(g);
           }
           if (_npcs7.length > 4) {
@@ -36980,6 +37005,25 @@ function renderMapApp(body){
             svgEl.appendChild(badge);
           }
         }
+
+        // ★ 头像点击事件 → 显示状态气泡
+        svgEl.addEventListener('click', function(ev){
+          var avG = ev.target.closest('.mapNpcAvatar');
+          if (!avG) return;
+          var nName = avG.getAttribute('data-npcname')||'';
+          var statusText = avG.getAttribute('data-status')||'';
+          var bubbleText = statusText || (nName + ' 在这里');
+          // 移除旧气泡
+          var oldBub = wrap.querySelector('.mapNpcBubble');
+          if (oldBub) oldBub.remove();
+          // 创建气泡
+          var bub = doc.createElement('div');
+          bub.className = 'mapNpcBubble';
+          bub.style.cssText = 'position:absolute;top:12px;left:50%;transform:translateX(-50%);background:rgba(20,24,28,.82);color:#fff;padding:6px 14px;border-radius:16px;font-size:12px;white-space:nowrap;z-index:20;pointer-events:none;animation:mapFadeIn .2s ease;';
+          bub.textContent = bubbleText;
+          wrap.appendChild(bub);
+          setTimeout(function(){ try{bub.remove();}catch(e){} }, 2500);
+        });
       }, 200);
       // 底部"外出中"动态条
       if (_offMapList.length > 0) {
@@ -46801,7 +46845,13 @@ setTimeout(function() {
     if (!worldData.npcBindings) worldData.npcBindings = {};
     console.log('[WorldEngine] AI 生成成功:', worldData.landmarks.length, '个地标');
     var mapData = null; try { mapData = (typeof _mapEnsure==='function') ? _mapEnsure() : null; } catch(e) {} if (!mapData) return { ok:false, error:'无法初始化基础地图' };
-    if (mode==='fresh') mapData.landmarks = [];
+    if (mode==='fresh') {
+      mapData.landmarks = [];
+      // ★ 清除旧 trace（旧地标 ID 已失效）
+      for (var _ti = 0; _ti < selectedNpcIds.length; _ti++) {
+        try { localStorage.removeItem('meow_npc_trace_' + selectedNpcIds[_ti]); } catch(e){}
+      }
+    }
     var newLandmarks = worldData.landmarks.map(function(lm){ return { id:lm.id, type:'ai_generated', region:'city', name:lm.name, customName:lm.name, x:0, y:0, icon:'ai_generated', emoji:lm.emoji, tags:[], funcTags:lm.funcTags, desc:lm.desc||'', actions:_generateActionsFromFuncTags(lm.funcTags,lm.name), visits:[], note:lm.desc||'' }; });
     mapData.landmarks = (mode==='append') ? (mapData.landmarks||[]).concat(newLandmarks) : newLandmarks;
     _autoLayoutLandmarks(mapData.landmarks, mapData);
