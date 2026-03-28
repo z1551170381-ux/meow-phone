@@ -14002,9 +14002,6 @@ function _buildFallbackAIFriendCandidate(){
             var ret = await PhoneAI.chat({ system:sysP, messages:[{role:'user',content:userP}], temperature:0.9, maxTokens:600, channel:'proactive' });
             if (ret && ret.ok && ret.data){
               var raw = String(ret.data||'').replace(/```json|```/g,'').trim();
-              var _fi = raw.indexOf('{'), _li = raw.lastIndexOf('}');
-              if (_fi >= 0 && _li > _fi) raw = raw.substring(_fi, _li + 1);
-              try { raw = _meowSanitizeJSONish(raw); } catch(e){}
               var parsed = JSON.parse(raw);
               if (parsed.name && parsed.text){
                 ov._close();
@@ -17711,9 +17708,6 @@ const npc = _wxGetChatTargetMeta(npcId);
           });
           if(!result.ok) return;
           var raw = String(result.data||'').replace(/```json\s*/gi,'').replace(/```\s*/gi,'').trim();
-          var _sfi = raw.indexOf('{'), _sli = raw.lastIndexOf('}');
-          if (_sfi >= 0 && _sli > _sfi) raw = raw.substring(_sfi, _sli + 1);
-          try { raw = _meowSanitizeJSONish(raw); } catch(e){}
           var parsed = JSON.parse(raw);
           parsed._generatedAt = Date.now();
           _saveSmsData(parsed);
@@ -18647,9 +18641,9 @@ const npc = _wxGetChatTargetMeta(npcId);
                     <span style="font-size:12px;color:rgba(20,24,28,.55);flex:1;">楼自动生成一次总结</span>
                   </div>
                   <div style="font-size:11px;color:rgba(20,24,28,.45);margin-bottom:6px;">线上总结词：</div>
-                  <textarea data-el="sumPromptOnline" rows="3" placeholder="例如：更偏手机聊天纪要、关系变化、关键信息点" style="width:100%;padding:8px 10px;border:1px solid rgba(0,0,0,.08);border-radius:8px;font-size:12px;outline:none;resize:vertical;font-family:inherit;line-height:1.5;box-sizing:border-box;background:rgba(255,255,255,.6);">${esc(charEx.onlineSummaryPrompt||'【重要】只输出纯 JSON 对象，禁止在 JSON 前后写任何文字，不要用代码块包裹，直接以 { 开头。你是剧情记录员，只记录客观发生的事，不做任何评价或定论。对话有时间范围标注，请在 storyTime 里写出日期和时段。输出格式：{"storyTime":"日期+时段","facts":["发生了什么事（只写事实）"],"quotes":["值得记录的原话，谁说了什么"],"events":["具体事件，只写发生了什么"],"props":["出现的物品/地点"],"todos":[{"text":"待办","done":false}]}。quotes 数组必须是纯字符串数组（string），不要返回对象或带 speaker 字段的结构。严禁出现"关系取得突破""首次主动""关系进一步"之类的评价性语言。')}</textarea>
+                  <textarea data-el="sumPromptOnline" rows="3" placeholder="例如：更偏手机聊天纪要、关系变化、关键信息点" style="width:100%;padding:8px 10px;border:1px solid rgba(0,0,0,.08);border-radius:8px;font-size:12px;outline:none;resize:vertical;font-family:inherit;line-height:1.5;box-sizing:border-box;background:rgba(255,255,255,.6);">${esc(charEx.onlineSummaryPrompt||'你是剧情记录员，只记录客观发生的事，不做任何评价或定论。对话有时间范围标注，请在 storyTime 里写出日期和时段。请输出纯 JSON：{"storyTime":"日期+时段","facts":["发生了什么事（只写事实）"],"quotes":["值得记录的原话"],"events":["具体事件，只写发生了什么"],"props":["出现的物品/地点"],"todos":[{"text":"待办","done":false}]}。quotes 数组必须是纯字符串数组（string），不要返回对象或带 speaker 字段的结构。严禁出现"关系取得突破""首次主动""关系进一步"之类的评价性语言。')}</textarea>
                   <div style="font-size:11px;color:rgba(20,24,28,.45);margin:10px 0 6px;">线下总结模板：</div>
-                  <textarea data-el="sumPromptOffline" rows="3" placeholder="例如：更偏线下见面、动作、场景、事件推进" style="width:100%;padding:8px 10px;border:1px solid rgba(0,0,0,.08);border-radius:8px;font-size:12px;outline:none;resize:vertical;font-family:inherit;line-height:1.5;box-sizing:border-box;background:rgba(255,255,255,.6);">${esc(charEx.offlineSummaryTemplate||'【重要】只输出纯 JSON 对象，禁止在 JSON 前后写任何文字，不要用代码块包裹，直接以 { 开头。你是剧情记录员，只记录客观发生的事，不做任何评价或定论。以下内容来自线下见面/场景互动，对话有时间范围标注，请在 storyTime 里写出日期和时段。输出格式：{"storyTime":"日期+时段","facts":["发生了什么事（只写事实）"],"quotes":["值得记录的原话，谁说了什么"],"events":["具体事件，只写发生了什么"],"props":["出现的物品/地点"],"todos":[{"text":"待办","done":false}]}。严禁出现评价性语言，只记录行为本身。')}</textarea>
+                  <textarea data-el="sumPromptOffline" rows="3" placeholder="例如：更偏线下见面、动作、场景、事件推进" style="width:100%;padding:8px 10px;border:1px solid rgba(0,0,0,.08);border-radius:8px;font-size:12px;outline:none;resize:vertical;font-family:inherit;line-height:1.5;box-sizing:border-box;background:rgba(255,255,255,.6);">${esc(charEx.offlineSummaryTemplate||'你是剧情记录员，只记录客观发生的事，不做任何评价或定论。以下内容来自线下见面/场景互动，对话有时间范围标注，请在 storyTime 里写出日期和时段。请输出纯 JSON：{"storyTime":"日期+时段","facts":["发生了什么事（只写事实）"],"quotes":["值得记录的原话"],"events":["具体事件，只写发生了什么"],"props":["出现的物品/地点"],"todos":[{"text":"待办","done":false}]}。严禁出现评价性语言，只记录行为本身。')}</textarea>
                   <div style="font-size:11px;color:rgba(20,24,28,.45);margin:10px 0 6px;">聊天专属总结词：</div>
                   <textarea data-el="sumPromptChat" rows="3" placeholder="该角色专属总结补充，线上线下都会带上" style="width:100%;padding:8px 10px;border:1px solid rgba(0,0,0,.08);border-radius:8px;font-size:12px;outline:none;resize:vertical;font-family:inherit;line-height:1.5;box-sizing:border-box;background:rgba(255,255,255,.6);">${esc(sharedPrompt)}</textarea>
                   <div style="font-size:11px;color:rgba(20,24,28,.45);margin:10px 0 6px;">线上聊天附加提示词：</div>
@@ -18938,9 +18932,6 @@ const npc = _wxGetChatTargetMeta(npcId);
             if (!result || !result.ok) throw new Error(result ? (result.error || '请求超时或被取消，请重试') : 'AI 请求失败');
 
             var raw = String(result.data || '').trim().replace(/```json|```/gi, '').trim();
-            var _arrStart = raw.indexOf('['), _arrEnd = raw.lastIndexOf(']');
-            if (_arrStart >= 0 && _arrEnd > _arrStart) raw = raw.substring(_arrStart, _arrEnd + 1);
-            try { raw = _meowSanitizeJSONish(raw); } catch(e){}
             var parsed = JSON.parse(raw);
             if (!Array.isArray(parsed) || !parsed.length) throw new Error('格式无效');
 
@@ -20732,17 +20723,14 @@ const npc = _wxGetChatTargetMeta(npcId);
           if (isBackgroundCall) {
             channel = 'background';
             // ★ 后台调用全局冷却：防止短时间内多次调用 API
-            // skipCooldown: 时间线批量总结等串行队列已自行控制节奏，不需要冷却
-            if (!(opts && opts.skipCooldown)) {
-              var globalCooldownKey = '_meowBgApiLastCall';
-              var lastApiCall = this[globalCooldownKey] || 0;
-              var cooldownMs = 30000; // 30秒冷却
-              if (Date.now() - lastApiCall < cooldownMs) {
-                console.log('[PhoneAI] 后台 API 冷却中，跳过');
-                return { ok:false, data:null, error:'API 冷却中' };
-              }
-              this[globalCooldownKey] = Date.now();
+            var globalCooldownKey = '_meowBgApiLastCall';
+            var lastApiCall = this[globalCooldownKey] || 0;
+            var cooldownMs = 30000; // 30秒冷却
+            if (Date.now() - lastApiCall < cooldownMs) {
+              console.log('[PhoneAI] 后台 API 冷却中，跳过');
+              return { ok:false, data:null, error:'API 冷却中' };
             }
+            this[globalCooldownKey] = Date.now();
           }
           if (channel !== 'background') channel = 'default';
           var cfg = this._getConfig(channel);
@@ -20844,27 +20832,8 @@ const npc = _wxGetChatTargetMeta(npcId);
                 try{
                   text = json.choices[0].message.content || '';
                 }catch(e){
-                  // 兼容多种 API 响应格式
-                  try{
-                    // Anthropic Claude: { content: [{ type:'text', text:'...' }] }
-                    if (!text && json.content && Array.isArray(json.content)){
-                      text = json.content.filter(function(b){ return b.type === 'text'; }).map(function(b){ return b.text || ''; }).join('');
-                    }
-                    // Gemini native: { candidates: [{ content: { parts: [{ text }] } }] }
-                    if (!text && json.candidates && json.candidates[0]){
-                      var parts = json.candidates[0].content && json.candidates[0].content.parts;
-                      if (parts) text = parts.map(function(p){ return p.text || ''; }).join('');
-                    }
-                    // 其他常见格式
-                    if (!text) text = json.output_text || json.result || json.response || json.text || '';
-                    // deepseek / minimax / 通义千问: choices[0].message.content 可能是 array
-                    if (!text && json.choices && json.choices[0] && json.choices[0].message){
-                      var mc = json.choices[0].message.content;
-                      if (Array.isArray(mc)) text = mc.filter(function(b){ return b.type === 'text'; }).map(function(b){ return b.text || ''; }).join('');
-                    }
-                    // Cohere: { text: '...' } 或 { generations: [{ text }] }
-                    if (!text && json.generations && json.generations[0]) text = json.generations[0].text || '';
-                  }catch(e2){}
+                  // 兼容其他响应格式
+                  try{ text = json.output_text || json.result || json.response || ''; }catch(e2){}
                 }
                 // ★ 修复：空内容时返回 error 而不是原始 JSON（避免把 JSON 显示成气泡消息）
                 if (!text){
@@ -20940,8 +20909,7 @@ const npc = _wxGetChatTargetMeta(npcId);
             temperature: (opts && opts.temperature != null) ? opts.temperature : 0.85,
             maxTokens: (opts && opts.maxTokens) ? opts.maxTokens : 1024,
             timeout: (opts && opts.timeout) ? opts.timeout : 30,
-            channel: (opts && opts.channel) || 'default',
-            skipCooldown: !!(opts && opts.skipCooldown)
+            channel: (opts && opts.channel) || 'default'
           });
         },
 
@@ -23211,7 +23179,6 @@ const npc = _wxGetChatTargetMeta(npcId);
             // 提取第一个 JSON 数组
             var m = txt.match(/\[[\s\S]*\]/);
             if (m) txt = m[0];
-            try { txt = _meowSanitizeJSONish(txt); } catch(e){}
             var arr = JSON.parse(txt);
             var validArr = Array.isArray(arr) ? arr.filter(function(item){
               return typeof item.hour === 'number' && typeof item.endHour === 'number' && item.activity && item.tag;
@@ -23888,9 +23855,6 @@ const npc = _wxGetChatTargetMeta(npcId);
 
             var txt = String(resp.data).trim();
             txt = txt.replace(/```json|```/g, '').trim();
-            var _pfi = txt.indexOf('{'), _pli = txt.lastIndexOf('}');
-            if (_pfi >= 0 && _pli > _pfi) txt = txt.substring(_pfi, _pli + 1);
-            try { txt = _meowSanitizeJSONish(txt); } catch(e){}
 
             // JSON 解析
             var parsed;
@@ -27884,7 +27848,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           if (!result.ok) return [];
           var raw = String(result.data||'').replace(/```json\s*/gi,'').replace(/```\s*/gi,'').trim();
           var arrMatch = raw.match(/\[[\s\S]*\]/); if (arrMatch) raw = arrMatch[0];
-          try { raw = _meowSanitizeJSONish(raw); } catch(e){}
+          raw = raw.replace(/,\s*([\]}])/g, '$1');
           var festivals = JSON.parse(raw);
           if (!Array.isArray(festivals)) return [];
           festivals = festivals.filter(function(f){ return f && f.day && f.name; });
@@ -27944,7 +27908,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           if (!result.ok) { console.warn('[NpcDaily] 生成失败:', result.error); return { _day: today, npcs: {} }; }
           var raw = String(result.data||'').replace(/```json\s*/gi,'').replace(/```\s*/gi,'').trim();
           var objMatch = raw.match(/\{[\s\S]*\}/); if (objMatch) raw = objMatch[0];
-          try { raw = _meowSanitizeJSONish(raw); } catch(e){}
+          raw = raw.replace(/,\s*([\]}])/g, '$1');
           var parsed = JSON.parse(raw);
           if (typeof parsed !== 'object') throw new Error('not object');
           var dailyData = { _day: today, _at: Date.now(), npcs: parsed };
@@ -27996,7 +27960,7 @@ const npc = _wxGetChatTargetMeta(npcId);
           if(!result.ok) return;
           var raw = String(result.data||'').replace(/```json\s*/gi,'').replace(/```\s*/gi,'').trim();
           var objMatch = raw.match(/\{[\s\S]*\}/); if (objMatch) raw = objMatch[0];
-          try { raw = _meowSanitizeJSONish(raw); } catch(e){}
+          raw = raw.replace(/,\s*([\]}])/g, '$1');
           var parsed = JSON.parse(raw);
           parsed._generatedAt = Date.now();
           _saveCalendarData(parsed);
@@ -29191,9 +29155,6 @@ const npc = _wxGetChatTargetMeta(npcId);
           });
           if(!result.ok) return;
           var raw = String(result.data||'').replace(/```json\s*/gi,'').replace(/```\s*/gi,'').trim();
-          var _wfi = raw.indexOf('{'), _wli = raw.lastIndexOf('}');
-          if (_wfi >= 0 && _wli > _wfi) raw = raw.substring(_wfi, _wli + 1);
-          try { raw = _meowSanitizeJSONish(raw); } catch(e){}
           var parsed = JSON.parse(raw);
           parsed._generatedAt = Date.now();
           _saveWeatherData(parsed);
@@ -34178,98 +34139,6 @@ function _getTimelinePendingRangeByTime(npcId, mode, gapMinutes, maxChunk){
 }
 
 // ========== Phase 5B：生成时间线总结条目 ==========
-// ---- 健壮 JSON 解析：兼容各种模型的不规范输出 ----
-function _robustParseTimelineJSON(raw){
-  if (!raw) return null;
-  raw = String(raw).trim();
-
-  // 0. 清除 thinking/think 标签残留（包括未闭合的）
-  raw = raw.replace(/<thinking>[\s\S]*?<\/thinking>/gi, '').replace(/<think>[\s\S]*?<\/think>/gi, '');
-  raw = raw.replace(/<\/?thinking>/gi, '').replace(/<\/?think>/gi, '');
-  // 清除零宽字符、BOM
-  raw = raw.replace(/[\u200B-\u200F\u2028\u2029\uFEFF]/g, '').trim();
-
-  // 1. ★ 先提取 {...} 块
-  var firstBrace = raw.indexOf('{');
-  var lastBrace = raw.lastIndexOf('}');
-  if (firstBrace >= 0 && lastBrace > firstBrace){
-    raw = raw.substring(firstBrace, lastBrace + 1);
-  } else if (firstBrace >= 0) {
-    // ★ 有 { 但没有 } → JSON 被 max_tokens 截断，取 { 之后的内容交给截断修复
-    console.warn('[_robustParse] JSON 被截断（有{无}），尝试修复');
-    raw = raw.substring(firstBrace);
-  } else {
-    console.warn('[_robustParse] 未找到 JSON 大括号，原文前200字:', raw.slice(0, 200));
-    return null;
-  }
-
-  // 2. 用 _meowSanitizeJSONish 修复智能引号、字符串内换行、尾逗号等
-  try { raw = _meowSanitizeJSONish(raw); } catch(e){}
-
-  // 3. 直接尝试解析
-  try { return JSON.parse(raw); } catch(e){}
-
-  // 4. 尝试修复被截断的 JSON（模型 max_tokens 截断常见）
-  try {
-    var fixed = raw;
-    // 检查字符串是否未闭合
-    var inStr = false, esc2 = false;
-    for (var ci = 0; ci < fixed.length; ci++){
-      if (inStr){ if (esc2){ esc2 = false; continue; } if (fixed[ci] === '\\'){ esc2 = true; continue; } if (fixed[ci] === '"') inStr = false; }
-      else { if (fixed[ci] === '"') inStr = true; }
-    }
-    if (inStr) fixed += '"';
-    // 统计未闭合的括号
-    var opens = 0, arrs = 0;
-    inStr = false; esc2 = false;
-    for (var cj = 0; cj < fixed.length; cj++){
-      var cc = fixed[cj];
-      if (inStr){ if (esc2){ esc2 = false; continue; } if (cc === '\\'){ esc2 = true; continue; } if (cc === '"') inStr = false; continue; }
-      if (cc === '"'){ inStr = true; continue; }
-      if (cc === '{') opens++; else if (cc === '}') opens--;
-      if (cc === '[') arrs++; else if (cc === ']') arrs--;
-    }
-    // 去掉末尾不完整的 key-value 对
-    fixed = fixed.replace(/,\s*"[^"]*"?\s*:?\s*"?[^"]*$/, '').replace(/,\s*\{[^}]*$/, '').replace(/,\s*$/, '');
-    while (arrs > 0){ fixed += ']'; arrs--; }
-    while (opens > 0){ fixed += '}'; opens--; }
-    return JSON.parse(fixed);
-  } catch(e2){}
-
-  // 5. 最后手段：new Function
-  try { return (new Function('return (' + raw + ');'))(); } catch(e){}
-
-  return null;
-}
-
-// 把原始模型输出规范化为标准的 structured 对象
-function _normalizeTimelineStructured(s){
-  if (!s || typeof s !== 'object') return null;
-  // 兼容字段名变体（有些模型会用不同字段名）
-  var result = {
-    storyTime: String(s.storyTime || s.story_time || s.time || s.timeRange || s.time_range || ''),
-    facts: _safeArr(s.facts || s.fact || s.事实 || []),
-    quotes: _safeArr(s.quotes || s.quote || s.原话 || []),
-    events: _safeArr(s.events || s.event || s.turning || s.事件 || s.转折 || []),
-    props: _safeArr(s.props || s.prop || s.items || s.道具 || s.物品 || []),
-    todos: _safeArr(s.todos || s.todo || s.待办 || [])
-  };
-  // 确保 facts/events/props 都是字符串数组
-  ['facts','events','props'].forEach(function(k){
-    result[k] = result[k].map(function(v){ return (v && typeof v === 'object') ? (v.text || v.content || JSON.stringify(v)) : String(v || ''); }).filter(Boolean);
-  });
-  // quotes 统一为字符串数组（有些模型会返回 {speaker, text} 对象）
-  result.quotes = result.quotes.map(function(q){
-    return (q && typeof q === 'object') ? (q.text || q.quote || q.content || JSON.stringify(q)) : String(q || '');
-  }).filter(Boolean);
-  // todos 统一为 {text, done} 格式
-  result.todos = result.todos.map(function(t){
-    if (typeof t === 'string') return { text: t, done: false };
-    if (t && typeof t === 'object') return { text: String(t.text || t.content || t.todo || ''), done: !!t.done };
-    return null;
-  }).filter(function(t){ return t && t.text; });
-  return result;
-}
 // ---- 时间线专用 API 队列（避免被聊天挤掉）----
 var _tlApiQueue = [];
 var _tlApiRunning = false;
@@ -34444,9 +34313,7 @@ async function _generateTimelineEntry(npcId, fromIdx, toIdx, mode, opts){
     : '';
 
   var defaultPrompt = targetMode === 'offline'
-    ? `【重要】你只能输出一个纯 JSON 对象，禁止在 JSON 前后输出任何文字说明。不要写"好的""以下是"之类的开头，不要用 markdown 代码块包裹，直接以 { 开头输出。
-
-你是剧情记录员，只记录客观发生的事，不做任何评价或定论。对话有时间范围标注，请在 storyTime 里写出日期和时段（如"3月17日 深夜"）。严格按以下 JSON 格式输出：
+    ? `你是剧情记录员，只记录客观发生的事，不做任何评价或定论。对话有时间范围标注，请在 storyTime 里写出日期和时段（如"3月17日 深夜"）。请输出纯 JSON（不要 markdown 代码块）：
 {
   "storyTime": "日期+时段，如：3月17日 深夜至18日凌晨",
   "facts": ["发生了什么事（只写事实，不写这意味着什么）"],
@@ -34457,9 +34324,7 @@ async function _generateTimelineEntry(npcId, fromIdx, toIdx, mode, opts){
 }
 ${todoHint}
 quotes 数组必须是纯字符串数组（string），不要返回对象或带 speaker 字段的结构。严禁出现"关系取得突破""首次主动""关系进一步"之类的评价性语言，只记录行为本身。`
-    : `【重要】你只能输出一个纯 JSON 对象，禁止在 JSON 前后输出任何文字说明。不要写"好的""以下是"之类的开头，不要用 markdown 代码块包裹，直接以 { 开头输出。
-
-你是剧情记录员，只记录客观发生的事，不做任何评价或定论。对话有时间范围标注，请在 storyTime 里写出日期和时段（如"3月15日 晚上至次日中午"）。严格按以下 JSON 格式输出：
+    : `你是剧情记录员，只记录客观发生的事，不做任何评价或定论。对话有时间范围标注，请在 storyTime 里写出日期和时段（如"3月15日 晚上至次日中午"）。请输出纯 JSON（不要 markdown 代码块）：
 {
   "storyTime": "日期+时段，如：3月15日 晚上至次日中午",
   "facts": ["发生了什么事（只写事实，不写这意味着什么）"],
@@ -34470,28 +34335,16 @@ quotes 数组必须是纯字符串数组（string），不要返回对象或带 
 }
 ${todoHint}
 严禁出现"关系取得突破""首次主动""关系进一步"之类的评价性语言，只记录行为本身。`;
-  // ★ JSON 格式强制约束（无论是否有自定义 prompt 都会注入）
-  var _jsonEnforcement = '【重要】你只能输出一个纯 JSON 对象，禁止在 JSON 前后输出任何文字说明、解释、markdown 代码块。直接以 { 开头，以 } 结尾。\n严格按此格式：{"storyTime":"日期+时段","facts":["事实"],"quotes":["原话字符串"],"events":["事件"],"props":["物品/地点"],"todos":[{"text":"待办","done":false}]}\nquotes 必须是纯字符串数组，不要返回对象。';
-
-  var systemPrompt;
-  if (customPrompt) {
-    // 用户有自定义 prompt → 在前面强制注入 JSON 格式约束 + 追加待办提示
-    systemPrompt = _jsonEnforcement + '\n\n' + customPrompt + (todoHint ? '\n\n' + todoHint : '');
-  } else {
-    systemPrompt = defaultPrompt;
-  }
+  var systemPrompt = customPrompt || defaultPrompt;
 
   try{
-    // ★ 线下模式内容更密，需要更多 output token
-    var _maxTk = targetMode === 'offline' ? 1200 : 800;
     var result = await PhoneAI.chat({
       system: systemPrompt,
-      messages: [{ role:'user', content: (_dateHint ? _dateHint + '\n\n' : '') + '对话片段（第' + (fromIdx+1) + '~' + (toIdx+1) + '条）：\n' + dialogText.slice(0, 4000) }],
+      messages: [{ role:'user', content: (_dateHint ? _dateHint + '\n\n' : '') + '对话片段（第' + (fromIdx+1) + '~' + (toIdx+1) + '条）：\n' + dialogText.slice(0, 3000) }],
       temperature: 0.3,
-      maxTokens: _maxTk,
+      maxTokens: 800,
       channel: 'background',
-      timeout: 60,
-      skipCooldown: true
+      timeout: 60
     });
     if (!result.ok) {
       if (!(opts && opts.silent)) { try{toast(result.error||'总结失败');}catch(e){} }
@@ -34501,19 +34354,15 @@ ${todoHint}
     var raw = String(result.data||'').trim();
     var structured = null;
     try{
-      var parsed = _robustParseTimelineJSON(raw);
-      if (!parsed) {
-        console.warn('[Timeline] _robustParseTimelineJSON 返回 null，原文前300字:', raw.slice(0, 300));
-      }
-      if (parsed && typeof parsed === 'object'){
-        structured = _normalizeTimelineStructured(parsed);
-      }
-      if (!structured || (!structured.facts.length && !structured.events.length && !structured.quotes.length && !structured.storyTime)){
-        if (!structured) structured = { storyTime:'', facts:['（解析异常，请重新生成）\n原文：' + raw.slice(0, 200)], quotes:[], events:[], props:[], todos:[] };
+      raw = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
+      structured = JSON.parse(raw);
+      if (structured && Array.isArray(structured.quotes)) {
+        structured.quotes = structured.quotes.map(function(q){
+          return (q && typeof q === 'object') ? (q.text || q.quote || JSON.stringify(q)) : String(q || '');
+        }).filter(Boolean);
       }
     }catch(e){
-      console.warn('[Timeline] JSON 解析失败:', e.message, '原文前300字:', raw.slice(0, 300));
-      structured = { storyTime:'', facts:['（总结解析失败，请重新生成）\n原文：' + raw.slice(0, 200)], quotes:[], events:[], props:[], todos:[] };
+      structured = { facts:[raw], quotes:[], turning:[], props:[], todos:[] };
     }
 
     // ===== 待办去重：与所有已有条目的 todos 对比 =====
@@ -34974,29 +34823,13 @@ function _openTimelineViewer(npcId){
             return _generateTimelineEntry(npcId, fromR, toR, viewMode, { forceRegen: true });
           });
           if (newE){
-            // ★ 在原位替换：找到旧条目删掉，把新条目插入相同位置
+            // 删掉旧的（sourceHash 以 REGEN_ 开头）
             var tlR3 = _loadTimeline(npcId);
             var bktR3 = _getTimelineModeState(tlR3, viewMode, true);
             var oldRi = bktR3.entries.findIndex(function(e){
               return String(e.sourceHash||'').startsWith('REGEN_') && e.range[0] === fromR;
             });
-            // 找到新追加的条目（_generateTimelineEntry push 到末尾的）
-            var newRi = bktR3.entries.findIndex(function(e){ return e.id === newE.id; });
-            if (oldRi >= 0 && newRi >= 0 && oldRi !== newRi){
-              // 从末尾取出新条目
-              var newEntry = bktR3.entries.splice(newRi, 1)[0];
-              // 重新定位旧条目（splice 可能改变了索引）
-              var oldRi2 = bktR3.entries.findIndex(function(e){
-                return String(e.sourceHash||'').startsWith('REGEN_') && e.range[0] === fromR;
-              });
-              if (oldRi2 >= 0){
-                bktR3.entries.splice(oldRi2, 1, newEntry); // 替换旧条目
-              } else {
-                bktR3.entries.push(newEntry); // fallback
-              }
-            } else if (oldRi >= 0) {
-              bktR3.entries.splice(oldRi, 1);
-            }
+            if (oldRi >= 0) bktR3.entries.splice(oldRi, 1);
             _saveTimeline(npcId, tlR3);
             _syncSummaryFromTimeline(npcId, viewMode);
             try{toast('重新生成完成 ✓');}catch(e){}
@@ -37136,9 +36969,21 @@ function renderMapApp(body){
             var _statusText7 = _we7.traceToTextStable(_n7.trace, _n7.npcName);
             g.setAttribute('data-status', _statusText7);
             g.style.cursor='pointer';
-            // 白边圆
+            // 外发光效果
+            var filterId = 'avGlow_'+_ni7;
+            var defs2 = svgEl.querySelector('defs') || document.createElementNS('http://www.w3.org/2000/svg','defs');
+            if (!defs2.parentNode) svgEl.insertBefore(defs2, svgEl.firstChild);
+            if (!svgEl.querySelector('#'+filterId)) {
+              var flt = document.createElementNS('http://www.w3.org/2000/svg','filter');
+              flt.setAttribute('id',filterId); flt.setAttribute('x','-40%'); flt.setAttribute('y','-40%'); flt.setAttribute('width','180%'); flt.setAttribute('height','180%');
+              flt.innerHTML = '<feGaussianBlur stdDeviation="1.5" result="blur"/><feFlood flood-color="rgba(212,190,140,0.5)" result="color"/><feComposite in="color" in2="blur" operator="in" result="glow"/><feMerge><feMergeNode in="glow"/><feMergeNode in="SourceGraphic"/></feMerge>';
+              defs2.appendChild(flt);
+            }
+            // 白底圆 + 淡金细边 + 柔光
             var circ = document.createElementNS('http://www.w3.org/2000/svg','circle');
-            circ.setAttribute('r','9'); circ.setAttribute('fill','#fff'); circ.setAttribute('stroke','#07c160'); circ.setAttribute('stroke-width','1.8');
+            circ.setAttribute('r','9'); circ.setAttribute('fill','#fff');
+            circ.setAttribute('stroke','rgba(200,178,130,0.6)'); circ.setAttribute('stroke-width','0.8');
+            circ.setAttribute('filter','url(#'+filterId+')');
             g.appendChild(circ);
             if (_avUrl) {
               // 用clipPath做圆形头像
@@ -46881,6 +46726,10 @@ setTimeout(function() {
   }
 
   function resolvePlace(npcId, behaviorKey, charState) {
+    // ★ 行为key → funcTag 映射（行为名和funcTag名不一定相同）
+    var BEHAVIOR_TO_FUNC = { snack:'buy_snack', nap:'rest', bathroom:'rest', social:'social', walk:'walk', relax:'relax', browse:'browse', eat:'eat' };
+    var searchKey = BEHAVIOR_TO_FUNC[behaviorKey] || behaviorKey;
+
     var mapData = null; try { mapData = (typeof _mapLoad === 'function') ? _mapLoad() : null; } catch(e) {}
     if (!mapData) return { lmId:null, offMap:true, offMapType:behaviorKey };
     var landmarks = mapData.landmarks || []; var bindPlaces = (charState && charState.bindPlaces) || {};
@@ -46888,8 +46737,8 @@ setTimeout(function() {
     if (bindType && bindPlaces[bindType]) { var boundLm = landmarks.find(function(l){ return l.id === bindPlaces[bindType]; }); if (boundLm) return { lmId:bindPlaces[bindType], offMap:false, lmName:boundLm.customName||boundLm.name }; }
     if (bindType && !bindPlaces[bindType] && ['office','school','store'].indexOf(bindType) >= 0) return { lmId:null, offMap:true, offMapType:bindType };
     var candidates = [];
-    for (var i = 0; i < landmarks.length; i++) { var lm = landmarks[i]; var ft = lm.funcTags || guessFuncTags(lm); if (ft.indexOf(behaviorKey) >= 0) { if (bindPlaces.home && lm.id === bindPlaces.home) continue; candidates.push(lm); } }
-    if (candidates.length === 0 && ['eat','browse','relax'].indexOf(behaviorKey) >= 0 && bindPlaces.home) { var homeLm = landmarks.find(function(l){ return l.id === bindPlaces.home; }); if (homeLm) return { lmId:homeLm.id, offMap:false, lmName:homeLm.customName||homeLm.name }; }
+    for (var i = 0; i < landmarks.length; i++) { var lm = landmarks[i]; var ft = lm.funcTags || guessFuncTags(lm); if (ft.indexOf(searchKey) >= 0 || ft.indexOf(behaviorKey) >= 0) { if (bindPlaces.home && lm.id === bindPlaces.home) continue; candidates.push(lm); } }
+    if (candidates.length === 0 && ['eat','browse','relax','snack','nap'].indexOf(behaviorKey) >= 0 && bindPlaces.home) { var homeLm = landmarks.find(function(l){ return l.id === bindPlaces.home; }); if (homeLm) return { lmId:homeLm.id, offMap:false, lmName:homeLm.customName||homeLm.name }; }
     if (candidates.length === 0) return { lmId:null, offMap:true, offMapType:behaviorKey };
     var recent = (charState && charState.recentPlaceIds) || [];
     candidates.sort(function(a,b){ return (recent.indexOf(a.id)>=0?1:0) - (recent.indexOf(b.id)>=0?1:0); });
@@ -46905,7 +46754,7 @@ setTimeout(function() {
   var LIGHT_TEMPLATES = {
     work:['{name}在上班','{name}在工作中'], flex_work:['{name}在工作','{name}在远程办公'], overtime:['{name}在加班'], coffee_break:['{name}去买了杯咖啡'],
     study:['{name}在上课','{name}在学习'], shift_work:['{name}在上班','{name}在店里忙'],
-    eat:['{name}在{place}吃饭','{name}去吃了点东西'], buy_snack:['{name}去便利店了','{name}买了点零食'], buy_drink:['{name}买了饮料'],
+    eat:['{name}在{place}吃饭','{name}去吃了点东西'], snack:['{name}在吃零食','{name}嗑了点东西'], buy_snack:['{name}去便利店了','{name}买了点零食'], buy_drink:['{name}买了饮料'],
     cook:['{name}在家做饭'], sleep:['{name}已回家休息','{name}睡下了'], rest:['{name}在家歇着','{name}在休息'], bath:['{name}在洗澡'],
     browse:['{name}在刷手机','{name}在闲逛'], relax:['{name}在放松','{name}发呆中'],
     walk:['{name}在{place}散步','{name}出去走走了'], sit_and_relax:['{name}在{place}发呆','{name}坐着放空'],
