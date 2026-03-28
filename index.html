@@ -36849,7 +36849,7 @@ function renderMapApp(body){
   var mapData = _mapEnsure();
 
   // ★ 补丁6: 打开地图时对所有联系人做一次轻量 tick
-  try { var _allC = loadContactsDB(); var _cls = (_allC&&_allC.contacts)||[]; for (var _ci=0;_ci<_cls.length;_ci++) { if(_cls[_ci].id) try { LifeEngine.tick(_cls[_ci].id); } catch(_te){} } } catch(_e2){}
+  try { var _allTh = loadThreads(); var _cls = (_allTh&&_allTh.list)||[]; for (var _ci=0;_ci<_cls.length;_ci++) { if(_cls[_ci].id && String(_cls[_ci].id).indexOf('npc_')===0) try { LifeEngine.tick(_cls[_ci].id); } catch(_te){} } } catch(_e2){}
 
   var npcId = state.chatTarget || null;
 
@@ -36936,12 +36936,12 @@ function renderMapApp(body){
   if (typeof window.MeowWorldEngine !== 'undefined') {
     try {
       var _we7 = window.MeowWorldEngine;
-      var _db7 = loadContactsDB();
-      var _contacts7 = (_db7 && _db7.contacts) || [];
+      var _th7 = loadThreads();
+      var _contacts7 = (_th7 && _th7.list) || [];
       var _lmGroups = {}; // lmId → [{name, avatar, trace}]
       var _offMapList = [];
       for (var _i7 = 0; _i7 < _contacts7.length; _i7++) {
-        var _c7 = _contacts7[_i7]; if (!_c7.id) continue;
+        var _c7 = _contacts7[_i7]; if (!_c7.id || String(_c7.id).indexOf('npc_')!==0) continue;
         var _tr7 = _we7.getLatestTrace(_c7.id); if (!_tr7) continue;
         var _entry7 = { npcId:_c7.id, npcName:_c7.name||String(_c7.id), npcAvatar:_c7.avatar||((_c7.name||'?').charAt(0)), trace:_tr7 };
         if (_tr7.offMap) { _entry7.statusText = _we7.traceToTextStable(_tr7, _c7.name||''); _offMapList.push(_entry7); }
