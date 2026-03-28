@@ -36113,6 +36113,18 @@ function _mapShowLandmarkDetail(container, mapData, lmId, npcId){
   html += '<textarea class="mapNoteInput" data-el="mapNote" placeholder="记录你的故事…" rows="2">'+esc(lm.note||'')+'</textarea>';
   html += '</div>';
 
+  // ★ 地标管理区（折叠式，默认收起）
+  var _ftDisplay = '';
+  try { _ftDisplay = (lm.funcTags || (typeof MeowWorldEngine!=='undefined' ? MeowWorldEngine.guessFuncTags(lm) : (lm.tags||['social']))).join(', '); } catch(e){ _ftDisplay = 'social'; }
+  html += '<div style="margin-top:6px;border-top:1px solid rgba(0,0,0,.04);padding-top:8px;">';
+  html += '<div data-act="mapLmToggleMgmt" style="display:flex;align-items:center;justify-content:space-between;padding:6px 4px;cursor:pointer;opacity:.45;font-size:11px;"><span>⚙ 地标管理</span><span data-el="mgmtArrow" style="font-size:9px;">▼</span></div>';
+  html += '<div data-el="mgmtPanel" style="display:none;">';
+  html += '<div class="mapActRow" data-act="mapLmEditEmoji" data-lmid="'+lm.id+'" style="padding:8px 12px;font-size:12px;"><span class="mapActLabel"><span>图标 '+esc(lm.emoji||'📍')+'</span></span><span class="mapActArrow" style="opacity:.4;">✏️</span></div>';
+  html += '<div class="mapActRow" data-act="mapLmEditDesc" data-lmid="'+lm.id+'" style="padding:8px 12px;font-size:12px;"><span class="mapActLabel"><span>简介</span></span><span class="mapActArrow" style="opacity:.4;">✏️</span></div>';
+  html += '<div class="mapActRow" data-act="mapLmEditTags" data-lmid="'+lm.id+'" style="padding:8px 12px;font-size:12px;"><span class="mapActLabel"><span>功能</span></span><span class="mapActArrow" style="opacity:.4;">✏️</span></div>';
+  html += '<div class="mapActRow" data-act="mapLmDelete" data-lmid="'+lm.id+'" style="padding:8px 12px;font-size:12px;color:rgba(200,60,60,.6);"><span class="mapActLabel"><span>删除地标</span></span><span class="mapActArrow">›</span></div>';
+  html += '</div></div>';
+
   html += '</div>';
 
   // 移除旧卡片
@@ -36239,6 +36251,88 @@ function _mapShowLandmarkDetail(container, mapData, lmId, npcId){
       _mapSave(mapData);
     });
   }
+
+  // ★ 地标管理事件（只拦截地标管理相关的 act，不影响其他按钮）
+  var _lmMgmtActs = {mapLmEditEmoji:1, mapLmEditDesc:1, mapLmEditTags:1, mapLmDelete:1, mapLmToggleMgmt:1};
+  wrap.addEventListener('click', function(ev2){
+    var tgt2 = ev2.target.closest('[data-act]');
+    if (!tgt2) return;
+    var act2 = tgt2.getAttribute('data-act');
+    if (!_lmMgmtActs[act2]) return; // ★ 不是地标管理的 act 就不拦截
+    ev2.stopPropagation(); // 防止冒泡到原有事件
+
+    // 折叠/展开
+    if (act2 === 'mapLmToggleMgmt') {
+      var panel = wrap.querySelector('[data-el="mgmtPanel"]');
+      var arrow = wrap.querySelector('[data-el="mgmtArrow"]');
+      if (panel) { var isHidden = panel.style.display === 'none'; panel.style.display = isHidden ? 'block' : 'none'; if(arrow) arrow.textContent = isHidden ? '▲' : '▼'; }
+      return;
+    }
+
+    var targetLmId = tgt2.getAttribute('data-lmid') || lm.id;
+    var targetLm = (mapData.landmarks||[]).find(function(l){return l.id===targetLmId;});
+    if (!targetLm) return;
+
+    // 编辑 emoji
+    if (act2 === 'mapLmEditEmoji') {
+      var emojiList = ['🏠','🏢','🏫','🏪','💪','🍽️','🥗','🛍️','🌳','☕','📚','🍻','🏥','🚉','🎮','🌲','🎨','♨️','🏖️','🎤','💐','🌸','🔭','🏘️','🏕️','🎠','🍞','📍'];
+      var emojiHtml = '<div style="padding:4px 0;"><div style="font-size:14px;font-weight:600;margin-bottom:8px;">选择图标</div>'
+        + '<div style="display:flex;flex-wrap:wrap;gap:6px;">'
+        + emojiList.map(function(e){ return '<span data-emoji="'+e+'" style="font-size:24px;cursor:pointer;padding:4px;border-radius:6px;'+(e===targetLm.emoji?'background:rgba(7,193,96,.15);':'')+'">'+e+'</span>'; }).join('')
+        + '</div></div>';
+      var ov = _cpShowOverlay(emojiHtml);
+      ov.addEventListener('click', function(e3){
+        var em = e3.target.getAttribute('data-emoji');
+        if (em) { targetLm.emoji = em; _mapSave(mapData); ov.remove(); wrap.remove(); _mapShowLandmarkDetail(container, mapData, targetLmId, npcId); }
+      });
+    }
+
+    // 编辑简介
+    if (act2 === 'mapLmEditDesc') {
+      var descHtml = '<div style="padding:4px 0;"><div style="font-size:14px;font-weight:600;margin-bottom:8px;">编辑简介</div>'
+        + '<textarea data-el="descInput" style="width:100%;height:60px;padding:8px;border:1px solid rgba(0,0,0,.1);border-radius:8px;font-size:13px;outline:none;box-sizing:border-box;resize:none;font-family:inherit;">'+esc(targetLm.desc||'')+'</textarea>'
+        + '<div style="display:flex;gap:8px;margin-top:8px;">'
+        + '<button data-el="descSave" style="flex:1;padding:10px;border-radius:10px;border:0;background:#07c160;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">保存</button>'
+        + '<button data-el="descCancel" style="flex:1;padding:10px;border-radius:10px;border:1px solid rgba(0,0,0,.1);background:#fff;font-size:13px;cursor:pointer;">取消</button></div></div>';
+      var ov2 = _cpShowOverlay(descHtml);
+      ov2.querySelector('[data-el="descCancel"]').addEventListener('click', function(){ ov2.remove(); });
+      ov2.querySelector('[data-el="descSave"]').addEventListener('click', function(){ var v = (ov2.querySelector('[data-el="descInput"]')||{}).value||''; targetLm.desc=v.trim(); _mapSave(mapData); ov2.remove(); wrap.remove(); _mapShowLandmarkDetail(container, mapData, targetLmId, npcId); });
+    }
+
+    // 编辑功能标签
+    if (act2 === 'mapLmEditTags') {
+      var validTags = ['sleep','rest','cook','bath','browse','relax','work','overtime','coffee_break','flex_work','study','shift_work','eat','buy_snack','buy_drink','shopping','walk','sit_and_relax','workout','stretch','shower','social','commute','checkup'];
+      var tagLabels = {sleep:'睡觉',rest:'休息',cook:'做饭',bath:'洗澡',browse:'闲逛',relax:'放松',work:'上班',overtime:'加班',coffee_break:'咖啡',flex_work:'远程办公',study:'学习',shift_work:'轮班',eat:'吃饭',buy_snack:'买零食',buy_drink:'买饮料',shopping:'购物',walk:'散步',sit_and_relax:'发呆',workout:'锻炼',stretch:'拉伸',shower:'洗浴',social:'社交',commute:'通勤',checkup:'看病'};
+      var curTags = targetLm.funcTags || [];
+      var tagHtml = '<div style="padding:4px 0;"><div style="font-size:14px;font-weight:600;margin-bottom:8px;">设置地标功能</div>'
+        + '<div style="display:flex;flex-wrap:wrap;gap:4px;">'
+        + validTags.map(function(t){ return '<label style="display:inline-flex;align-items:center;gap:3px;padding:4px 8px;border-radius:6px;font-size:11px;background:rgba(0,0,0,.04);cursor:pointer;"><input type="checkbox" data-tag="'+t+'"'+(curTags.indexOf(t)>=0?' checked':'')+' style="width:14px;height:14px;accent-color:#07c160;"/>'+(tagLabels[t]||t)+'</label>'; }).join('')
+        + '</div>'
+        + '<div style="display:flex;gap:8px;margin-top:10px;">'
+        + '<button data-el="tagSave" style="flex:1;padding:10px;border-radius:10px;border:0;background:#07c160;color:#fff;font-size:13px;font-weight:600;cursor:pointer;">保存</button>'
+        + '<button data-el="tagCancel" style="flex:1;padding:10px;border-radius:10px;border:1px solid rgba(0,0,0,.1);background:#fff;font-size:13px;cursor:pointer;">取消</button></div></div>';
+      var ov3 = _cpShowOverlay(tagHtml);
+      ov3.querySelector('[data-el="tagCancel"]').addEventListener('click', function(){ ov3.remove(); });
+      ov3.querySelector('[data-el="tagSave"]').addEventListener('click', function(){
+        var newTags = []; ov3.querySelectorAll('input[data-tag]:checked').forEach(function(cb){ newTags.push(cb.getAttribute('data-tag')); });
+        if (newTags.length===0) newTags=['social'];
+        targetLm.funcTags = newTags;
+        targetLm.actions = (typeof MeowWorldEngine!=='undefined' && MeowWorldEngine._generateActionsFromFuncTags) ? MeowWorldEngine._generateActionsFromFuncTags(newTags, targetLm.customName||targetLm.name) : targetLm.actions;
+        _mapSave(mapData); ov3.remove(); wrap.remove(); _mapShowLandmarkDetail(container, mapData, targetLmId, npcId);
+      });
+    }
+
+    // 删除地标
+    if (act2 === 'mapLmDelete') {
+      var delName = targetLm.customName || targetLm.name;
+      if (confirm('确定删除地标「'+delName+'」吗？')) {
+        mapData.landmarks = (mapData.landmarks||[]).filter(function(l){ return l.id !== targetLmId; });
+        _mapSave(mapData);
+        wrap.remove();
+        try{ toast('已删除: '+delName); }catch(e){}
+      }
+    }
+  });
 }
 
 // ---- 场景触发（复用 Phase 3B + 钱包 + 状态联动） ----
@@ -46693,6 +46787,14 @@ setTimeout(function() {
     var worldData; try { worldData=JSON.parse(jsonStr.substring(start,end+1)); } catch(e){ return { ok:false, error:'JSON 解析失败: '+e.message }; }
     if (!worldData.landmarks||!Array.isArray(worldData.landmarks)||worldData.landmarks.length===0) return { ok:false, error:'AI 返回的地标列表为空' };
     worldData.landmarks.forEach(function(lm,idx){ if(!lm.id) lm.id='lm_'+String(idx+1).padStart(3,'0'); if(!lm.name) lm.name='未命名地标'; if(!lm.emoji) lm.emoji='📍'; if(!Array.isArray(lm.funcTags)) lm.funcTags=['social']; lm.funcTags=lm.funcTags.filter(function(t){return VALID_FUNC_TAGS.indexOf(t)>=0;}); if(lm.funcTags.length===0) lm.funcTags=['social']; });
+    // ★ 去重：按名字去重（AI 有时会生成重复地标）
+    var _seenNames = {};
+    worldData.landmarks = worldData.landmarks.filter(function(lm){
+      var key = String(lm.name||'').trim().toLowerCase();
+      if (_seenNames[key]) return false;
+      _seenNames[key] = true;
+      return true;
+    });
     if (!worldData.npcBindings) worldData.npcBindings = {};
     console.log('[WorldEngine] AI 生成成功:', worldData.landmarks.length, '个地标');
     var mapData = null; try { mapData = (typeof _mapEnsure==='function') ? _mapEnsure() : null; } catch(e) {} if (!mapData) return { ok:false, error:'无法初始化基础地图' };
@@ -46729,7 +46831,7 @@ setTimeout(function() {
     writeMapTrace:writeMapTrace, readMapTrace:readMapTrace, getLatestTrace:getLatestTrace,
     traceToText:traceToText, traceToTextStable:traceToTextStable,
     generateWorld:generateWorld, bindNewNpc:bindNewNpc, worldApiCall:worldApiCall,
-    _getApiConfig:_getApiConfig, _autoLayoutLandmarks:_autoLayoutLandmarks
+    _getApiConfig:_getApiConfig, _autoLayoutLandmarks:_autoLayoutLandmarks, _generateActionsFromFuncTags:_generateActionsFromFuncTags
   };
   // ★ 启动清理：删除幽灵 player 的残留数据
   try {
