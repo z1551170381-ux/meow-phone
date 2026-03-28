@@ -20732,14 +20732,17 @@ const npc = _wxGetChatTargetMeta(npcId);
           if (isBackgroundCall) {
             channel = 'background';
             // ★ 后台调用全局冷却：防止短时间内多次调用 API
-            var globalCooldownKey = '_meowBgApiLastCall';
-            var lastApiCall = this[globalCooldownKey] || 0;
-            var cooldownMs = 30000; // 30秒冷却
-            if (Date.now() - lastApiCall < cooldownMs) {
-              console.log('[PhoneAI] 后台 API 冷却中，跳过');
-              return { ok:false, data:null, error:'API 冷却中' };
+            // skipCooldown: 时间线批量总结等串行队列已自行控制节奏，不需要冷却
+            if (!(opts && opts.skipCooldown)) {
+              var globalCooldownKey = '_meowBgApiLastCall';
+              var lastApiCall = this[globalCooldownKey] || 0;
+              var cooldownMs = 30000; // 30秒冷却
+              if (Date.now() - lastApiCall < cooldownMs) {
+                console.log('[PhoneAI] 后台 API 冷却中，跳过');
+                return { ok:false, data:null, error:'API 冷却中' };
+              }
+              this[globalCooldownKey] = Date.now();
             }
-            this[globalCooldownKey] = Date.now();
           }
           if (channel !== 'background') channel = 'default';
           var cfg = this._getConfig(channel);
@@ -20937,7 +20940,8 @@ const npc = _wxGetChatTargetMeta(npcId);
             temperature: (opts && opts.temperature != null) ? opts.temperature : 0.85,
             maxTokens: (opts && opts.maxTokens) ? opts.maxTokens : 1024,
             timeout: (opts && opts.timeout) ? opts.timeout : 30,
-            channel: (opts && opts.channel) || 'default'
+            channel: (opts && opts.channel) || 'default',
+            skipCooldown: !!(opts && opts.skipCooldown)
           });
         },
 
@@ -34462,16 +34466,26 @@ quotes 数组必须是纯字符串数组（string），不要返回对象或带 
 }
 ${todoHint}
 严禁出现"关系取得突破""首次主动""关系进一步"之类的评价性语言，只记录行为本身。`;
-  var systemPrompt = customPrompt || defaultPrompt;
+  // ★ JSON 格式强制约束（无论是否有自定义 prompt 都会注入）
+  var _jsonEnforcement = '【重要】你只能输出一个纯 JSON 对象，禁止在 JSON 前后输出任何文字说明、解释、markdown 代码块。直接以 { 开头，以 } 结尾。\n严格按此格式：{"storyTime":"日期+时段","facts":["事实"],"quotes":["原话字符串"],"events":["事件"],"props":["物品/地点"],"todos":[{"text":"待办","done":false}]}\nquotes 必须是纯字符串数组，不要返回对象。';
+
+  var systemPrompt;
+  if (customPrompt) {
+    // 用户有自定义 prompt → 在前面强制注入 JSON 格式约束 + 追加待办提示
+    systemPrompt = _jsonEnforcement + '\n\n' + customPrompt + (todoHint ? '\n\n' + todoHint : '');
+  } else {
+    systemPrompt = defaultPrompt;
+  }
 
   try{
     var result = await PhoneAI.chat({
       system: systemPrompt,
-      messages: [{ role:'user', content: (_dateHint ? _dateHint + '\n\n' : '') + '对话片段（第' + (fromIdx+1) + '~' + (toIdx+1) + '条）：\n' + dialogText.slice(0, 3000) }],
+      messages: [{ role:'user', content: (_dateHint ? _dateHint + '\n\n' : '') + '对话片段（第' + (fromIdx+1) + '~' + (toIdx+1) + '条）：\n' + dialogText.slice(0, 4000) }],
       temperature: 0.3,
       maxTokens: 800,
       channel: 'background',
-      timeout: 60
+      timeout: 60,
+      skipCooldown: true
     });
     if (!result.ok) {
       if (!(opts && opts.silent)) { try{toast(result.error||'总结失败');}catch(e){} }
