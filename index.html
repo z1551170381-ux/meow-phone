@@ -34189,11 +34189,15 @@ function _robustParseTimelineJSON(raw){
   // 清除零宽字符、BOM
   raw = raw.replace(/[\u200B-\u200F\u2028\u2029\uFEFF]/g, '').trim();
 
-  // 1. ★ 先提取 {...} 块（最可靠：直接跳过模型一切废话、代码块标记、思考内容）
+  // 1. ★ 先提取 {...} 块
   var firstBrace = raw.indexOf('{');
   var lastBrace = raw.lastIndexOf('}');
   if (firstBrace >= 0 && lastBrace > firstBrace){
     raw = raw.substring(firstBrace, lastBrace + 1);
+  } else if (firstBrace >= 0) {
+    // ★ 有 { 但没有 } → JSON 被 max_tokens 截断，取 { 之后的内容交给截断修复
+    console.warn('[_robustParse] JSON 被截断（有{无}），尝试修复');
+    raw = raw.substring(firstBrace);
   } else {
     console.warn('[_robustParse] 未找到 JSON 大括号，原文前200字:', raw.slice(0, 200));
     return null;
@@ -34203,9 +34207,7 @@ function _robustParseTimelineJSON(raw){
   try { raw = _meowSanitizeJSONish(raw); } catch(e){}
 
   // 3. 直接尝试解析
-  try { return JSON.parse(raw); } catch(e){
-    console.warn('[_robustParse] JSON.parse 失败:', e.message, '前100字:', raw.slice(0, 100));
-  }
+  try { return JSON.parse(raw); } catch(e){}
 
   // 4. 尝试修复被截断的 JSON（模型 max_tokens 截断常见）
   try {
@@ -34480,11 +34482,13 @@ ${todoHint}
   }
 
   try{
+    // ★ 线下模式内容更密，需要更多 output token
+    var _maxTk = targetMode === 'offline' ? 1200 : 800;
     var result = await PhoneAI.chat({
       system: systemPrompt,
       messages: [{ role:'user', content: (_dateHint ? _dateHint + '\n\n' : '') + '对话片段（第' + (fromIdx+1) + '~' + (toIdx+1) + '条）：\n' + dialogText.slice(0, 4000) }],
       temperature: 0.3,
-      maxTokens: 800,
+      maxTokens: _maxTk,
       channel: 'background',
       timeout: 60,
       skipCooldown: true
