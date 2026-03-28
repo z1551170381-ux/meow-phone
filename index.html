@@ -34189,30 +34189,25 @@ function _robustParseTimelineJSON(raw){
   // 清除零宽字符、BOM
   raw = raw.replace(/[\u200B-\u200F\u2028\u2029\uFEFF]/g, '').trim();
 
-  // 1. 去掉 markdown 代码块
-  var codeBlockMatch = raw.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (codeBlockMatch && codeBlockMatch[1]) raw = codeBlockMatch[1].trim();
-  else raw = raw.replace(/```json\s*/gi, '').replace(/```\s*/gi, '').trim();
-
-  // 2. 提取第一个 {...} 块（跳过模型的前后废话）
+  // 1. ★ 先提取 {...} 块（最可靠：直接跳过模型一切废话、代码块标记、思考内容）
   var firstBrace = raw.indexOf('{');
   var lastBrace = raw.lastIndexOf('}');
   if (firstBrace >= 0 && lastBrace > firstBrace){
     raw = raw.substring(firstBrace, lastBrace + 1);
   } else {
-    console.warn('[_robustParse] 未找到 JSON 大括号，原文:', raw.slice(0, 200));
+    console.warn('[_robustParse] 未找到 JSON 大括号，原文前200字:', raw.slice(0, 200));
     return null;
   }
 
-  // 3. 用 _meowSanitizeJSONish 修复智能引号、字符串内换行、尾逗号等
+  // 2. 用 _meowSanitizeJSONish 修复智能引号、字符串内换行、尾逗号等
   try { raw = _meowSanitizeJSONish(raw); } catch(e){}
 
-  // 4. 直接尝试解析
+  // 3. 直接尝试解析
   try { return JSON.parse(raw); } catch(e){
-    console.warn('[_robustParse] 第一次 JSON.parse 失败:', e.message, '前100字:', raw.slice(0, 100));
+    console.warn('[_robustParse] JSON.parse 失败:', e.message, '前100字:', raw.slice(0, 100));
   }
 
-  // 5. 尝试修复被截断的 JSON（模型 max_tokens 截断常见）
+  // 4. 尝试修复被截断的 JSON（模型 max_tokens 截断常见）
   try {
     var fixed = raw;
     // 检查字符串是否未闭合
@@ -34239,7 +34234,7 @@ function _robustParseTimelineJSON(raw){
     return JSON.parse(fixed);
   } catch(e2){}
 
-  // 6. 最后手段：new Function
+  // 5. 最后手段：new Function
   try { return (new Function('return (' + raw + ');'))(); } catch(e){}
 
   return null;
@@ -34975,13 +34970,29 @@ function _openTimelineViewer(npcId){
             return _generateTimelineEntry(npcId, fromR, toR, viewMode, { forceRegen: true });
           });
           if (newE){
-            // 删掉旧的（sourceHash 以 REGEN_ 开头）
+            // ★ 在原位替换：找到旧条目删掉，把新条目插入相同位置
             var tlR3 = _loadTimeline(npcId);
             var bktR3 = _getTimelineModeState(tlR3, viewMode, true);
             var oldRi = bktR3.entries.findIndex(function(e){
               return String(e.sourceHash||'').startsWith('REGEN_') && e.range[0] === fromR;
             });
-            if (oldRi >= 0) bktR3.entries.splice(oldRi, 1);
+            // 找到新追加的条目（_generateTimelineEntry push 到末尾的）
+            var newRi = bktR3.entries.findIndex(function(e){ return e.id === newE.id; });
+            if (oldRi >= 0 && newRi >= 0 && oldRi !== newRi){
+              // 从末尾取出新条目
+              var newEntry = bktR3.entries.splice(newRi, 1)[0];
+              // 重新定位旧条目（splice 可能改变了索引）
+              var oldRi2 = bktR3.entries.findIndex(function(e){
+                return String(e.sourceHash||'').startsWith('REGEN_') && e.range[0] === fromR;
+              });
+              if (oldRi2 >= 0){
+                bktR3.entries.splice(oldRi2, 1, newEntry); // 替换旧条目
+              } else {
+                bktR3.entries.push(newEntry); // fallback
+              }
+            } else if (oldRi >= 0) {
+              bktR3.entries.splice(oldRi, 1);
+            }
             _saveTimeline(npcId, tlR3);
             _syncSummaryFromTimeline(npcId, viewMode);
             try{toast('重新生成完成 ✓');}catch(e){}
