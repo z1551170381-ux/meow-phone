@@ -9966,7 +9966,6 @@ if (act === 'exportChat'){ exportChatToMainDraft(); return; }
       window._meowLoadThreads = function(){ try{ return loadThreads(); }catch(e){ return {list:[]}; } };
       // ★ 暴露状态读取函数给心声系统使用
       window._meowLoadCharState = function(npcId){ try{ return _loadCharState(npcId); }catch(e){ return null; } };
-      window._meowLifeEngine = LifeEngine;
       window._meowLoadCharExtra = function(npcId){ try{ return _loadCharExtra(npcId); }catch(e){ return {}; } };
       window._meowSaveCharState = function(npcId, s){ try{ _saveCharState(npcId, s); }catch(e){} };
       window._meowFindContactById = function(db, id){ try{ return findContactById(db, id); }catch(e){ return null; } };
@@ -23893,6 +23892,9 @@ const npc = _wxGetChatTargetMeta(npcId);
 
         return { tick, getLifeLog, flushMsgQueue, catchUpProactiveMsgs, extractPersonality, BEHAVIORS, _generateAIMsg, ensureDailyOnlineProactive:_ensureDailyOnlineProactive };
       })();
+
+      // ★ 暴露 LifeEngine 到 window（必须在定义之后）
+      window._meowLifeEngine = LifeEngine;
 
 
 
