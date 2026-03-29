@@ -5805,8 +5805,7 @@ case '🍪': return s('<circle cx="12" cy="12" r="10"/><circle cx="8" cy="9" r="
   -webkit-transform: translateZ(0); transform: translateZ(0);
 }
 #${ID} .mapIslandSvg{
-  transition:transform 0.08s ease-out; will-change:transform;
-  -webkit-backface-visibility: hidden; backface-visibility: hidden;
+  transition:transform 0.08s ease-out;
   image-rendering: auto;
 }
 #${ID} .mapLm circle.mapLmBg{ transition:r 0.15s ease, fill 0.15s ease; }
@@ -37344,13 +37343,16 @@ function _mapLoad(){
   var raw = _phLoad(PHONE_CHAT_KEYS.map, null);
   return raw;
 }
+var _mapSaveTimer = null;
 function _mapSave(data){
   try{
     _phSave(PHONE_CHAT_KEYS.map, data);
-    // 诊断日志：确认保存被调用，含房子列表中的家具数量
-    var houseInfo = (data&&data.houses||[]).map(function(h){ return h.id+':'+(h.rooms&&h.rooms.furniture?h.rooms.furniture.length:'no-rooms'); }).join(',');
-    console.log('[mapSave] 已保存 houses='+houseInfo+' npcBalances='+JSON.stringify(data&&data.npcBalances||{}));
-  }catch(e){ console.error('[mapSave] 保存失败:', e); }
+  }catch(e){}
+}
+// ★ 防抖版：手势中频繁调用时只保存最后一次（2秒内合并）
+function _mapSaveDebounced(data){
+  clearTimeout(_mapSaveTimer);
+  _mapSaveTimer = setTimeout(function(){ _mapSave(data); }, 2000);
 }
 function _mapLoadLog(){
   return _phLoad(PHONE_CHAT_KEYS.maplog, { v:1, lastAutoGen:0, logs:[] });
@@ -38195,25 +38197,45 @@ function _mapShowLandmarkDetail(container, mapData, lmId, npcId){
   var _mainTag = (lm.funcTags||['social'])[0]||'social';
   var _sceneBg = _sceneGradients[_mainTag] || 'linear-gradient(170deg,#37474F 0%,#455A64 35%,#546E7A 70%,#607D8B 100%)';
 
-  var _bgStyle = lm.bgImage
-    ? 'background:url('+esc(lm.bgImage)+') center/cover;'
-    : 'background:'+_sceneBg+';';
+  var _bgStyle, _isDefaultBg;
+  if (lm.bgImage) {
+    _bgStyle = 'background:url('+esc(lm.bgImage)+') center/cover;';
+    _isDefaultBg = false;
+  } else {
+    // ★ 默认：玻璃模糊底 + 大图标
+    _bgStyle = 'background:linear-gradient(135deg,rgba(120,120,120,.15),rgba(80,80,80,.08));backdrop-filter:blur(30px) saturate(120%);-webkit-backdrop-filter:blur(30px) saturate(120%);';
+    _isDefaultBg = true;
+  }
 
-  html += '<div class="mapSceneArea" style="position:relative;'+_bgStyle+'height:320px;padding:20px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;">';
+  html += '<div class="mapSceneArea" style="position:relative;'+_bgStyle+'height:280px;padding:20px;display:flex;flex-direction:column;justify-content:space-between;overflow:hidden;">';
 
   // 遮罩层
-  if(lm.bgImage) html += '<div style="position:absolute;inset:0;background:linear-gradient(transparent 20%,rgba(0,0,0,.55));pointer-events:none;"></div>';
+  if(!_isDefaultBg) html += '<div style="position:absolute;inset:0;background:linear-gradient(transparent 20%,rgba(0,0,0,.55));pointer-events:none;"></div>';
+  else html += '<div style="position:absolute;inset:0;background:linear-gradient(135deg,rgba(255,255,255,.3),rgba(255,255,255,.08));pointer-events:none;"></div>';
 
-  // ── 微粒噪点纹理（模拟航拍质感） ──
-  html += '<div style="position:absolute;inset:0;pointer-events:none;opacity:.08;background-image:radial-gradient(circle,#fff 1px,transparent 1px);background-size:14px 14px;"></div>';
+  // ── 微粒噪点纹理 ──
+  html += '<div style="position:absolute;inset:0;pointer-events:none;opacity:.05;background-image:radial-gradient(circle,#000 1px,transparent 1px);background-size:14px 14px;"></div>';
 
-  // ── 左上：地标名 ──
+  // ── 默认模式：大图标居中 ──
+  if (_isDefaultBg) {
+    html += '<div style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center;pointer-events:none;">'
+      + '<div style="font-size:64px;opacity:.35;filter:drop-shadow(0 4px 12px rgba(0,0,0,.1));">'+(lm.emoji||'📍')+'</div></div>';
+  }
+
+  // ── 左上：地标名 + 设置图片按钮 ──
+  var _nameColor = _isDefaultBg ? 'var(--ph-text,#333)' : '#fff';
+  var _subColor = _isDefaultBg ? 'var(--ph-text-sub,#888)' : 'rgba(255,255,255,.45)';
   html += '<div style="position:relative;z-index:2;">';
-  html += '<div style="font-size:10px;color:rgba(255,255,255,.45);letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">'+esc(lm.desc||atmo||'')+'</div>';
+  html += '<div style="font-size:10px;color:'+_subColor+';letter-spacing:1px;text-transform:uppercase;margin-bottom:4px;">'+esc(lm.desc||atmo||'')+'</div>';
   html += '<div style="display:flex;align-items:center;gap:8px;">';
-  html += '<span data-el="mapLmName" style="font-size:22px;font-weight:700;color:#fff;text-shadow:0 2px 8px rgba(0,0,0,.3);letter-spacing:1px;">'+esc(displayName)+'</span>';
-  html += '<span data-act="mapEditName" style="font-size:12px;cursor:pointer;color:rgba(255,255,255,.4);">✏️</span>';
+  html += '<span data-el="mapLmName" style="font-size:22px;font-weight:700;color:'+_nameColor+';text-shadow:0 2px 8px rgba(0,0,0,.15);letter-spacing:1px;">'+esc(displayName)+'</span>';
+  html += '<span data-act="mapEditName" style="font-size:12px;cursor:pointer;color:'+_subColor+';">✏️</span>';
   html += '</div></div>';
+
+  // ── 右下：设置图片按钮 ──
+  html += '<div style="position:absolute;bottom:14px;right:16px;z-index:3;display:flex;gap:6px;">'
+    + '<button data-act="mapLmSetImage" data-lmid="'+lm.id+'" style="background:rgba(0,0,0,.2);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);border:1px solid rgba(255,255,255,.15);color:'+(lm.bgImage?'rgba(255,255,255,.7)':'var(--ph-text-sub,#888)')+';width:32px;height:32px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:14px;cursor:pointer;">📷</button>'
+    + '</div>';
 
   // ── 发光白点热点（随机分布在场景中） ──
   var _actions = lm.actions||[];
@@ -38290,15 +38312,10 @@ function _mapShowLandmarkDetail(container, mapData, lmId, npcId){
     html += '</div>';
   }
 
-  // ── 右下角小地图缩略（装饰） ──
-  html += '<div style="position:absolute;bottom:12px;left:16px;z-index:2;opacity:.5;">';
-  html += '<div style="font-size:24px;">'+(lm.emoji||'📍')+'</div>';
-  html += '</div>';
-
   html += '</div>'; // end mapSceneArea
 
-  // ═══════ 下方信息区（白色卡片，可滚动）═══════
-  html += '<div style="padding:12px 16px;max-height:40vh;overflow-y:auto;background:#fff;">';
+  // ═══════ 下方信息区（玻璃模糊，可滚动）═══════
+  html += '<div style="padding:12px 16px;max-height:40vh;overflow-y:auto;background:rgba(255,255,255,.75);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);">';
   // ── 钱包余额显示 ──
   var _wallet = loadWallet();
   var _walletBal = _wallet.balance || 0;
@@ -38526,13 +38543,49 @@ function _mapShowLandmarkDetail(container, mapData, lmId, npcId){
   }
 
   // ★ 地标管理事件（只拦截地标管理相关的 act，不影响其他按钮）
-  var _lmMgmtActs = {mapLmEditEmoji:1, mapLmEditDesc:1, mapLmEditTags:1, mapLmDelete:1, mapLmToggleMgmt:1, mapLmBindNpc:1};
+  var _lmMgmtActs = {mapLmEditEmoji:1, mapLmEditDesc:1, mapLmEditTags:1, mapLmDelete:1, mapLmToggleMgmt:1, mapLmBindNpc:1, mapLmSetImage:1};
   wrap.addEventListener('click', function(ev2){
     var tgt2 = ev2.target.closest('[data-act]');
     if (!tgt2) return;
     var act2 = tgt2.getAttribute('data-act');
-    if (!_lmMgmtActs[act2]) return; // ★ 不是地标管理的 act 就不拦截
-    ev2.stopPropagation(); // 防止冒泡到原有事件
+    if (!_lmMgmtActs[act2]) return;
+    ev2.stopPropagation();
+
+    // ★ 设置地标背景图
+    if (act2 === 'mapLmSetImage') {
+      var targetLmId2 = tgt2.getAttribute('data-lmid');
+      var targetLm2 = (mapData.landmarks||[]).find(function(l2){ return l2.id===targetLmId2; });
+      if (!targetLm2) return;
+      var ov4 = doc.createElement('div');
+      ov4.style.cssText = 'position:absolute;inset:0;z-index:9999;background:rgba(0,0,0,.4);display:flex;align-items:center;justify-content:center;';
+      var panel4 = doc.createElement('div');
+      panel4.style.cssText = 'background:var(--ph-glass-strong,rgba(248,246,244,.96));backdrop-filter:blur(16px);border-radius:16px;padding:20px;width:85%;max-width:320px;';
+      panel4.innerHTML = '<div style="font-size:14px;font-weight:600;color:var(--ph-text,#333);margin-bottom:12px;">📷 设置地标图片</div>'
+        + '<div style="font-size:12px;color:var(--ph-text-sub,#888);margin-bottom:12px;">输入图片URL（支持网络图片链接）</div>'
+        + '<input data-el="imgUrlInput" type="text" placeholder="https://example.com/photo.jpg" value="'+esc(targetLm2.bgImage||'')+'" style="width:100%;padding:10px 12px;border:1px solid var(--ph-sep);border-radius:10px;font-size:13px;background:rgba(255,255,255,.6);color:var(--ph-text,#333);outline:none;margin-bottom:12px;box-sizing:border-box;"/>'
+        + '<div style="display:flex;gap:8px;">'
+        + '<button data-el="imgCancel" style="flex:1;padding:10px;border:1px solid var(--ph-sep);border-radius:10px;background:none;font-size:13px;cursor:pointer;color:var(--ph-text-sub,#888);">取消</button>'
+        + (targetLm2.bgImage ? '<button data-el="imgClear" style="flex:1;padding:10px;border:1px solid rgba(200,60,60,.2);border-radius:10px;background:none;font-size:13px;cursor:pointer;color:rgba(200,60,60,.6);">清除图片</button>' : '')
+        + '<button data-el="imgSave" style="flex:1;padding:10px;border:none;border-radius:10px;background:#2d3748;font-size:13px;cursor:pointer;color:#fff;font-weight:500;">保存</button>'
+        + '</div>';
+      ov4.appendChild(panel4);
+      ov4.addEventListener('click', function(e4){ if(e4.target===ov4) ov4.remove(); });
+      panel4.querySelector('[data-el="imgCancel"]').addEventListener('click', function(){ ov4.remove(); });
+      panel4.querySelector('[data-el="imgSave"]').addEventListener('click', function(){
+        var url = (panel4.querySelector('[data-el="imgUrlInput"]')||{}).value||'';
+        targetLm2.bgImage = url.trim();
+        _mapSave(mapData); ov4.remove(); wrap.remove();
+        _mapShowLandmarkDetail(container, mapData, targetLmId2, npcId);
+      });
+      var clearBtn = panel4.querySelector('[data-el="imgClear"]');
+      if (clearBtn) clearBtn.addEventListener('click', function(){
+        targetLm2.bgImage = '';
+        _mapSave(mapData); ov4.remove(); wrap.remove();
+        _mapShowLandmarkDetail(container, mapData, targetLmId2, npcId);
+      });
+      (document.getElementById('meow-phone-root')||document.body).appendChild(ov4);
+      return;
+    }
 
     // 折叠/展开
     if (act2 === 'mapLmToggleMgmt') {
@@ -39019,16 +39072,21 @@ function _mapInitGestures(wrapEl, mapData){
   var svgEl = wrapEl.querySelector('.mapIslandSvg');
   if(!svgEl) return;
 
+  var _rafPending = false;
   function apply(){
     zoom = Math.max(0.7, Math.min(3, zoom));
     var maxP = 150 * zoom;
     panX = Math.max(-maxP, Math.min(maxP, panX));
     panY = Math.max(-maxP, Math.min(maxP, panY));
-    // 编辑模式下也要同步更新所有 .mapIslandSvg（因为 refresh 会重建）
-    var allSvg = wrapEl.querySelectorAll('.mapIslandSvg');
-    allSvg.forEach(function(s){
-      s.style.transform = 'translate('+panX+'px,'+panY+'px) scale('+zoom+')';
-      s.style.transformOrigin = 'center center';
+    if (_rafPending) return;
+    _rafPending = true;
+    requestAnimationFrame(function(){
+      _rafPending = false;
+      var allSvg = wrapEl.querySelectorAll('.mapIslandSvg');
+      allSvg.forEach(function(s){
+        s.style.transform = 'translate('+panX+'px,'+panY+'px) scale('+zoom+')';
+        s.style.transformOrigin = 'center center';
+      });
     });
   }
   apply();
@@ -39037,7 +39095,7 @@ function _mapInitGestures(wrapEl, mapData){
     mapData.viewState.zoom = zoom;
     mapData.viewState.panX = panX;
     mapData.viewState.panY = panY;
-    _mapSave(mapData);
+    _mapSaveDebounced(mapData);
   }
 
   // 触摸事件
